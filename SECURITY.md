@@ -37,6 +37,11 @@ intake and translation features. The key is treated as follows:
 
 - Rate limiting / abuse protection on the proxy (KV-based limiter or Vercel's
   built-in protection) before any public, unauthenticated deployment.
+- **Known accepted risk:** `vite`/`esbuild` dev-server vulnerabilities (GHSA-67mh-4wv8-2f99
+  and related) only fix via a Vite 5→8 major upgrade, which is intentionally
+  deferred (see `.github/dependabot.yml`) until it can be tested deliberately.
+  These affect the local dev server only, not production builds — don't expose
+  `npm run dev` to an untrusted network in the meantime.
 - An origin/shared-secret check so only your own front-end can call the proxy.
 
 ## If a key is ever exposed
