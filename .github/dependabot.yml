@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+    # Core framework majors (React 18->19, Vite 5->8, etc.) need a deliberate,
+    # tested upgrade during active feature work, not an unattended merge.
+    # Patch/minor bumps still flow through normally.
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]
+    groups:
+      actions:
+        patterns: ["*"]
