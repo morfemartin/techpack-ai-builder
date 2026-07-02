@@ -1,0 +1,140 @@
+// A small, dependency-free flexbox-*like* solver for laying out tech pack
+// pages. It mirrors CSS flexbox's core idea (a node is a flex ITEM relative
+// to its parent's main axis, and a flex CONTAINER for its own children) but
+// only implements the single-pass subset this project actually needs:
+// row/column direction, grow/shrink/basis/min/max sizing, gap, padding,
+// stretch|start|center|end alignment on the cross axis, and
+// start|center|end|space-between justification on the main axis.
+//
+// Known simplification vs. real flexbox: when both grow and shrink clamp
+// against min/max, leftover space from a clamped child is NOT redistributed
+// to siblings in a second pass. For tech-pack layouts (a handful of
+// well-behaved regions per page) this has not mattered in practice; if it
+// ever does, add a redistribution loop here rather than working around it
+// at the call site.
+
+const AUTO = "auto"
+
+function box(padding) {
+  if (typeof padding === "number") return { top: padding, right: padding, bottom: padding, left: padding }
+  return { top: 0, right: 0, bottom: 0, left: 0, ...padding }
+}
+
+function mainAxis(direction) {
+  return direction === "column" ? "height" : "width"
+}
+function crossAxis(direction) {
+  return direction === "column" ? "width" : "height"
+}
+function mainPos(direction) {
+  return direction === "column" ? "y" : "x"
+}
+function crossPos(direction) {
+  return direction === "column" ? "x" : "y"
+}
+
+/**
+ * Resolve a region tree into absolute boxes.
+ * @param {object} node - see src/layout/builders.js for the shape.
+ * @param {{x?:number,y?:number,width:number,height:number}} outer - the box this node must fill.
+ * @returns {object} the same tree shape, with x/y/width/height added on every node.
+ */
+export function solveLayout(node, outer) {
+  const x = outer.x || 0
+  const y = outer.y || 0
+  const width = outer.width
+  const height = outer.height
+  const resolved = { ...node, x, y, width, height }
+
+  if (!node.children || node.children.length === 0) return resolved
+
+  const direction = node.direction || "row"
+  const pad = box(node.padding || 0)
+  const gap = node.gap || 0
+  const mAxis = mainAxis(direction)
+  const cAxis = crossAxis(direction)
+  const mPos = mainPos(direction)
+  const cPos = crossPos(direction)
+
+  const innerMain = (direction === "column" ? height - pad.top - pad.bottom : width - pad.left - pad.right)
+  const innerCross = (direction === "column" ? width - pad.left - pad.right : height - pad.top - pad.bottom)
+  const innerMainStart = direction === "column" ? y + pad.top : x + pad.left
+  const innerCrossStart = direction === "column" ? x + pad.left : y + pad.top
+
+  const children = node.children
+  const n = children.length
+  const totalGap = gap * Math.max(0, n - 1)
+  const availableForBasis = innerMain - totalGap
+
+  const bases = children.map((c) => {
+    const b = c.basis === undefined || c.basis === AUTO ? 0 : c.basis
+    const min = c.min !== undefined ? c.min : 0
+    const max = c.max !== undefined ? c.max : Infinity
+    return Math.min(Math.max(b, min), max)
+  })
+  const usedBasis = bases.reduce((a, b) => a + b, 0)
+  const remaining = availableForBasis - usedBasis
+
+  const mainSizes = bases.slice()
+  if (remaining > 0) {
+    const totalGrow = children.reduce((a, c) => a + (c.grow || 0), 0)
+    if (totalGrow > 0) {
+      children.forEach((c, i) => {
+        const grow = c.grow || 0
+        if (grow <= 0) return
+        const min = c.min !== undefined ? c.min : 0
+        const max = c.max !== undefined ? c.max : Infinity
+        const extra = remaining * (grow / totalGrow)
+        mainSizes[i] = Math.min(Math.max(bases[i] + extra, min), max)
+      })
+    }
+  } else if (remaining < 0) {
+    const totalShrinkWeight = children.reduce((a, c, i) => a + (c.shrink === undefined ? 1 : c.shrink) * bases[i], 0)
+    if (totalShrinkWeight > 0) {
+      children.forEach((c, i) => {
+        const shrink = c.shrink === undefined ? 1 : c.shrink
+        const weight = shrink * bases[i]
+        if (weight <= 0) return
+        const min = c.min !== undefined ? c.min : 0
+        const max = c.max !== undefined ? c.max : Infinity
+        const delta = remaining * (weight / totalShrinkWeight)
+        mainSizes[i] = Math.min(Math.max(bases[i] + delta, min), max)
+      })
+    }
+  }
+
+  const justify = node.justify || "start"
+  const usedMain = mainSizes.reduce((a, b) => a + b, 0) + totalGap
+  const freeSpace = Math.max(0, innerMain - usedMain)
+  let cursor = innerMainStart
+  let gapExtra = gap
+  if (justify === "center") cursor += freeSpace / 2
+  else if (justify === "end") cursor += freeSpace
+  else if (justify === "space-between" && n > 1) gapExtra = gap + freeSpace / (n - 1)
+
+  const align = node.align || "stretch"
+
+  resolved.children = children.map((child, i) => {
+    const mSize = mainSizes[i]
+    let cSize
+    let cOffset = innerCrossStart
+    if (align === "stretch" || child.crossBasis === undefined) {
+      cSize = align === "stretch" ? innerCross : (child.crossBasis !== undefined ? child.crossBasis : innerCross)
+    } else {
+      cSize = child.crossBasis
+    }
+    if (align === "center") cOffset = innerCrossStart + (innerCross - cSize) / 2
+    else if (align === "end") cOffset = innerCrossStart + (innerCross - cSize)
+
+    const childOuter = {
+      [mPos]: cursor,
+      [cPos]: cOffset,
+      [mAxis]: mSize,
+      [cAxis]: cSize,
+    }
+    cursor += mSize + gapExtra
+    return solveLayout(child, childOuter)
+  })
+
+  return resolved
+}

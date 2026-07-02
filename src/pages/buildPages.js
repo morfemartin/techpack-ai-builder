@@ -2,56 +2,115 @@ import { T } from "../core/i18n.js"
 import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
+import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 
-/* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ---- */
+/* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
+ * Built on the flexbox-style layout engine (src/layout/) instead of hand-computed
+ * pixel math. The spec-table row heights in particular used to be a manual
+ * `Math.floor(bodyH / partsCount)` formula that had to be re-derived any time the
+ * page geometry changed - now every row is just `leaf({ grow: 1, min: 16 })` and
+ * the solver distributes the available height across however many parts are
+ * active. That's the "flex by data volume" property the engine exists for.
+ */
 export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var t = T[lang] || T.ES
   var pn = garment.partLabels[lang] || garment.partLabels.ES
-  var W = 1200, H = 900, hH = 80, discH = 28, bodyH = H - hH - discH
-  var lW = 320, rW = W - lW, vW = rW / 2, vH = bodyH / 2
+  var W = 1200, H = 900, hH = 80, discH = 28
+  var lW = 320
   var ap = parts.filter(function (p) { return p.on })
-  var rH = Math.max(16, Math.floor((bodyH - 42) / Math.max(ap.length, 1)))
   var txP = txData && txData.parts ? txData.parts : null
 
-  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
-  s += "<rect width='" + W + "' height='" + H + "' fill='white' stroke='#333' stroke-width='1.5'/>"
-  s += svgHeader(hdr, logo, W, hH)
-  s += R(0, hH, W, 22, "#f0f0f0", "#555", "0.8") + TX(W / 2, hH + 11, "DETAILS", 11, true, "middle")
-
-  var sy = hH + 22
-  s += R(0, sy, lW, 20, "#e8e8e8", "#aaa")
-  s += TX(lW * 0.11, sy + 10, "#", 8, true, "middle") + TX(lW * 0.32, sy + 10, t.sp, 8, true, "middle") + TX(lW * 0.62, sy + 10, t.dt, 8, true, "middle") + TX(lW * 0.82, sy + 10, "Archivo / Drive", 7, true, "middle")
-
-  ap.forEach(function (p, i) {
-    var ry = sy + 20 + i * rH, bg = i % 2 === 0 ? "white" : "#f9f9f9"
-    var nm = pn[p.id] || p.customName || ("P" + p.id)
-    var v = txP ? txP[i] : p.val
-    s += R(0, ry, lW, rH, bg, "#ccc", "0.4")
-    s += TX(lW * 0.11, ry + rH / 2, i + 1, 8, false, "middle")
-    s += "<line x1='" + Math.round(lW * 0.21) + "' y1='" + ry + "' x2='" + Math.round(lW * 0.21) + "' y2='" + (ry + rH) + "' stroke='#ddd' stroke-width='0.5'/>"
-    s += TX(lW * 0.21 + 3, ry + rH / 2, nm, 7, false, "start")
-    s += "<line x1='" + Math.round(lW * 0.5) + "' y1='" + ry + "' x2='" + Math.round(lW * 0.5) + "' y2='" + (ry + rH) + "' stroke='#ddd' stroke-width='0.5'/>"
-    s += TX(lW * 0.5 + 3, ry + rH / 2, v || NA, 7, false, "start")
+  var headerLeaf = leaf({
+    basis: hH,
+    render: (b) => "<g transform='translate(" + b.x + " " + b.y + ")'>" + svgHeader(hdr, logo, b.width, b.height) + "</g>",
   })
-  s += R(0, hH, lW, bodyH, "none", "#555", "1")
 
-  for (var vi = 0; vi < 4; vi++) {
-    var vx = lW + (vi % 2) * vW, vy = hH + Math.floor(vi / 2) * vH
-    s += R(vx, vy, vW, vH, "white", "#aaa", "0.8")
-    s += TX(vx + vW / 2, vy + 14, t.vw[vi], 11, true, "middle")
-    var ox = vx + (vW - 200) / 2, oy = vy + 22
-    s += "<g transform='translate(" + ox + " " + oy + ")'><path d='" + garment.guides[vi] + "' fill='none' stroke='#ccc' stroke-width='1' stroke-dasharray='5,3'/></g>"
-    garment.callouts[vi].forEach(function (co) {
-      var pid = co[0], tx2 = co[1], ty2 = co[2], cx2 = co[3], cy2 = co[4]
-      var ri = ap.findIndex(function (a) { return a.id === pid })
-      if (ri < 0) return
-      s += "<line x1='" + (ox + cx2) + "' y1='" + (oy + cy2) + "' x2='" + (ox + tx2) + "' y2='" + (oy + ty2) + "' stroke='#c0392b' stroke-width='0.9'/>"
-      s += "<circle cx='" + (ox + cx2) + "' cy='" + (oy + cy2) + "' r='9' fill='white' stroke='#c0392b' stroke-width='1'/>"
-      s += TX(ox + cx2, oy + cy2, ri + 1, 8, true, "middle")
+  var detailsBar = leaf({
+    basis: 22,
+    render: (b) => R(b.x, b.y, b.width, b.height, "#f0f0f0", "#555", "0.8") + TX(b.x + b.width / 2, b.y + b.height / 2, "DETAILS", 11, true, "middle"),
+  })
+
+  var tableHeaderRow = leaf({
+    basis: 20,
+    render: (b) =>
+      R(b.x, b.y, b.width, b.height, "#e8e8e8", "#aaa") +
+      TX(b.x + b.width * 0.11, b.y + b.height / 2, "#", 8, true, "middle") +
+      TX(b.x + b.width * 0.32, b.y + b.height / 2, t.sp, 8, true, "middle") +
+      TX(b.x + b.width * 0.62, b.y + b.height / 2, t.dt, 8, true, "middle") +
+      TX(b.x + b.width * 0.82, b.y + b.height / 2, "Archivo / Drive", 7, true, "middle"),
+  })
+
+  var partRows = ap.map((p, i) =>
+    leaf({
+      grow: 1,
+      min: 16,
+      render: (b) => {
+        var bg = i % 2 === 0 ? "white" : "#f9f9f9"
+        var nm = pn[p.id] || p.customName || "P" + p.id
+        var v = txP ? txP[i] : p.val
+        var divX1 = Math.round(b.x + b.width * 0.21)
+        var divX2 = Math.round(b.x + b.width * 0.5)
+        return (
+          R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
+          TX(b.x + b.width * 0.11, b.y + b.height / 2, i + 1, 8, false, "middle") +
+          "<line x1='" + divX1 + "' y1='" + b.y + "' x2='" + divX1 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
+          TX(b.x + b.width * 0.21 + 3, b.y + b.height / 2, nm, 7, false, "start") +
+          "<line x1='" + divX2 + "' y1='" + b.y + "' x2='" + divX2 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
+          TX(b.x + b.width * 0.5 + 3, b.y + b.height / 2, v || NA, 7, false, "start")
+        )
+      },
+    })
+  )
+
+  var specTable = col({ basis: lW }, [tableHeaderRow, ...partRows])
+
+  function buildViewCell(vi) {
+    return leaf({
+      grow: 1,
+      render: (b) => {
+        var s = R(b.x, b.y, b.width, b.height, "white", "#aaa", "0.8")
+        s += TX(b.x + b.width / 2, b.y + 14, t.vw[vi], 11, true, "middle")
+        var ox = b.x + (b.width - 200) / 2, oy = b.y + 22
+        s += "<g transform='translate(" + ox + " " + oy + ")'><path d='" + garment.guides[vi] + "' fill='none' stroke='#ccc' stroke-width='1' stroke-dasharray='5,3'/></g>"
+        garment.callouts[vi].forEach((co) => {
+          var pid = co[0], tx2 = co[1], ty2 = co[2], cx2 = co[3], cy2 = co[4]
+          var ri = ap.findIndex((a) => a.id === pid)
+          if (ri < 0) return
+          s += "<line x1='" + (ox + cx2) + "' y1='" + (oy + cy2) + "' x2='" + (ox + tx2) + "' y2='" + (oy + ty2) + "' stroke='#c0392b' stroke-width='0.9'/>"
+          s += "<circle cx='" + (ox + cx2) + "' cy='" + (oy + cy2) + "' r='9' fill='white' stroke='#c0392b' stroke-width='1'/>"
+          s += TX(ox + cx2, oy + cy2, ri + 1, 8, true, "middle")
+        })
+        return s
+      },
     })
   }
 
-  s += svgDisc(t, hdr, W, H - discH, discH)
+  var fourViewGrid = col({ grow: 1 }, [
+    row({ grow: 1 }, [buildViewCell(0), buildViewCell(1)]),
+    row({ grow: 1 }, [buildViewCell(2), buildViewCell(3)]),
+  ])
+
+  var bodyRow = row({ grow: 1 }, [specTable, fourViewGrid])
+
+  var discBar = leaf({ basis: discH, render: (b) => svgDisc(t, hdr, b.width, b.y, b.height) })
+
+  var root = col({}, [headerLeaf, detailsBar, bodyRow, discBar])
+  var resolved = solveLayout(root, { x: 0, y: 0, width: W, height: H })
+
+  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
+  s += "<rect width='" + W + "' height='" + H + "' fill='white' stroke='#333' stroke-width='1.5'/>"
+  s += renderLayoutToSVG(resolved)
+
+  // Frame around the spec-table column: spans from the top of the DETAILS bar
+  // down to the disclaimer, not just around the table's own rows - a purely
+  // decorative cross-cutting line that doesn't belong to any single region, so
+  // it's drawn from the already-resolved boxes instead of forcing the tree
+  // into an unnatural shape just to own this one rectangle.
+  var rDetails = resolved.children[1]
+  var rDisc = resolved.children[3]
+  var rSpecTable = resolved.children[2].children[0]
+  s += R(rSpecTable.x, rDetails.y, rSpecTable.width, rDisc.y - rDetails.y, "none", "#555", "1")
+
   s += "</svg>"
   return s
 }
