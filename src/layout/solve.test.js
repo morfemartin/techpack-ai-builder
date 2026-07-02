@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { solveLayout } from "./solve.js"
+import { solveLayout, resolveLen } from "./solve.js"
 import { row, col, leaf } from "./builders.js"
 
 describe("solveLayout", () => {
@@ -133,6 +133,41 @@ describe("solveLayout", () => {
     solveLayout(tree, { width: 100, height: 40 })
     // solveLayout itself doesn't call render - that's renderLayoutToSVG's job.
     expect(received).toBe(null)
+  })
+
+  it("resolveLen handles px numbers, percent strings, and fallbacks", () => {
+    expect(resolveLen(40, 200)).toBe(40)
+    expect(resolveLen("10%", 200)).toBe(20)
+    expect(resolveLen("6%", 1200)).toBe(72)
+    expect(resolveLen(undefined, 200, 5)).toBe(5)
+    expect(resolveLen("auto", 200, 7)).toBe(7)
+  })
+
+  it("resolves a percentage basis against the container main axis", () => {
+    const tree = row({}, [leaf({ basis: "25%" }), leaf({ grow: 1 })])
+    const resolved = solveLayout(tree, { width: 400, height: 50 })
+    expect(resolved.children[0].width).toBe(100) // 25% of 400
+    expect(resolved.children[1].width).toBe(300)
+  })
+
+  it("resolves percentage gaps as margins between retículas", () => {
+    // "márgenes por porcentaje entre las retículas": a 10% gutter between two
+    // equal blocks on a 500px-wide row -> 50px gutter, 225px each.
+    const tree = row({ gap: "10%" }, [leaf({ grow: 1 }), leaf({ grow: 1 })])
+    const resolved = solveLayout(tree, { width: 500, height: 50 })
+    expect(resolved.children[0].width).toBe(225)
+    expect(resolved.children[1].width).toBe(225)
+    expect(resolved.children[1].x).toBe(225 + 50)
+  })
+
+  it("resolves percentage padding per axis", () => {
+    const tree = col({ padding: "10%" }, [leaf({ grow: 1 })])
+    const resolved = solveLayout(tree, { width: 200, height: 400 })
+    // left/right padding = 10% of width (20), top/bottom = 10% of height (40)
+    expect(resolved.children[0].x).toBe(20)
+    expect(resolved.children[0].y).toBe(40)
+    expect(resolved.children[0].width).toBe(160)
+    expect(resolved.children[0].height).toBe(320)
   })
 
   it("flexes row heights by data volume - the whole point of this engine", () => {

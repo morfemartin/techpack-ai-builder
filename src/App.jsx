@@ -11,8 +11,96 @@ import { ImageUploader } from "./components/ImageUploader.jsx"
 import { EmbForm } from "./components/EmbForm.jsx"
 import { SvgModal } from "./components/SvgModal.jsx"
 import { Preview } from "./components/Preview.jsx"
+import { Icon } from "./components/Icon.jsx"
+import { palette, role, type, space } from "./design/tokens.js"
 
-const ICONS = ["🧵", "🌐", "📋", "🧩", "🎨", "👁"]
+// Material Symbols per wizard step (no emojis). Order matches T.*.steps.
+const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
+
+const C = palette
+const hair = `1px solid ${C.ink.hex}`
+
+// ── shared style atoms, derived from tokens ──────────────────────────────────
+// A red enumeration chip (role.index): a numeric marker the eye finds first.
+function IndexChip({ n, active }) {
+  return (
+    <span
+      style={{
+        width: space(6),
+        height: space(6),
+        flexShrink: 0,
+        background: role.index.fill,
+        color: role.index.on,
+        fontFamily: type.fonts.data,
+        fontWeight: 700,
+        fontSize: type.size.sm,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // active step gets a small yellow keyline: highest priority, tiny area.
+        boxShadow: active ? `0 0 0 2px ${role.highlight.fill}` : "none",
+      }}
+    >
+      {n}
+    </span>
+  )
+}
+
+function primaryBtnStyle(enabled) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space(2),
+    padding: `${space(2)}px ${space(5)}px`,
+    background: enabled ? role.priority.fill : C.canvas.hex,
+    color: enabled ? role.priority.on : "#9AA0AB",
+    border: hair,
+    borderColor: enabled ? role.priority.fill : "#C6CAD2",
+    fontFamily: type.fonts.ui,
+    fontWeight: 700,
+    fontSize: type.size.base,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    cursor: enabled ? "pointer" : "not-allowed",
+  }
+}
+
+const secondaryBtnStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: space(2),
+  padding: `${space(2)}px ${space(4)}px`,
+  background: C.white.hex,
+  color: C.ink.hex,
+  border: hair,
+  fontFamily: type.fonts.ui,
+  fontWeight: 700,
+  fontSize: type.size.base,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  cursor: "pointer",
+}
+
+const dashedActionStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: space(2),
+  marginTop: space(3),
+  padding: `${space(2)}px ${space(4)}px`,
+  background: C.white.hex,
+  border: `1px dashed ${role.priority.fill}`,
+  color: role.priority.fill,
+  fontFamily: type.fonts.ui,
+  fontSize: type.size.sm,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  cursor: "pointer",
+}
+
+function iconBtn(color) {
+  return { background: "none", border: "none", color, cursor: "pointer", display: "inline-flex", padding: 0 }
+}
 
 function newDesign() {
   return {
@@ -92,22 +180,51 @@ export default function App() {
     return true
   }
 
+  // A selectable chip (garment / language), flat with an ink keyline; selected
+  // gets a blue keyline + a blue check icon (role.priority).
+  function Chip({ selected, onClick, iconName, children }) {
+    return (
+      <label
+        onClick={onClick}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: space(2),
+          padding: `${space(3)}px ${space(4)}px`,
+          border: `${selected ? 2 : 1}px solid ${selected ? role.priority.fill : C.ink.hex}`,
+          background: C.white.hex,
+          color: C.ink.hex,
+          cursor: "pointer",
+          fontFamily: type.fonts.ui,
+          fontSize: type.size.base,
+          fontWeight: selected ? 700 : 500,
+        }}
+      >
+        {iconName && <Icon name={iconName} size={20} />}
+        {children}
+        {selected && <Icon name="check" size={18} color={role.priority.fill} />}
+      </label>
+    )
+  }
+
+  function stepHelp(text) {
+    return <p style={{ color: C.ink.hex, opacity: 0.7, margin: `0 0 ${space(4)}px`, fontSize: type.size.base, fontFamily: type.fonts.ui }}>{text}</p>
+  }
+
   function renderStep() {
     if (step === 0)
       return (
         <div>
-          <p style={{ color: "#555", margin: "0 0 14px", fontSize: 13 }}>{tl.garmentStep}</p>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {stepHelp(tl.garmentStep)}
+          <div style={{ display: "flex", gap: space(3), flexWrap: "wrap" }}>
             {GARMENT_LIST.map((g) => (
-              <label
-                key={g.id}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px", border: "2px solid " + (garmentId === g.id ? "#1a4fd6" : "#d0d0d0"), borderRadius: 10, cursor: "pointer", background: garmentId === g.id ? "#eff4ff" : "white", fontSize: 14, fontWeight: garmentId === g.id ? 700 : 400 }}
-              >
-                <input type="radio" checked={garmentId === g.id} onChange={() => selectGarment(g.id)} style={{ display: "none" }} />
-                {g.icon} {g.label.ES} {garmentId === g.id && <span style={{ color: "#1a4fd6", fontWeight: 700 }}>ok</span>}
-              </label>
+              <Chip key={g.id} selected={garmentId === g.id} onClick={() => selectGarment(g.id)} iconName={g.icon}>
+                {g.label.ES}
+              </Chip>
             ))}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px", border: "2px dashed #d0d0d0", borderRadius: 10, fontSize: 13, color: "#999" }}>+ Mas tipos de prenda proximamente — contribuye uno en GitHub</div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(3)}px ${space(4)}px`, border: `1px dashed #B7BCC6`, color: "#8A909B", fontSize: type.size.sm, fontFamily: type.fonts.ui }}>
+              <Icon name="add" size={18} color="#8A909B" /> Más prendas pronto — contribuye una en GitHub
+            </div>
           </div>
         </div>
       )
@@ -115,74 +232,89 @@ export default function App() {
     if (step === 1)
       return (
         <div>
-          <p style={{ color: "#555", margin: "0 0 14px", fontSize: 13 }}>{tl.langStep}</p>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {stepHelp(tl.langStep)}
+          <div style={{ display: "flex", gap: space(3), flexWrap: "wrap" }}>
             {[{ c: "ES", l: "Espanol" }, { c: "EN", l: "English" }, { c: "ZH", l: "Zhongwen" }].map((item) => (
-              <label key={item.c} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 20px", border: "2px solid " + (langs.includes(item.c) ? "#1a4fd6" : "#d0d0d0"), borderRadius: 10, cursor: "pointer", background: langs.includes(item.c) ? "#eff4ff" : "white", fontSize: 14, fontWeight: langs.includes(item.c) ? 700 : 400 }}>
-                <input type="checkbox" checked={langs.includes(item.c)} onChange={() => toggleLang(item.c)} style={{ display: "none" }} />
-                {item.l} {langs.includes(item.c) && <span style={{ color: "#1a4fd6", fontWeight: 700 }}>ok</span>}
-              </label>
+              <Chip key={item.c} selected={langs.includes(item.c)} onClick={() => toggleLang(item.c)}>
+                {item.l}
+              </Chip>
             ))}
           </div>
         </div>
       )
 
-    if (step === 2)
+    if (step === 2) {
+      const reqEmpty = (k) => !hdr[k].trim()
+      const RequiredLabel = ({ text, field }) => (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: space(1) }}>
+          {text}
+          {reqEmpty(field) && (
+            <span title="Requerido" style={{ width: space(2), height: space(2), background: role.highlight.fill, boxShadow: `0 0 0 1px ${role.highlight.keyline}` }} />
+          )}
+        </span>
+      )
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: space(4) }}>
           <Fld lbl="Logo de la Marca">
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <label style={{ padding: "8px 14px", background: logo ? "#e8f5e9" : "#f0f4ff", border: "1.5px dashed " + (logo ? "#27ae60" : "#1a4fd6"), borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, color: logo ? "#27ae60" : "#1a4fd6" }}>
-                {logo ? "Logo cargado - cambiar" : "Seleccionar imagen (PNG, JPG, SVG)"}
+            <div style={{ display: "flex", alignItems: "center", gap: space(3), flexWrap: "wrap" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: C.white.hex, border: `1px dashed ${logo ? role.priority.fill : C.ink.hex}`, cursor: "pointer", fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                <Icon name="upload_file" size={18} />
+                {logo ? "Cambiar logo" : "Subir imagen (PNG, JPG, SVG)"}
                 <input type="file" accept="image/*" onChange={handleLogo} style={{ display: "none" }} />
               </label>
-              {logo && <img src={logo} style={{ height: 46, maxWidth: 100, objectFit: "contain", border: "1px solid #eee", borderRadius: 4, padding: 4 }} alt="logo" />}
+              {logo && <img src={logo} style={{ height: 46, maxWidth: 100, objectFit: "contain", border: hair, padding: 4 }} alt="logo" />}
               {logo && (
-                <button onClick={() => setLogo(null)} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 18 }}>
-                  x
+                <button onClick={() => setLogo(null)} style={iconBtn(role.index.fill)} title="Quitar">
+                  <Icon name="delete" size={20} color={role.index.fill} />
                 </button>
               )}
             </div>
           </Fld>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            {[["Marca", "brand", "Ej: New Era"], ["Temporada", "season", "Ej: 2027 SS/FW"], ["Codigo", "sno", "Ej: 2ACP002"], ["Tela", "fab", "Ej: 100% Poliester"], ["Fabrica", "fac", "Ej: Colombia"], ["Fecha Entrada", "ind", "18/10/2027"], ["Fecha Salida", "outd", "20/11/2027"]].map((row) => (
-              <Fld key={row[1]} lbl={row[0]}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: space(4) }}>
+            {[["Marca", "brand", "Ej: New Era", true], ["Temporada", "season", "Ej: 2027 SS/FW"], ["Codigo", "sno", "Ej: 2ACP002"], ["Tela", "fab", "Ej: 100% Poliester"], ["Fabrica", "fac", "Ej: Colombia"], ["Fecha Entrada", "ind", "18/10/2027"], ["Fecha Salida", "outd", "20/11/2027"]].map((row) => (
+              <Fld key={row[1]} lbl={row[3] ? <RequiredLabel text={row[0]} field={row[1]} /> : row[0]}>
                 <Inp v={hdr[row[1]]} ch={(v) => setHdr((p) => Object.assign({}, p, { [row[1]]: v }))} ph={row[2]} />
               </Fld>
             ))}
             <Fld lbl="Categoria">
               <Sel v={hdr.cat} ch={(v) => setHdr((p) => Object.assign({}, p, { cat: v }))} opts={tl.cats} />
             </Fld>
-            <Fld lbl="Nombre del Producto" span={2}>
+            <Fld lbl={<RequiredLabel text="Nombre del Producto" field="pname" />} span={2}>
               <Inp v={hdr.pname} ch={(v) => setHdr((p) => Object.assign({}, p, { pname: v }))} ph="Ej: Gorra New Era 59FIFTY Los Angeles" />
             </Fld>
           </div>
         </div>
       )
+    }
 
     if (step === 3) {
       const pn = garment.partLabels.ES
+      let idx = 0
       return (
         <div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: space(1), border: hair }}>
             {parts.map((p) => {
               var nm = p.customName || pn[p.id] || "P" + p.id
+              const n = p.on ? ++idx : null
               return (
-                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", border: "1px solid #e0e0e0", borderRadius: 8, background: p.on ? "white" : "#f6f6f6", opacity: p.on ? 1 : 0.5 }}>
-                  <input type="checkbox" checked={p.on} onChange={() => updPart(p.id, "on", !p.on)} style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#1a4fd6", flexShrink: 0 }} />
-                  <span style={{ width: 140, fontSize: 11, fontWeight: 600, color: "#444", flexShrink: 0 }}>{nm}</span>
-                  <input value={p.val} onChange={(e) => updPart(p.id, "val", e.target.value)} style={{ flex: 1, padding: "4px 8px", border: "1px solid #d0d0d0", borderRadius: 5, fontSize: 11, outline: "none", background: p.on ? "white" : "#eee" }} />
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: space(2), padding: space(2), borderBottom: `1px solid #E6E8EC`, background: C.white.hex, opacity: p.on ? 1 : 0.45 }}>
+                  <input type="checkbox" checked={p.on} onChange={() => updPart(p.id, "on", !p.on)} style={{ width: 15, height: 15, cursor: "pointer", accentColor: role.priority.fill, flexShrink: 0 }} />
+                  <span style={{ width: space(6), flexShrink: 0, display: "inline-flex", justifyContent: "center" }}>
+                    {n && <IndexChip n={n} />}
+                  </span>
+                  <span style={{ width: 132, fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, flexShrink: 0, fontFamily: type.fonts.ui }}>{nm}</span>
+                  <input value={p.val} onChange={(e) => updPart(p.id, "val", e.target.value)} style={{ flex: 1, padding: `${space(1)}px ${space(2)}px`, border: hair, fontSize: type.size.sm, outline: "none", background: C.white.hex, fontFamily: type.fonts.ui }} />
                   {p.customName && (
-                    <button onClick={() => setParts((prev) => prev.filter((x) => x.id !== p.id))} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 15 }}>
-                      x
+                    <button onClick={() => setParts((prev) => prev.filter((x) => x.id !== p.id))} style={iconBtn(role.index.fill)} title="Quitar">
+                      <Icon name="delete" size={18} color={role.index.fill} />
                     </button>
                   )}
                 </div>
               )
             })}
           </div>
-          <button onClick={() => setParts((p) => [...p, { id: uid(), val: "", on: true, customName: "Pieza personalizada" }])} style={{ marginTop: 10, padding: "8px 16px", background: "#f0f4ff", border: "1.5px dashed #1a4fd6", borderRadius: 8, color: "#1a4fd6", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            + Agregar Pieza
+          <button onClick={() => setParts((p) => [...p, { id: uid(), val: "", on: true, customName: "Pieza personalizada" }])} style={dashedActionStyle}>
+            <Icon name="add" size={16} color={role.priority.fill} /> Agregar Pieza
           </button>
         </div>
       )
@@ -195,66 +327,72 @@ export default function App() {
           {designs.map((d, i) => {
             var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
             return (
-              <div key={d.id} style={{ marginBottom: 16, padding: 14, border: "1px solid #e0e0e0", borderRadius: 10, background: "white" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1a4fd6" }}>
-                    Diseno {i + 1}: {d.name}
+              <div key={d.id} style={{ marginBottom: space(4), border: hair, background: C.white.hex }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: `${space(2)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: space(2), fontSize: type.size.base, fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    <IndexChip n={i + 1} /> {d.name}
                   </span>
-                  <button onClick={() => setDesigns((p) => p.filter((x) => x.id !== d.id))} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 16 }}>
-                    x
+                  <button onClick={() => setDesigns((p) => p.filter((x) => x.id !== d.id))} style={iconBtn(C.white.hex)} title="Quitar diseño">
+                    <Icon name="close" size={20} color={C.white.hex} />
                   </button>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <Fld lbl="Nombre">
-                    <Inp v={d.name} ch={(v) => updDesign(d.id, "name", v)} />
-                  </Fld>
-                  <Fld lbl="Posicion">
-                    <Sel v={d.pos} ch={(v) => updDesign(d.id, "pos", v)} opts={positions} />
-                  </Fld>
-                  <Fld lbl="Tecnica">
-                    <Sel v={d.tec} ch={(v) => updDesign(d.id, "tec", v)} opts={tl.tecs} />
-                  </Fld>
-                  {!isWhole ? (
-                    <Fld lbl="Posicion Detallada">
-                      <Inp v={d.posDetail || ""} ch={(v) => updDesign(d.id, "posDetail", v)} ph="Ej: Panel frontal centrado" />
+                <div style={{ padding: space(3) }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: space(3) }}>
+                    <Fld lbl="Nombre">
+                      <Inp v={d.name} ch={(v) => updDesign(d.id, "name", v)} />
                     </Fld>
-                  ) : (
-                    <div />
-                  )}
-                  {!isWhole && (
-                    <Fld lbl="Ancho (mm)">
-                      <Inp v={d.w || ""} ch={(v) => updDesign(d.id, "w", v)} ph="Ej: 111.6" />
+                    <Fld lbl="Posicion">
+                      <Sel v={d.pos} ch={(v) => updDesign(d.id, "pos", v)} opts={positions} />
                     </Fld>
-                  )}
-                  {!isWhole && (
-                    <Fld lbl="Alto (mm)">
-                      <Inp v={d.h || ""} ch={(v) => updDesign(d.id, "h", v)} ph="Ej: 59.1" />
+                    <Fld lbl="Tecnica">
+                      <Sel v={d.tec} ch={(v) => updDesign(d.id, "tec", v)} opts={tl.tecs} />
                     </Fld>
-                  )}
-                  {isWhole && <div style={{ gridColumn: "span 2", padding: "8px 12px", background: "#fffbe6", border: "1px solid #ffe58f", borderRadius: 6, fontSize: 11, color: "#856404" }}>Diseno cubre toda la prenda - medidas no aplican.</div>}
-                  <Fld lbl="Nombre del Archivo">
-                    <Inp v={d.fileName || ""} ch={(v) => updDesign(d.id, "fileName", v)} ph="Ej: SUNNER_HAWAII_LOGO_v3.ai" />
-                  </Fld>
-                  <Fld lbl="Enlace Drive">
-                    <Inp v={d.driveLink || ""} ch={(v) => updDesign(d.id, "driveLink", v)} ph="Ej: drive.google.com/..." mono={true} />
-                  </Fld>
+                    {!isWhole ? (
+                      <Fld lbl="Posicion Detallada">
+                        <Inp v={d.posDetail || ""} ch={(v) => updDesign(d.id, "posDetail", v)} ph="Ej: Panel frontal centrado" />
+                      </Fld>
+                    ) : (
+                      <div />
+                    )}
+                    {!isWhole && (
+                      <Fld lbl="Ancho (mm)">
+                        <Inp v={d.w || ""} ch={(v) => updDesign(d.id, "w", v)} ph="Ej: 111.6" mono={true} />
+                      </Fld>
+                    )}
+                    {!isWhole && (
+                      <Fld lbl="Alto (mm)">
+                        <Inp v={d.h || ""} ch={(v) => updDesign(d.id, "h", v)} ph="Ej: 59.1" mono={true} />
+                      </Fld>
+                    )}
+                    {isWhole && (
+                      <div style={{ gridColumn: "span 2", display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(3)}px`, background: C.white.hex, border: `1px solid ${role.highlight.keyline}`, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, fontSize: type.size.sm, color: C.ink.hex }}>
+                        <Icon name="info" size={18} /> Diseño cubre toda la prenda — medidas no aplican.
+                      </div>
+                    )}
+                    <Fld lbl="Nombre del Archivo">
+                      <Inp v={d.fileName || ""} ch={(v) => updDesign(d.id, "fileName", v)} ph="Ej: SUNNER_HAWAII_LOGO_v3.ai" mono={true} />
+                    </Fld>
+                    <Fld lbl="Enlace Drive">
+                      <Inp v={d.driveLink || ""} ch={(v) => updDesign(d.id, "driveLink", v)} ph="Ej: drive.google.com/..." mono={true} />
+                    </Fld>
+                  </div>
+                  <div style={{ marginTop: space(3) }}>
+                    <Fld lbl="Colores (selector + nombre Pantone)">
+                      <ColorsEditor colors={d.colors || []} onChange={(c) => updDesign(d.id, "colors", c)} />
+                    </Fld>
+                  </div>
+                  <div style={{ marginTop: space(3) }}>
+                    <Fld lbl="Imagen del diseno (PNG o SVG - se muestra con cotas)">
+                      <ImageUploader d={d} onUpdate={(obj) => updDesignMulti(d.id, obj)} />
+                    </Fld>
+                  </div>
+                  {isEmb && <EmbForm emb={d.emb || Object.assign({}, EMPTY_EMB, { stopSeq: [] })} onChange={(emb) => updDesign(d.id, "emb", emb)} />}
                 </div>
-                <div style={{ marginTop: 12 }}>
-                  <Fld lbl="Colores (selector + nombre Pantone)">
-                    <ColorsEditor colors={d.colors || []} onChange={(c) => updDesign(d.id, "colors", c)} />
-                  </Fld>
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <Fld lbl="Imagen del diseno (PNG o SVG - se muestra con cotas)">
-                    <ImageUploader d={d} onUpdate={(obj) => updDesignMulti(d.id, obj)} />
-                  </Fld>
-                </div>
-                {isEmb && <EmbForm emb={d.emb || Object.assign({}, EMPTY_EMB, { stopSeq: [] })} onChange={(emb) => updDesign(d.id, "emb", emb)} />}
               </div>
             )
           })}
-          <button onClick={() => setDesigns((p) => [...p, Object.assign(newDesign(), { pos: positions[0] })])} style={{ padding: "9px 18px", background: "#f0f4ff", border: "1.5px dashed #1a4fd6", borderRadius: 8, color: "#1a4fd6", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-            + Agregar Diseno
+          <button onClick={() => setDesigns((p) => [...p, Object.assign(newDesign(), { pos: positions[0] })])} style={dashedActionStyle}>
+            <Icon name="add" size={16} color={role.priority.fill} /> Agregar Diseño
           </button>
         </div>
       )
@@ -262,28 +400,38 @@ export default function App() {
 
     if (step === 5) {
       var allPgs = [{ l: "Pag. Principal", i: 0 }, ...designs.map((d, i) => ({ l: "Diseno " + (i + 1), i: i + 1 }))]
+      const miniBtn = (active, activeColor) => ({
+        padding: `${space(1)}px ${space(2)}px`,
+        background: active ? activeColor : C.white.hex,
+        color: active ? C.white.hex : C.ink.hex,
+        border: hair,
+        fontSize: type.size.xs,
+        fontFamily: type.fonts.ui,
+        fontWeight: active ? 700 : 500,
+        cursor: "pointer",
+      })
       return (
         <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#555", marginRight: 4 }}>Vista:</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: space(3), flexWrap: "wrap", gap: space(2) }}>
+            <div style={{ display: "flex", gap: space(1), flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, marginRight: space(1), textTransform: "uppercase", letterSpacing: "0.08em" }}>Vista</span>
               {allPgs.map((p) => (
-                <button key={p.i} onClick={() => { setPrevPage(p.i); ensureTx(prevLang) }} style={{ padding: "5px 10px", background: prevPage === p.i ? "#1a4fd6" : "white", color: prevPage === p.i ? "white" : "#555", border: "1px solid #d0d0d0", borderRadius: 6, fontSize: 11, cursor: "pointer", fontWeight: prevPage === p.i ? 700 : 400 }}>
+                <button key={p.i} onClick={() => { setPrevPage(p.i); ensureTx(prevLang) }} style={miniBtn(prevPage === p.i, role.priority.fill)}>
                   {p.l}
                 </button>
               ))}
-              <span style={{ margin: "0 4px", borderLeft: "1px solid #ddd" }} />
+              <span style={{ width: 1, alignSelf: "stretch", background: C.ink.hex, margin: `0 ${space(1)}px` }} />
               {langs.map((l) => (
-                <button key={l} onClick={() => { setPrevLang(l); ensureTx(l) }} style={{ padding: "5px 10px", background: prevLang === l ? "#34495e" : "white", color: prevLang === l ? "white" : "#555", border: "1px solid #d0d0d0", borderRadius: 6, fontSize: 11, cursor: "pointer", fontWeight: prevLang === l ? 700 : 400 }}>
+                <button key={l} onClick={() => { setPrevLang(l); ensureTx(l) }} style={miniBtn(prevLang === l, C.ink.hex)}>
                   {l}
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              {translating && <span style={{ fontSize: 11, color: "#e67e22", fontWeight: 600 }}>Traduciendo...</span>}
+            <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
+              {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
               {langs.map((l) => (
-                <button key={l} onClick={() => handleGenerate(l)} style={{ padding: "7px 14px", background: "#1a4fd6", color: "white", border: "none", borderRadius: 7, fontSize: 11, cursor: "pointer", fontWeight: 700 }}>
-                  Generar SVG [{l}]
+                <button key={l} onClick={() => handleGenerate(l)} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on, border: hair, borderColor: role.priority.fill, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  <Icon name="bolt" size={16} color={C.white.hex} /> Generar SVG [{l}]
                 </button>
               ))}
             </div>
@@ -295,41 +443,72 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#eef0f8", display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 16px", fontFamily: "Arial,sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: C.canvas.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.ink.hex }}>
       {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
-      <div style={{ width: "100%", maxWidth: 940, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-          <div style={{ width: 42, height: 42, background: "#1a4fd6", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🧢</div>
+      <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
+        {/* Wordmark */}
+        <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>
+          <div style={{ width: space(11), height: space(11), background: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="grid_view" size={26} color={C.white.hex} />
+          </div>
           <div>
-            <h1 style={{ margin: 0, fontSize: 18, color: "#1a2340", letterSpacing: 1 }}>TECHPACK AI BUILDER</h1>
-            <p style={{ margin: 0, fontSize: 11, color: "#999" }}>Generador Open Source de Fichas Tecnicas v0.1</p>
+            <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.ink.hex }}>TechPack AI Builder</h1>
+            <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6 }}>Generador Open Source de Fichas Técnicas · v0.2</p>
           </div>
         </div>
-        <div style={{ display: "flex", background: "white", borderRadius: 10, overflow: "hidden", border: "1px solid #e0e0e0" }}>
-          {tl.steps.map((s, i) => (
-            <div key={i} onClick={() => { if (i < step) setStep(i) }} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "10px 4px", background: i === step ? "#1a4fd6" : i < step ? "#e8efff" : "#f8f8f8", color: i === step ? "white" : i < step ? "#1a4fd6" : "#bbb", fontSize: 11, fontWeight: i === step ? 700 : 400, cursor: i < step ? "pointer" : "default", borderRight: i < tl.steps.length - 1 ? "1px solid #e0e0e0" : "none" }}>
-              {ICONS[i]} {s}
-            </div>
-          ))}
+        {/* Stepper — red index numbers (enumeration seen first), blue underline = active */}
+        <div style={{ display: "flex", border: hair, background: C.white.hex }}>
+          {tl.steps.map((s, i) => {
+            const active = i === step
+            const done = i < step
+            return (
+              <div
+                key={i}
+                onClick={() => { if (done) setStep(i) }}
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: space(2),
+                  padding: `${space(2)}px ${space(1)}px`,
+                  borderRight: i < tl.steps.length - 1 ? hair : "none",
+                  borderBottom: active ? `${space(1)}px solid ${role.priority.fill}` : `${space(1)}px solid transparent`,
+                  background: C.white.hex,
+                  color: C.ink.hex,
+                  opacity: active || done ? 1 : 0.4,
+                  cursor: done ? "pointer" : "default",
+                }}
+              >
+                <IndexChip n={i + 1} active={active} />
+                <span style={{ fontSize: type.size.xs, fontWeight: active ? 700 : 500, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{s}</span>
+              </div>
+            )
+          })}
         </div>
       </div>
-      <div style={{ width: "100%", maxWidth: 940, background: "white", borderRadius: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.07)", overflow: "hidden" }}>
-        <div style={{ padding: "14px 22px", borderBottom: "1px solid #f0f0f0", background: "#fafbff" }}>
-          <h2 style={{ margin: 0, fontSize: 14, color: "#1a2340" }}>
-            {ICONS[step]} {tl.steps[step]}
-          </h2>
+
+      {/* Document panel */}
+      <div style={{ width: "100%", maxWidth: 960, background: C.white.hex, border: hair }}>
+        {/* Step title bar — blue block, white text + icon (role.priority) */}
+        <div style={{ display: "flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: role.priority.fill, color: role.priority.on }}>
+          <Icon name={STEP_ICONS[step]} size={22} color={C.white.hex} />
+          <h2 style={{ margin: 0, fontSize: type.size.md, fontFamily: type.fonts.display, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em" }}>{tl.steps[step]}</h2>
         </div>
-        <div style={{ padding: "18px 22px", maxHeight: "64vh", overflowY: "auto" }}>{renderStep()}</div>
-        <div style={{ padding: "12px 22px", borderTop: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", background: "#fafbff" }}>
-          <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ padding: "8px 18px", background: step === 0 ? "#eee" : "white", color: step === 0 ? "#bbb" : "#555", border: "1px solid " + (step === 0 ? "#e0e0e0" : "#ccc"), borderRadius: 8, fontSize: 12, cursor: step === 0 ? "not-allowed" : "pointer", fontWeight: 600 }}>
-            {tl.bk}
+        <div style={{ padding: space(5), maxHeight: "64vh", overflowY: "auto" }}>{renderStep()}</div>
+        {/* Nav */}
+        <div style={{ padding: `${space(3)}px ${space(4)}px`, borderTop: hair, display: "flex", justifyContent: "space-between", background: C.white.hex }}>
+          <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...secondaryBtnStyle, opacity: step === 0 ? 0.4 : 1, cursor: step === 0 ? "not-allowed" : "pointer" }}>
+            <Icon name="arrow_back" size={18} /> {tl.bk}
           </button>
           {step < 5 ? (
-            <button onClick={() => { if (canNext()) setStep((s) => s + 1) }} disabled={!canNext()} style={{ padding: "8px 22px", background: canNext() ? "#1a4fd6" : "#b0c4e8", color: "white", border: "none", borderRadius: 8, fontSize: 12, cursor: canNext() ? "pointer" : "not-allowed", fontWeight: 700 }}>
-              {step === 4 ? tl.gen : tl.nxt}
+            <button onClick={() => { if (canNext()) setStep((s) => s + 1) }} disabled={!canNext()} style={primaryBtnStyle(canNext())}>
+              {step === 4 ? tl.gen : tl.nxt} <Icon name="arrow_forward" size={18} color={canNext() ? C.white.hex : "#9AA0AB"} />
             </button>
           ) : (
-            <span style={{ fontSize: 11, color: "#888", alignSelf: "center" }}>Haz clic en "Generar SVG" para obtener los archivos</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: space(2), fontSize: type.size.sm, color: C.ink.hex, opacity: 0.7, alignSelf: "center" }}>
+              <Icon name="bolt" size={18} /> Genera el SVG por idioma arriba
+            </span>
           )}
         </div>
       </div>

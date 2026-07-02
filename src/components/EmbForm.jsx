@@ -44,13 +44,13 @@ export function EmbForm({ emb, onChange }) {
     { k: "maxStitch", lbl: "Max Puntada" }, { k: "minStitch", lbl: "Min Puntada" }, { k: "maxJump", lbl: "Max Salto" }, { k: "totalThread", lbl: "Hilo Total" }, { k: "totalBobbin", lbl: "Bobina Total" },
   ]
   return (
-    <div style={{ marginTop: 12, padding: 14, background: "#f0f4ff", borderRadius: 10, border: "1px solid #c5d5f0" }}>
+    <div style={{ marginTop: 12, padding: 14, background: "#FFFFFF", borderRadius: 10, border: "1px solid #c5d5f0" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#1a4fd6" }}>Ficha Tecnica de Bordado</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#1A3FB0" }}>Ficha Tecnica de Bordado</span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {extracted && <span style={{ fontSize: 11, color: "#27ae60", fontWeight: 600 }}>PDF extraido</span>}
-          {extracting && <span style={{ fontSize: 11, color: "#e67e22", fontWeight: 600 }}>Extrayendo...</span>}
-          <label style={{ padding: "6px 12px", background: "white", border: "1.5px dashed #1a4fd6", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700, color: "#1a4fd6" }}>
+          {extracted && <span style={{ fontSize: 11, color: "#1A3FB0", fontWeight: 600 }}>PDF extraido</span>}
+          {extracting && <span style={{ fontSize: 11, color: "#E5352B", fontWeight: 600 }}>Extrayendo...</span>}
+          <label style={{ padding: "6px 12px", background: "white", border: "1.5px dashed #1A3FB0", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700, color: "#1A3FB0" }}>
             Subir PDF Wilcom
             <input ref={fileRef} type="file" accept="application/pdf" onChange={handlePDF} style={{ display: "none" }} />
           </label>
@@ -67,7 +67,7 @@ export function EmbForm({ emb, onChange }) {
       <div style={{ marginTop: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: "#555" }}>Secuencia de Stops</span>
-          <button onClick={addStop} style={{ padding: "4px 10px", background: "white", border: "1px solid #1a4fd6", borderRadius: 5, color: "#1a4fd6", fontSize: 11, cursor: "pointer" }}>
+          <button onClick={addStop} style={{ padding: "4px 10px", background: "white", border: "1px solid #1A3FB0", borderRadius: 5, color: "#1A3FB0", fontSize: 11, cursor: "pointer" }}>
             + Stop
           </button>
         </div>
@@ -80,7 +80,7 @@ export function EmbForm({ emb, onChange }) {
                 <input value={st[kl[0]] || ""} onChange={(e) => updSeq(i, kl[0], e.target.value)} style={{ padding: "3px 6px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 11, outline: "none" }} />
               </div>
             ))}
-            <button onClick={() => delStop(i)} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 14, paddingBottom: 4 }}>
+            <button onClick={() => delStop(i)} style={{ background: "none", border: "none", color: "#E5352B", cursor: "pointer", fontSize: 14, paddingBottom: 4 }}>
               x
             </button>
           </div>

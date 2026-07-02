@@ -8,6 +8,14 @@
 The big shift: from a **fixed** coordinate layout to an **AI-driven, flexbox-style**
 tech pack generator. Two pillars, built on a hardened, secret-safe backend.
 
+### Design system — Bauhaus, computationally semantic (`src/design/`)
+- [x] Single-source design tokens (`src/design/tokens.js`) → injected CSS vars + imported by SVG builders, so UI and printed page share one palette/type/grid
+- [x] **Computational color model:** color = attention role, not decoration — red = numeric index markers, blue = priority blocks (white text), yellow = small high-priority highlights (always keylined), ink/white = 80% structure
+- [x] Palette tuned to stay legible in **black & white / photocopy** (distinct grayscale levels); printable surface is pure white
+- [x] Two typefaces / three roles: Space Grotesk (display+ui) + JetBrains Mono (data); Material Symbols icons, zero emojis, zero border-radius
+- [x] Layout engine extended to resolve **percentage** basis/gap/padding — the "márgenes por porcentaje entre retículas"
+- [ ] Recolor the generated SVG pages with the same role tokens (currently only the wizard UI uses them)
+
 ### Phase 0 — Security & backend scaffold
 - [x] Server-side proxy (`api/deepseek.js`) so the NVIDIA/DeepSeek key never reaches the browser
 - [x] `SECURITY.md`, secret scanning + push protection, gitleaks in CI, Dependabot
