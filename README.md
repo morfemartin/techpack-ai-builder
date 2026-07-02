@@ -97,11 +97,21 @@ Ver [CONTRIBUTING.md](CONTRIBUTING.md) — agregar un tipo de prenda nuevo es la
 
 - React 18 + Vite 5
 - SVG generado 100% en cliente (sin dependencias de canvas/render externo)
-- Claude API (Anthropic) para traducción y extracción de datos de PDF — opcional
+- DeepSeek (vía API OpenAI-compatible de NVIDIA) para el intake asistido y la traducción — a través de un proxy backend, nunca directo desde el navegador
+- Serverless en Vercel (`api/deepseek.js`) para custodiar la API key del lado servidor
 
 ## ¿Necesitás la ficha técnica de tu marca ya armada, no la herramienta?
 
 Este repo es la base open source que usamos en [Morfe](https://github.com/morfemartin) para nuestro propio pipeline de lanzamiento de marcas de ropa (branding, desarrollo textil, fichas técnicas y web). Si preferís que te lo hagamos nosotros de punta a punta, [contactanos](https://github.com/morfemartin).
+
+## Seguridad
+
+La API key de DeepSeek/NVIDIA **nunca** vive en el repositorio ni llega al
+navegador: todas las llamadas de IA pasan por un proxy serverless
+(`api/deepseek.js`) que adjunta la key del lado servidor. Los archivos `.env*`
+están gitignoreados, hay escaneo de secretos (gitleaks + push protection de
+GitHub) y Dependabot vigilando dependencias. Detalle completo y política de
+reporte en [SECURITY.md](SECURITY.md).
 
 ## Licencia
 

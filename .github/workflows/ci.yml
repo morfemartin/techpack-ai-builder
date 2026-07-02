@@ -17,3 +17,17 @@ jobs:
           cache: npm
       - run: npm install
       - run: npm run build
+      # Surface known-vulnerable deps without failing the build on advisories
+      # that have no fix yet. Dependabot handles the actual upgrades.
+      - run: npm audit --audit-level=high || true
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
