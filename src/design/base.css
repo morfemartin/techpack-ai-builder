@@ -1,0 +1,57 @@
+/* Base reset + Bauhaus defaults. Component-level styling lives in the inline
+   styles that read from src/design/tokens.js; this file only sets global
+   ground rules and the accessibility floor the frontend-design skill asks for
+   (visible keyboard focus, reduced-motion respected). */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  /* Bauhaus has no rounded corners — enforce it computationally so no stray
+     border-radius can creep back in. */
+  border-radius: 0 !important;
+}
+
+:root {
+  --c-white: #ffffff;
+  --c-ink: #141518;
+  --c-canvas: #e8eaef;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  background: var(--c-canvas);
+  color: var(--c-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.material-symbols-sharp {
+  font-family: "Material Symbols Sharp";
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus — a solid ink ring, no glow (flat, Bauhaus). */
+:focus-visible {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

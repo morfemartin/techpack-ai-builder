@@ -6,6 +6,13 @@
 // stretch|start|center|end alignment on the cross axis, and
 // start|center|end|space-between justification on the main axis.
 //
+// Sizing values (basis, min, max, gap, padding) may be given as a number of
+// px OR as a percentage string like "6%". Percentages resolve against the
+// container's main-axis size (for basis/min/max/gap) or the matching axis
+// (for padding sides) — this is how the design system expresses the
+// "márgenes por porcentaje entre retículas": the gutters between major grid
+// blocks scale proportionally with the format instead of being fixed px.
+//
 // Known simplification vs. real flexbox: when both grow and shrink clamp
 // against min/max, leftover space from a clamped child is NOT redistributed
 // to siblings in a second pass. For tech-pack layouts (a handful of
@@ -15,9 +22,33 @@
 
 const AUTO = "auto"
 
-function box(padding) {
-  if (typeof padding === "number") return { top: padding, right: padding, bottom: padding, left: padding }
-  return { top: 0, right: 0, bottom: 0, left: 0, ...padding }
+// Resolve a length that may be a number (px), a "N%" string (percent of
+// `basis`), or undefined -> fallback.
+export function resolveLen(value, basis, fallback = 0) {
+  if (value === undefined || value === null || value === AUTO) return fallback
+  if (typeof value === "number") return value
+  if (typeof value === "string" && value.trim().endsWith("%")) {
+    return (parseFloat(value) / 100) * basis
+  }
+  return parseFloat(value) || fallback
+}
+
+function box(padding, width, height) {
+  if (padding === undefined || padding === null) return { top: 0, right: 0, bottom: 0, left: 0 }
+  if (typeof padding === "number" || typeof padding === "string") {
+    return {
+      top: resolveLen(padding, height),
+      right: resolveLen(padding, width),
+      bottom: resolveLen(padding, height),
+      left: resolveLen(padding, width),
+    }
+  }
+  return {
+    top: resolveLen(padding.top, height),
+    right: resolveLen(padding.right, width),
+    bottom: resolveLen(padding.bottom, height),
+    left: resolveLen(padding.left, width),
+  }
 }
 
 function mainAxis(direction) {
@@ -49,12 +80,16 @@ export function solveLayout(node, outer) {
   if (!node.children || node.children.length === 0) return resolved
 
   const direction = node.direction || "row"
-  const pad = box(node.padding || 0)
-  const gap = node.gap || 0
+  const pad = box(node.padding, width, height)
   const mAxis = mainAxis(direction)
   const cAxis = crossAxis(direction)
   const mPos = mainPos(direction)
   const cPos = crossPos(direction)
+
+  // Full main-axis size of this container — the reference for resolving any
+  // percentage basis/gap/min/max of its children.
+  const mainDim = direction === "column" ? height : width
+  const gap = resolveLen(node.gap, mainDim, 0)
 
   const innerMain = (direction === "column" ? height - pad.top - pad.bottom : width - pad.left - pad.right)
   const innerCross = (direction === "column" ? width - pad.left - pad.right : height - pad.top - pad.bottom)
@@ -66,11 +101,12 @@ export function solveLayout(node, outer) {
   const totalGap = gap * Math.max(0, n - 1)
   const availableForBasis = innerMain - totalGap
 
+  const minOf = (c) => resolveLen(c.min, mainDim, 0)
+  const maxOf = (c) => (c.max === undefined ? Infinity : resolveLen(c.max, mainDim, Infinity))
+
   const bases = children.map((c) => {
-    const b = c.basis === undefined || c.basis === AUTO ? 0 : c.basis
-    const min = c.min !== undefined ? c.min : 0
-    const max = c.max !== undefined ? c.max : Infinity
-    return Math.min(Math.max(b, min), max)
+    const b = resolveLen(c.basis, mainDim, 0)
+    return Math.min(Math.max(b, minOf(c)), maxOf(c))
   })
   const usedBasis = bases.reduce((a, b) => a + b, 0)
   const remaining = availableForBasis - usedBasis
@@ -82,10 +118,8 @@ export function solveLayout(node, outer) {
       children.forEach((c, i) => {
         const grow = c.grow || 0
         if (grow <= 0) return
-        const min = c.min !== undefined ? c.min : 0
-        const max = c.max !== undefined ? c.max : Infinity
         const extra = remaining * (grow / totalGrow)
-        mainSizes[i] = Math.min(Math.max(bases[i] + extra, min), max)
+        mainSizes[i] = Math.min(Math.max(bases[i] + extra, minOf(c)), maxOf(c))
       })
     }
   } else if (remaining < 0) {
@@ -95,10 +129,8 @@ export function solveLayout(node, outer) {
         const shrink = c.shrink === undefined ? 1 : c.shrink
         const weight = shrink * bases[i]
         if (weight <= 0) return
-        const min = c.min !== undefined ? c.min : 0
-        const max = c.max !== undefined ? c.max : Infinity
         const delta = remaining * (weight / totalShrinkWeight)
-        mainSizes[i] = Math.min(Math.max(bases[i] + delta, min), max)
+        mainSizes[i] = Math.min(Math.max(bases[i] + delta, minOf(c)), maxOf(c))
       })
     }
   }
@@ -119,9 +151,9 @@ export function solveLayout(node, outer) {
     let cSize
     let cOffset = innerCrossStart
     if (align === "stretch" || child.crossBasis === undefined) {
-      cSize = align === "stretch" ? innerCross : (child.crossBasis !== undefined ? child.crossBasis : innerCross)
+      cSize = align === "stretch" ? innerCross : (child.crossBasis !== undefined ? resolveLen(child.crossBasis, innerCross) : innerCross)
     } else {
-      cSize = child.crossBasis
+      cSize = resolveLen(child.crossBasis, innerCross)
     }
     if (align === "center") cOffset = innerCrossStart + (innerCross - cSize) / 2
     else if (align === "end") cOffset = innerCrossStart + (innerCross - cSize)

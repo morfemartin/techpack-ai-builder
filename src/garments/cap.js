@@ -2,7 +2,7 @@
 // polo, ...) should follow this same shape - see ROADMAP.md "Add a garment type".
 export const capGarment = {
   id: "cap",
-  icon: "🧢",
+  icon: "checkroom", // Material Symbols name (no emojis anywhere in the UI)
   label: { ES: "Gorra", EN: "Cap", ZH: "帽子" },
 
   defaultParts: [

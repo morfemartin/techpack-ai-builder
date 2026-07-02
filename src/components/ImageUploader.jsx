@@ -17,12 +17,12 @@ export function ImageUploader({ d, onUpdate }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <label style={{ padding: "7px 14px", background: d.imageData ? "#e8f5e9" : "#f0f4ff", border: "1.5px dashed " + (d.imageData ? "#27ae60" : "#1a4fd6"), borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, color: d.imageData ? "#27ae60" : "#1a4fd6" }}>
+        <label style={{ padding: "7px 14px", background: d.imageData ? "#FFFFFF" : "#FFFFFF", border: "1.5px dashed " + (d.imageData ? "#1A3FB0" : "#1A3FB0"), borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, color: d.imageData ? "#1A3FB0" : "#1A3FB0" }}>
           {d.imageData ? "Imagen cargada - cambiar" : "Subir PNG o SVG del diseno"}
           <input type="file" accept="image/png,image/svg+xml,image/jpeg" onChange={handleFile} style={{ display: "none" }} />
         </label>
         {d.imageData && (
-          <button onClick={() => onUpdate({ imageData: null, imageType: null, imgNatW: null, imgNatH: null })} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 13 }}>
+          <button onClick={() => onUpdate({ imageData: null, imageType: null, imgNatW: null, imgNatH: null })} style={{ background: "none", border: "none", color: "#E5352B", cursor: "pointer", fontSize: 13 }}>
             x quitar
           </button>
         )}
@@ -35,7 +35,7 @@ export function ImageUploader({ d, onUpdate }) {
             <div>
               Dim. nativas: {d.imgNatW}x{d.imgNatH}px
             </div>
-            <div style={{ color: "#c0392b", fontWeight: 600 }}>Las cotas se muestran con los valores de Ancho/Alto (mm) que ingresaste arriba</div>
+            <div style={{ color: "#E5352B", fontWeight: 600 }}>Las cotas se muestran con los valores de Ancho/Alto (mm) que ingresaste arriba</div>
           </div>
         </div>
       )}
