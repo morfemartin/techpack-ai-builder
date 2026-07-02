@@ -16,6 +16,7 @@ Nota: esta demo estática no incluye las funciones asistidas por IA (traducción
 - [Instalación](#instalación)
 - [Uso rápido](#uso-rápido)
 - [Arquitectura multi-prenda](#arquitectura-multi-prenda)
+- [Diseño y UX](#diseño-y-ux)
 - [Roadmap](#roadmap)
 - [Contribuir](#contribuir)
 - [Tecnologías](#tecnologías)
@@ -83,6 +84,19 @@ src/
 ```
 
 Agregar una prenda nueva = copiar `cap.js`, completar los mismos campos, y registrarla. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Diseño y UX
+
+La interfaz sigue un sistema de diseño **Bauhaus** donde el color codifica
+prioridad de atención (rojo = índices numéricos, azul = bloques de prioridad,
+amarillo = highlights críticos), pensado desde el lector real de una ficha
+técnica: **la fábrica** — que la imprime, la fotocopia en blanco y negro y la lee
+en otro idioma. Todo está codificado en un solo `tokens.js` que alimenta la
+interfaz y el SVG generado.
+
+El porqué de cada decisión (impresión, escala de grises, tipografía mono para
+datos, la retícula ligada al motor flexbox) está justificado en
+**[docs/UX-DESIGN.md](docs/UX-DESIGN.md)**.
 
 ## Roadmap
 
