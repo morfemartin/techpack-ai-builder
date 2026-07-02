@@ -16,6 +16,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm install
+      - run: npm test
       - run: npm run build
       # Surface known-vulnerable deps without failing the build on advisories
       # that have no fix yet. Dependabot handles the actual upgrades.

@@ -14,10 +14,11 @@ tech pack generator. Two pillars, built on a hardened, secret-safe backend.
 - [ ] Rate limiting / origin check on the proxy before any public deployment
 
 ### Phase 1 — Flexbox layout engine (`src/layout/`)
-- [ ] Region tree model (header/membrete → body{ spec tables, blank design area } → footer with page number) with flex properties (grow / min / max / direction)
-- [ ] Solver that resolves the tree to absolute boxes, then renders each to SVG
-- [ ] Refactor the cap pages to use the engine (must reproduce current output first, then flex by data volume)
-- [ ] Unit tests for the solver
+- [x] Region tree model (row/column containers, grow/shrink/basis/min/max, gap, padding, align, justify) — `src/layout/builders.js` + `solve.js`
+- [x] Solver that resolves the tree to absolute boxes (`solveLayout`) + a renderer that walks it to SVG (`renderLayoutToSVG`)
+- [x] `buildPage1` (parts spec sheet + 4-view diagram) rebuilt on the engine — part-table rows are now `leaf({ grow: 1, min: 16 })` instead of a hand-derived `Math.floor(bodyH / partsCount)` formula. Verified geometric parity against the old fixed-coordinate output in `src/pages/buildPages.test.js`, and fixed a real bug surfaced by the refactor: the 4-view grid used to start flush with the DETAILS bar's own top edge instead of below it, so its opaque background silently covered most of the "DETAILS" label.
+- [ ] `buildDesignPage` still uses hand-computed pixel math — port it to the engine next (same pattern as `buildPage1`)
+- [x] Unit tests for the solver (`src/layout/solve.test.js`, 16 cases: grow/shrink/clamping/nesting/justify/align/data-volume flexing)
 
 ### Phase 2 — AI intake (DeepSeek)
 - [ ] Adaptive, garment-aware questionnaire that offers options as it goes
