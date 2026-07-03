@@ -15,6 +15,7 @@
 :root {
   --c-white: #ffffff;
   --c-ink: #141518;
+  --c-shell: #000000;
   --c-canvas: #e8eaef;
 }
 
@@ -25,7 +26,8 @@ body {
 
 body {
   font-family: "Space Grotesk", system-ui, sans-serif;
-  background: var(--c-canvas);
+  /* General app background: black (the document panels stay white for print). */
+  background: var(--c-shell);
   color: var(--c-ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

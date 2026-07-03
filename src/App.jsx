@@ -12,6 +12,7 @@ import { EmbForm } from "./components/EmbForm.jsx"
 import { SvgModal } from "./components/SvgModal.jsx"
 import { Preview } from "./components/Preview.jsx"
 import { Icon } from "./components/Icon.jsx"
+import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
@@ -443,17 +444,15 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: C.canvas.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.ink.hex }}>
+    <div style={{ minHeight: "100vh", background: C.shell.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.white.hex }}>
       {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
       <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
-        {/* Wordmark */}
+        {/* Wordmark — Morfe mark in white on the black shell */}
         <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>
-          <div style={{ width: space(11), height: space(11), background: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon name="grid_view" size={26} color={C.white.hex} />
-          </div>
+          <MorfeLogo size={44} color={C.white.hex} />
           <div>
-            <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.ink.hex }}>TechPack AI Builder</h1>
-            <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6 }}>Generador Open Source de Fichas Técnicas · v0.2</p>
+            <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.white.hex }}>TechPack AI Builder</h1>
+            <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.white.hex, opacity: 0.55 }}>por Morfe · Generador Open Source de Fichas Técnicas · v0.2</p>
           </div>
         </div>
         {/* Stepper — red index numbers (enumeration seen first), blue underline = active */}
