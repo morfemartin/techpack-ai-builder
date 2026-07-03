@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { buildPage1 } from "./buildPages.js"
 import { capGarment } from "../garments/cap.js"
+import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 // These assert the exact geometry the old hand-computed pixel math produced
 // (hH=80, detailsBar=22, tableHeader=20, discH=28 on an 1200x900 page -> a
@@ -80,5 +81,28 @@ describe("buildPage1 layout parity", () => {
     expect(fiveRowHeights).toHaveLength(5)
     expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(750, 5)
     expect(fiveRowHeights[0]).toBeCloseTo(150, 5)
+  })
+})
+
+describe("buildPage1 with a garment that has no hand-drawn guides/callouts", () => {
+  // Shape produced by buildCustomGarment.js for an AI-drafted "prenda desde 0".
+  const bareGarment = {
+    id: "custom-test",
+    label: { ES: "Prenda de Prueba" },
+    defaultParts: [{ id: 1, val: "Valor de prueba", on: true }],
+    partLabels: { ES: { 1: "Pieza de Prueba" } },
+    positions: { ES: ["Toda la prenda"] },
+  }
+  const hdr = { brand: "Test Brand", season: "2027", sno: "T001", cat: "Otro", fab: "Test", fac: "", ind: "", outd: "", pname: "Test" }
+
+  it("does not throw and falls back to the generic silhouette rectangle instead of inventing a garment shape", () => {
+    expect(() => buildPage1("ES", hdr, bareGarment.defaultParts, null, null, bareGarment)).not.toThrow()
+    const svg = buildPage1("ES", hdr, bareGarment.defaultParts, null, null, bareGarment)
+    expect(svg).toContain(GENERIC_SILHOUETTE)
+  })
+
+  it("draws no callout circles (no invented pointer coordinates)", () => {
+    const svg = buildPage1("ES", hdr, bareGarment.defaultParts, null, null, bareGarment)
+    expect(svg).not.toContain("<circle")
   })
 })

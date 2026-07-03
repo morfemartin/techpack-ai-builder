@@ -5,7 +5,7 @@ Open-source wizard that generates professional, print-ready fashion **tech packs
 > Turn a brand's parts list, colorways, and embroidery specs into a multi-page, artboard-ready technical sheet in minutes, in Spanish, English and/or Chinese.
 
 **[▶ Demo en vivo](https://morfemartin.github.io/techpack-ai-builder/)** — build del wizard servido desde GitHub Pages.
-Nota: esta demo estática no incluye las funciones asistidas por IA (traducción, extracción de PDF de bordado) — esas requieren el proxy backend en Vercel descrito en [Seguridad](#seguridad), que un sitio estático no puede correr.
+Nota: esta demo estática no incluye las funciones asistidas por IA (importar CSV, traducción, extracción de PDF de bordado) — esas requieren el proxy backend en Vercel descrito en [Seguridad](#seguridad), que un sitio estático no puede correr. Corré `npm run dev` en local para probarlas (ver [Instalación](#instalación)).
 
 ---
 

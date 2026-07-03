@@ -4,6 +4,7 @@ import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
+import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 /* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
  * Built on the flexbox-style layout engine (src/layout/) instead of hand-computed
@@ -80,8 +81,13 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
         var s = R(b.x, b.y, b.width, b.height, "white", "#aaa", "0.8")
         s += TX(b.x + b.width / 2, b.y + 14, t.vw[vi], 11, true, "middle")
         var ox = b.x + (b.width - 200) / 2, oy = b.y + 22
-        s += "<g transform='translate(" + ox + " " + oy + ")'><path d='" + garment.guides[vi] + "' fill='none' stroke='#ccc' stroke-width='1' stroke-dasharray='5,3'/></g>"
-        garment.callouts[vi].forEach((co) => {
+        var guidePath = garment.guides ? garment.guides[vi] : GENERIC_SILHOUETTE
+        s += "<g transform='translate(" + ox + " " + oy + ")'><path d='" + guidePath + "' fill='none' stroke='#ccc' stroke-width='1' stroke-dasharray='5,3'/></g>"
+        // No hand-drawn callouts for a garment without real guides (e.g. an
+        // AI-drafted "prenda desde 0") - inventing pointer coordinates would
+        // misrepresent data we don't have. The numbered parts table above
+        // still carries the same red index chips either way.
+        ;(garment.callouts ? garment.callouts[vi] : []).forEach((co) => {
           var pid = co[0], tx2 = co[1], ty2 = co[2], cx2 = co[3], cy2 = co[4]
           var ri = ap.findIndex((a) => a.id === pid)
           if (ri < 0) return
