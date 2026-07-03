@@ -3,6 +3,7 @@ import { NA } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { palette, role, type } from "../design/tokens.js"
+import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 // This is the live on-screen mockup shown in the "Vista Previa" wizard step -
 // the thing a user actually looks at before clicking "Generar SVG". It has to
@@ -93,8 +94,8 @@ export function Preview({ lang, hdr, parts, designs, logo, page, txCache, garmen
                   <div key={vi} style={{ border: hairThin, position: "relative", overflow: "hidden", background: C.white.hex }}>
                     <div style={{ position: "absolute", top: 5, left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: "bold", color: C.ink.hex, zIndex: 2 }}>{t.vw[vi]}</div>
                     <svg viewBox="0 0 200 150" style={{ position: "absolute", top: 18, left: "50%", transform: "translateX(-50%)", width: vW * 0.76, height: vH * 0.7 }} overflow="visible">
-                      <path d={garment.guides[vi]} fill="none" stroke="#ccc" strokeWidth="1" strokeDasharray="5,3" />
-                      {garment.callouts[vi].map((co) => {
+                      <path d={garment.guides ? garment.guides[vi] : GENERIC_SILHOUETTE} fill="none" stroke="#ccc" strokeWidth="1" strokeDasharray="5,3" />
+                      {(garment.callouts ? garment.callouts[vi] : []).map((co) => {
                         var pid = co[0], tx3 = co[1], ty3 = co[2], cx3 = co[3], cy3 = co[4]
                         var ri = ap.findIndex((a) => a.id === pid)
                         if (ri < 0) return null

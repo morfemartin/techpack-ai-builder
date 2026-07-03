@@ -7,12 +7,15 @@ import { importGarmentCSV, readFileText, buildExampleCSV } from "./core/csvImpor
 import { DeepSeekError } from "./core/deepseekClient.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
+import { buildCustomGarment } from "./garments/buildCustomGarment.js"
+import { downloadGarmentFile } from "./garments/exportGarment.js"
 import { Inp, Sel, Fld } from "./components/FormControls.jsx"
 import { ColorsEditor } from "./components/ColorsEditor.jsx"
 import { ImageUploader } from "./components/ImageUploader.jsx"
 import { EmbForm } from "./components/EmbForm.jsx"
 import { SvgModal } from "./components/SvgModal.jsx"
 import { Preview } from "./components/Preview.jsx"
+import { GarmentChat } from "./components/GarmentChat.jsx"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
@@ -118,10 +121,19 @@ export default function App() {
   const [garmentId, setGarmentId] = useState("cap")
   const [langs, setLangs] = useState(["ES"])
   const [hdr, setHdr] = useState({ brand: "", season: "2027 SS/FW", sno: "", cat: "Accesorio", fab: "100% Poliester", fac: "", ind: "", outd: "", pname: "" })
-  const garment = GARMENTS[garmentId]
-  const [parts, setParts] = useState(garment.defaultParts.map((p) => Object.assign({}, p)))
-  const [designs, setDesigns] = useState([
-    Object.assign(newDesign(), { name: "Logo Frontal", pos: garment.positions.ES[3] || garment.positions.ES[0], posDetail: "Centrado", colors: [{ name: "PANTONE 286 C", hex: "#003DA5" }, { name: "PANTONE White", hex: "#FFFFFF" }] }),
+  // "custom" is a chat-drafted garment (GarmentChat.jsx) - not in the static
+  // registry, lives only in this state until/unless someone downloads it as
+  // a scaffold to PR in (see garments/exportGarment.js).
+  const [customGarment, setCustomGarment] = useState(null)
+  const garment = garmentId === "custom" ? customGarment : GARMENTS[garmentId]
+  // Lazy initializers (the `() => ...` form): a plain `useState(garment.defaultParts...)`
+  // re-evaluates that expression on EVERY render (React only uses the result
+  // on mount, but the expression itself still runs) - once `garment` can be
+  // null (garmentId === "custom" before the chat finishes), that throws on
+  // every re-render instead of just once safely at mount.
+  const [parts, setParts] = useState(() => GARMENTS.cap.defaultParts.map((p) => Object.assign({}, p)))
+  const [designs, setDesigns] = useState(() => [
+    Object.assign(newDesign(), { name: "Logo Frontal", pos: GARMENTS.cap.positions.ES[3] || GARMENTS.cap.positions.ES[0], posDetail: "Centrado", colors: [{ name: "PANTONE 286 C", hex: "#003DA5" }, { name: "PANTONE White", hex: "#FFFFFF" }] }),
   ])
   const [logo, setLogo] = useState(null)
   const [prevLang, setPrevLang] = useState("ES")
@@ -135,12 +147,25 @@ export default function App() {
 
   function selectGarment(id) {
     if (id === garmentId) return
-    const g = GARMENTS[id]
     setGarmentId(id)
-    setParts(g.defaultParts.map((p) => Object.assign({}, p)))
-    setDesigns([Object.assign(newDesign(), { pos: g.positions.ES[0] })])
+    if (id === "custom") {
+      setCustomGarment(null)
+      setParts([])
+      setDesigns([])
+    } else {
+      const g = GARMENTS[id]
+      setParts(g.defaultParts.map((p) => Object.assign({}, p)))
+      setDesigns([Object.assign(newDesign(), { pos: g.positions.ES[0] })])
+    }
     setTxCache({})
     setPrevPage(0)
+  }
+
+  function handleGarmentChatComplete(draft) {
+    const g = buildCustomGarment(draft)
+    setCustomGarment(g)
+    setParts(g.defaultParts.map((p) => Object.assign({}, p)))
+    setDesigns([Object.assign(newDesign(), { pos: g.positions.ES[0] })])
   }
   function toggleLang(c) {
     setLangs((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]))
@@ -213,6 +238,7 @@ export default function App() {
     if (step === 0) return !!garmentId
     if (step === 1) return langs.length > 0
     if (step === 2) return hdr.brand.trim() && hdr.pname.trim()
+    if (step === 3 && garmentId === "custom") return !!customGarment // chat must finish first
     return true
   }
 
@@ -258,10 +284,15 @@ export default function App() {
                 {g.label.ES}
               </Chip>
             ))}
-            <div style={{ display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(3)}px ${space(4)}px`, border: `1px dashed #B7BCC6`, color: "#8A909B", fontSize: type.size.sm, fontFamily: type.fonts.ui }}>
-              <Icon name="add" size={18} color="#8A909B" /> Más prendas pronto — contribuye una en GitHub
-            </div>
+            <Chip selected={garmentId === "custom"} onClick={() => selectGarment("custom")} iconName="auto_awesome">
+              Prenda nueva (con IA)
+            </Chip>
           </div>
+          {garmentId === "custom" && (
+            <p style={{ marginTop: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 480 }}>
+              Vas a charlar con la IA en el paso "Piezas" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual.
+            </p>
+          )}
         </div>
       )
 
@@ -321,6 +352,10 @@ export default function App() {
           </div>
         </div>
       )
+    }
+
+    if (step === 3 && garmentId === "custom") {
+      return <GarmentChat onComplete={handleGarmentChatComplete} />
     }
 
     if (step === 3) {
@@ -489,6 +524,15 @@ export default function App() {
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
               {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
+              {garmentId === "custom" && customGarment && (
+                <button
+                  onClick={() => downloadGarmentFile(customGarment)}
+                  title="Descarga un archivo .js de partida para contribuir esta prenda al repo - ver CONTRIBUTING.md"
+                  style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: C.white.hex, color: C.ink.hex, border: hair, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}
+                >
+                  <Icon name="download" size={16} color={C.ink.hex} /> Descargar prenda (.js)
+                </button>
+              )}
               {langs.map((l) => (
                 <button key={l} onClick={() => handleGenerate(l)} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on, border: hair, borderColor: role.priority.fill, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   <Icon name="bolt" size={16} color={C.white.hex} /> Generar SVG [{l}]
