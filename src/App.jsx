@@ -3,6 +3,8 @@ import { uid } from "./core/idGen.js"
 import { T } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
 import { translateContent } from "./core/claudeApi.js"
+import { importGarmentCSV, readFileText, buildExampleCSV } from "./core/csvImport.js"
+import { DeepSeekError } from "./core/deepseekClient.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { Inp, Sel, Fld } from "./components/FormControls.jsx"
@@ -127,6 +129,8 @@ export default function App() {
   const [translating, setTranslating] = useState(false)
   const [txCache, setTxCache] = useState({})
   const [svgPages, setSvgPages] = useState(null)
+  const [csvImporting, setCsvImporting] = useState(false)
+  const [csvError, setCsvError] = useState(null)
   const tl = T.ES
 
   function selectGarment(id) {
@@ -157,6 +161,37 @@ export default function App() {
     var r = new FileReader()
     r.onload = (ev) => setLogo(ev.target.result)
     r.readAsDataURL(f)
+  }
+
+  async function handleCsvUpload(e) {
+    var f = e.target.files[0]
+    if (!f) return
+    setCsvImporting(true)
+    setCsvError(null)
+    try {
+      var text = await readFileText(f)
+      var result = await importGarmentCSV(text, { garment, lang: "ES", tecs: tl.tecs })
+      setParts(result.parts)
+      if (result.designs.length > 0) {
+        setDesigns(result.designs.map((d) => Object.assign(newDesign(), d)))
+      }
+    } catch (err) {
+      setCsvError(err instanceof DeepSeekError ? err.message : "No se pudo leer o interpretar el CSV.")
+    } finally {
+      setCsvImporting(false)
+      e.target.value = ""
+    }
+  }
+
+  function downloadCsvTemplate() {
+    var csv = buildExampleCSV(garment, "ES")
+    var uri = "data:text/csv;charset=utf-8," + encodeURIComponent(csv)
+    var a = document.createElement("a")
+    a.href = uri
+    a.download = "ejemplo-" + garment.id + ".csv"
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
   }
 
   async function ensureTx(lang) {
@@ -293,6 +328,30 @@ export default function App() {
       let idx = 0
       return (
         <div>
+          <div style={{ marginBottom: space(4), padding: space(3), border: `1px dashed ${role.priority.fill}`, background: C.white.hex }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: space(3), flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: type.size.sm, fontWeight: 700, fontFamily: type.fonts.ui, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>Importar desde CSV (opcional)</div>
+                <div style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, marginTop: 2, maxWidth: 480 }}>
+                  Subí un CSV con las piezas (y de paso los diseños, si los incluís) — la IA lo interpreta, no hace falta que el formato sea exacto.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: space(2), alignItems: "center", flexWrap: "wrap" }}>
+                <button onClick={downloadCsvTemplate} style={secondaryBtnStyle}>
+                  <Icon name="description" size={16} /> Ver ejemplo
+                </button>
+                <label style={{ ...primaryBtnStyle(true), cursor: csvImporting ? "wait" : "pointer", opacity: csvImporting ? 0.6 : 1 }}>
+                  <Icon name="upload_file" size={16} color={C.white.hex} /> {csvImporting ? "Analizando..." : "Subir CSV"}
+                  <input type="file" accept=".csv,text/csv" onChange={handleCsvUpload} disabled={csvImporting} style={{ display: "none" }} />
+                </label>
+              </div>
+            </div>
+            {csvError && (
+              <div style={{ marginTop: space(2), display: "flex", alignItems: "center", gap: space(2), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>
+                <Icon name="error" size={16} color={role.index.fill} /> {csvError}
+              </div>
+            )}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: space(1), border: hair }}>
             {parts.map((p) => {
               var nm = p.customName || pn[p.id] || "P" + p.id

@@ -89,7 +89,9 @@ apiServer.listen(API_PORT, () => {
   console.log(`[dev-api] /api/deepseek shim listening on http://localhost:${API_PORT}`)
 })
 
-const vite = spawn("npx", ["vite"], { stdio: "inherit", shell: process.platform === "win32" })
+// Forward any extra CLI args (e.g. `npm run dev -- --port 3001`) straight
+// through to Vite, same as plain `vite dev` would.
+const vite = spawn("npx", ["vite", ...process.argv.slice(2)], { stdio: "inherit", shell: process.platform === "win32" })
 vite.on("exit", (code) => {
   apiServer.close()
   process.exit(code ?? 0)
