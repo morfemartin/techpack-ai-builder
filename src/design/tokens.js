@@ -24,9 +24,10 @@ export const palette = {
   blue: { hex: "#1A3FB0", grayValue: 76 },
   ink: { hex: "#141518", grayValue: 25 },
   // Screen-only chrome tints — NOT part of the five brand colors:
-  //  · shell  = the general app background (black).
+  //  · shell  = the general app background. Same near-black gray as `ink`
+  //    (not pure #000) — reuses the palette instead of inventing a 6th hex.
   //  · canvas = a light muted surface for disabled controls / instruction bars.
-  shell: { hex: "#000000", grayValue: 0 },
+  shell: { hex: "#141518", grayValue: 25 },
   canvas: { hex: "#E8EAEF", grayValue: 233 },
 }
 
