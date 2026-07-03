@@ -3,6 +3,7 @@ import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc } from "../core/sv
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
+import { palette, type } from "../design/tokens.js"
 
 /* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
  * Built on the flexbox-style layout engine (src/layout/) instead of hand-computed
@@ -27,13 +28,14 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 
   var detailsBar = leaf({
     basis: 22,
-    render: (b) => R(b.x, b.y, b.width, b.height, "#f0f0f0", "#555", "0.8") + TX(b.x + b.width / 2, b.y + b.height / 2, "DETAILS", 11, true, "middle"),
+    // role.priority: a section header bar spanning the page - solid blue, white text.
+    render: (b) => R(b.x, b.y, b.width, b.height, palette.blue.hex, palette.ink.hex, "0.8") + TX(b.x + b.width / 2, b.y + b.height / 2, "DETAILS", 11, true, "middle", palette.white.hex),
   })
 
   var tableHeaderRow = leaf({
     basis: 20,
     render: (b) =>
-      R(b.x, b.y, b.width, b.height, "#e8e8e8", "#aaa") +
+      R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
       TX(b.x + b.width * 0.11, b.y + b.height / 2, "#", 8, true, "middle") +
       TX(b.x + b.width * 0.32, b.y + b.height / 2, t.sp, 8, true, "middle") +
       TX(b.x + b.width * 0.62, b.y + b.height / 2, t.dt, 8, true, "middle") +
@@ -45,18 +47,25 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
       grow: 1,
       min: 16,
       render: (b) => {
-        var bg = i % 2 === 0 ? "white" : "#f9f9f9"
+        var bg = i % 2 === 0 ? palette.white.hex : "#F7F7F8"
         var nm = pn[p.id] || p.customName || "P" + p.id
         var v = txP ? txP[i] : p.val
         var divX1 = Math.round(b.x + b.width * 0.21)
         var divX2 = Math.round(b.x + b.width * 0.5)
+        // role.index chip: the same red square + white mono number used for
+        // the stepper/part chips in the wizard UI - one visual language for
+        // "this is a numbered reference" across screen and print.
+        var chip = Math.min(b.height - 6, 15)
+        var chipX = b.x + b.width * 0.11 - chip / 2
+        var chipY = b.y + b.height / 2 - chip / 2
         return (
           R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
-          TX(b.x + b.width * 0.11, b.y + b.height / 2, i + 1, 8, false, "middle") +
+          R(chipX, chipY, chip, chip, palette.red.hex, palette.red.hex, "0") +
+          TX(b.x + b.width * 0.11, b.y + b.height / 2, i + 1, 7.5, true, "middle", palette.white.hex, type.svgFonts.data) +
           "<line x1='" + divX1 + "' y1='" + b.y + "' x2='" + divX1 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
           TX(b.x + b.width * 0.21 + 3, b.y + b.height / 2, nm, 7, false, "start") +
           "<line x1='" + divX2 + "' y1='" + b.y + "' x2='" + divX2 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(b.x + b.width * 0.5 + 3, b.y + b.height / 2, v || NA, 7, false, "start")
+          TX(b.x + b.width * 0.5 + 3, b.y + b.height / 2, v || NA, 7, false, "start", undefined, type.svgFonts.data)
         )
       },
     })
@@ -76,9 +85,11 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
           var pid = co[0], tx2 = co[1], ty2 = co[2], cx2 = co[3], cy2 = co[4]
           var ri = ap.findIndex((a) => a.id === pid)
           if (ri < 0) return
-          s += "<line x1='" + (ox + cx2) + "' y1='" + (oy + cy2) + "' x2='" + (ox + tx2) + "' y2='" + (oy + ty2) + "' stroke='#c0392b' stroke-width='0.9'/>"
-          s += "<circle cx='" + (ox + cx2) + "' cy='" + (oy + cy2) + "' r='9' fill='white' stroke='#c0392b' stroke-width='1'/>"
-          s += TX(ox + cx2, oy + cy2, ri + 1, 8, true, "middle")
+          // role.index: solid red badge + white mono number - same "found first"
+          // enumeration mark as the part-row chips, cross-referenced by number.
+          s += "<line x1='" + (ox + cx2) + "' y1='" + (oy + cy2) + "' x2='" + (ox + tx2) + "' y2='" + (oy + ty2) + "' stroke='" + palette.red.hex + "' stroke-width='0.9'/>"
+          s += "<circle cx='" + (ox + cx2) + "' cy='" + (oy + cy2) + "' r='9' fill='" + palette.red.hex + "' stroke='" + palette.red.hex + "' stroke-width='1'/>"
+          s += TX(ox + cx2, oy + cy2, ri + 1, 8, true, "middle", palette.white.hex, type.svgFonts.data)
         })
         return s
       },
@@ -98,7 +109,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var resolved = solveLayout(root, { x: 0, y: 0, width: W, height: H })
 
   var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
-  s += "<rect width='" + W + "' height='" + H + "' fill='white' stroke='#333' stroke-width='1.5'/>"
+  s += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
   s += renderLayoutToSVG(resolved)
 
   // Frame around the spec-table column: spans from the top of the DETAILS bar
@@ -109,7 +120,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var rDetails = resolved.children[1]
   var rDisc = resolved.children[3]
   var rSpecTable = resolved.children[2].children[0]
-  s += R(rSpecTable.x, rDetails.y, rSpecTable.width, rDisc.y - rDetails.y, "none", "#555", "1")
+  s += R(rSpecTable.x, rDetails.y, rSpecTable.width, rDisc.y - rDetails.y, "none", palette.ink.hex, "1")
 
   s += "</svg>"
   return s
@@ -124,35 +135,56 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   var RX = LW, RW = W - LW, RH = bodyH
 
   var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
-  s += "<rect width='" + W + "' height='" + H + "' fill='white' stroke='#333' stroke-width='1.5'/>"
+  s += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
   s += svgHeader(hdr, logo, W, hH)
-  s += R(0, hH, W, 22, "#f0f0f0", "#555", "0.8")
-  s += TX(W / 2, hH + 11, t.pageDesign + " " + (idx + 1) + " - " + (txName || d.name), 11, true, "middle")
+  // role.priority: this page's title bar - solid blue, white text.
+  s += R(0, hH, W, 22, palette.blue.hex, palette.ink.hex, "0.8")
+  s += TX(W / 2, hH + 11, t.pageDesign + " " + (idx + 1) + " - " + (txName || d.name), 11, true, "middle", palette.white.hex)
 
   var by = hH + 22
-  s += R(0, by, LW, bodyH, "white", "#aaa", "0.8")
+  s += R(0, by, LW, bodyH, palette.white.hex, palette.ink.hex, "0.8")
 
   var ty = by + 16
-  var rows = [[t.fileName, d.fileName || NA], [t.driveLink, d.driveLink || NA], [t.pageDesign + " #", idx + 1], [d.name ? "Nombre" : "", (txName || d.name)], [t.pos, d.pos], [t.tec, d.tec]]
-  if (!isWhole) { rows.push([t.posDetail, txPosDetail || d.posDetail || NA], [t.wDes, d.w ? (d.w + " mm") : NA], [t.hDes, d.h ? (d.h + " mm") : NA]) }
-  else { rows.push([t.noApplica, ""]) }
+  // Third element flags a row's value as DATA (mono face) vs descriptive text.
+  var rows = [
+    [t.fileName, d.fileName || NA, true],
+    [t.driveLink, d.driveLink || NA, true],
+    [t.pageDesign + " #", idx + 1, true],
+    [d.name ? "Nombre" : "", (txName || d.name), false],
+    [t.pos, d.pos, false],
+    [t.tec, d.tec, false],
+  ]
+  if (!isWhole) { rows.push([t.posDetail, txPosDetail || d.posDetail || NA, false], [t.wDes, d.w ? (d.w + " mm") : NA, true], [t.hDes, d.h ? (d.h + " mm") : NA, true]) }
   rows.forEach(function (row) {
     if (!row[0]) return
-    s += TX(12, ty, row[0] + ":", 9, true, "start") + TX(LW * 0.52, ty, String(row[1] || NA), 9, false, "start")
+    s += TX(12, ty, row[0] + ":", 9, true, "start") + TX(LW * 0.52, ty, String(row[1] || NA), 9, false, "start", undefined, row[2] ? type.svgFonts.data : type.svgFonts.ui)
     ty += 21
   })
+
+  if (isWhole) {
+    // role.highlight: a small, high-priority exception note - white box, ink
+    // keyline, thick yellow left accent. Same treatment as the wizard UI's
+    // "covers the whole garment" callout (App.jsx) - one language, two surfaces.
+    var boxH = 24
+    s += R(12, ty, LW - 24, boxH, palette.white.hex, palette.ink.hex, "0.8")
+    s += R(12, ty, 4, boxH, palette.yellow.hex, palette.yellow.hex, "0")
+    s += TX(12 + 4 + 10, ty + boxH / 2, t.noApplica, 8, false, "start")
+    ty += boxH + 6
+  }
 
   ty += 6
   s += "<line x1='10' y1='" + ty + "' x2='" + (LW - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
   ty += 16
-  s += TX(LW / 2, ty, "PANTONE / CMYK", 10, true, "middle")
-  ty += 20
+  // role.priority bar, same treatment as the embroidery title below it.
+  s += R(10, ty - 10, LW - 20, 18, palette.blue.hex, "none")
+  s += TX(LW / 2, ty - 1, "PANTONE / CMYK", 9, true, "middle", palette.white.hex)
+  ty += 18
   ;(d.colors || []).forEach(function (col) {
     if (!col.hex || ty > by + bodyH - 32) return
     var cm = h2c(col.hex)
-    s += R(12, ty - 10, 20, 20, col.hex, "#ccc", "0.5")
+    s += R(12, ty - 10, 20, 20, col.hex, palette.ink.hex, "0.5")
     s += TX(38, ty - 2, col.name || col.hex, 8, true, "start")
-    s += TX(38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start")
+    s += TX(38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
     ty += 30
   })
 
@@ -161,13 +193,13 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
     ty += 8
     s += "<line x1='10' y1='" + ty + "' x2='" + (LW - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
     ty += 16
-    s += R(10, ty - 10, LW - 20, 18, "#1a4fd6", "none")
-    s += TX(LW / 2, ty - 1, t.embTitle, 9, true, "middle", "white")
+    s += R(10, ty - 10, LW - 20, 18, palette.blue.hex, "none")
+    s += TX(LW / 2, ty - 1, t.embTitle, 9, true, "middle", palette.white.hex)
     ty += 18
     var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
     er.forEach(function (row) {
       if (ty > by + bodyH - 16) return
-      s += TX(12, ty, row[0] + ":", 8, true, "start") + TX(LW * 0.55, ty, row[1] || NA, 8, false, "start")
+      s += TX(12, ty, row[0] + ":", 8, true, "start") + TX(LW * 0.55, ty, row[1] || NA, 8, false, "start", undefined, type.svgFonts.data)
       ty += 16
     })
     if (ef.stopSeq && ef.stopSeq.length > 0 && ty < by + bodyH - 40) {
@@ -178,14 +210,14 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
       ty += 14
       ef.stopSeq.forEach(function (st) {
         if (ty > by + bodyH - 14) return
-        s += TX(14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", 8, false, "start")
+        s += TX(14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", 8, false, "start", undefined, type.svgFonts.data)
         ty += 13
       })
     }
   }
 
   var pad = 30
-  s += R(RX, by, RW, RH, "#fafafa", "#aaa", "0.8")
+  s += R(RX, by, RW, RH, palette.white.hex, palette.ink.hex, "0.8")
 
   if (d.imageData) {
     var dimSpace = 50
@@ -199,14 +231,14 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
 
     var mime = d.imageType === "svg" ? "image/svg+xml" : "image/png"
     s += "<image href='data:" + mime + ";base64," + d.imageData + "' x='" + imgX + "' y='" + imgY + "' width='" + dw + "' height='" + dh + "' preserveAspectRatio='xMidYMid meet'/>"
-    s += R(imgX, imgY, dw, dh, "none", "#c0392b", "0.8")
+    s += R(imgX, imgY, dw, dh, "none", palette.red.hex, "0.8")
 
     var wLabel = (d.w ? d.w + " mm" : "w")
     var hLabel = (d.h ? d.h + " mm" : "h")
     s += dimLine(imgX, imgY, imgX + dw, imgY + dh, wLabel, dh + 30, true)
     s += dimLine(imgX, imgY, imgX + dw, imgY + dh, hLabel, dw + 30, false)
   } else {
-    s += TX(RX + RW / 2, by + RH / 2, t.illZone, 11, false, "middle", "#ccc")
+    s += TX(RX + RW / 2, by + RH / 2, t.illZone, 11, false, "middle", "#B7BCC6")
     var cors = [[RX + 20, by + 20], [RX + 20, by + RH - 20], [RX + RW - 20, by + 20], [RX + RW - 20, by + RH - 20]]
     cors.forEach(function (pt) {
       s += "<line x1='" + (pt[0] - 12) + "' y1='" + pt[1] + "' x2='" + (pt[0] + 12) + "' y2='" + pt[1] + "' stroke='#ddd' stroke-width='1'/>"
