@@ -66,6 +66,13 @@ export const type = {
     ui: "'Space Grotesk', system-ui, sans-serif",
     data: "'JetBrains Mono', ui-monospace, monospace",
   },
+  // SVG-safe variants (double-quoted family names) for the generated tech-pack
+  // SVG, whose text attributes are themselves single-quoted XML — nesting the
+  // single-quoted family strings above inside them would break the markup.
+  svgFonts: {
+    ui: '"Space Grotesk", system-ui, sans-serif',
+    data: '"JetBrains Mono", ui-monospace, monospace',
+  },
   // Three hierarchies. Sizes in px; tracking in em.
   display: { family: "'Space Grotesk', system-ui, sans-serif", weight: 700, tracking: "-0.01em", transform: "uppercase" },
   ui: { family: "'Space Grotesk', system-ui, sans-serif", weight: 500, tracking: "0" },
