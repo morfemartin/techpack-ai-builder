@@ -16,15 +16,17 @@
 // printed / photocopied in black & white — they are deliberately spread out so
 // the whole system stays legible with no color at all (a hard requirement for a
 // factory tech pack). Ramp, lightest → darkest:
-//   white 255 › yellow ~200 › red ~121 › blue ~76 › ink ~25
+//   white 255 › yellow ~200 › red ~114 › blue ~76 › ink ~25
 export const palette = {
   white: { hex: "#FFFFFF", grayValue: 255 }, // the printable surface — pure white, for paper
   yellow: { hex: "#F5C518", grayValue: 200 }, // ALWAYS drawn with a black keyline (closest to white in B/W)
-  red: { hex: "#E5352B", grayValue: 121 },
+  red: { hex: "#E11D3A", grayValue: 114 }, // cool crimson red (not the warmer vermilion)
   blue: { hex: "#1A3FB0", grayValue: 76 },
   ink: { hex: "#141518", grayValue: 25 },
-  // Screen-only: the canvas that frames the white document. Never printed, so
-  // it is NOT one of the five brand colors — just a cool tint of the chrome.
+  // Screen-only chrome tints — NOT part of the five brand colors:
+  //  · shell  = the general app background (black).
+  //  · canvas = a light muted surface for disabled controls / instruction bars.
+  shell: { hex: "#000000", grayValue: 0 },
   canvas: { hex: "#E8EAEF", grayValue: 233 },
 }
 
@@ -94,6 +96,7 @@ export function cssVars() {
     "--c-red": palette.red.hex,
     "--c-blue": palette.blue.hex,
     "--c-ink": palette.ink.hex,
+    "--c-shell": palette.shell.hex,
     "--c-canvas": palette.canvas.hex,
 
     "--role-index": role.index.fill,
