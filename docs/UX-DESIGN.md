@@ -83,12 +83,25 @@ inconfundibles.
 
 ---
 
-## 4. Tipografía: dos familias, tres jerarquías
+## 4. Tipografía: dos familias de sistema, tres jerarquías
 
-- **Space Grotesk** (display + interfaz): una grotesca geométrica con linaje
-  Bauhaus, distintiva pero muy legible. Lleva títulos, etiquetas y navegación.
-- **JetBrains Mono** (datos): monoespaciada, para todo valor técnico — códigos de
-  estilo, medidas en mm, hex, POMs.
+- **Helvetica** (display + interfaz): `"Helvetica Neue", Helvetica, Arial,
+  sans-serif`. No es una elección casual — Helvetica es la grotesca suiza sobre
+  la que se construyó el International Typographic Style que hereda el Bauhaus
+  tardío. Lleva títulos, etiquetas y navegación.
+- **Monoespaciada de sistema** (datos): `ui-monospace, Menlo, Consolas,
+  "Courier New", monospace` — la mono nativa de cada sistema operativo, para
+  todo valor técnico: códigos de estilo, medidas en mm, hex, POMs.
+
+**Por qué fuentes de sistema, no webfonts:** las versiones anteriores de este
+documento usaban Space Grotesk + JetBrains Mono vía Google Fonts. Se
+reemplazaron por fuentes de sistema por una razón que es, otra vez, la fábrica:
+el SVG que exportás se abre en Illustrator o en el visor por defecto en la
+computadora de la planta de producción — una máquina donde nadie instaló una
+tipografía de Google. Con Helvetica/Arial y la mono nativa del sistema, el
+documento se ve como se diseñó **en cualquier computadora, sin descargar nada**.
+Es la misma lógica de "funciona sin internet" que ya aplicamos a la paleta de
+colores en escala de grises.
 
 **Por qué mono para los datos** no es un capricho estético:
 

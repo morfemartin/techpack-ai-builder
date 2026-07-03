@@ -25,8 +25,8 @@ body {
 }
 
 body {
-  font-family: "Space Grotesk", system-ui, sans-serif;
-  /* General app background: black (the document panels stay white for print). */
+  /* System font stack (Helvetica's lineage) - no webfont download. See tokens.js. */
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   background: var(--c-shell);
   color: var(--c-ink);
   -webkit-font-smoothing: antialiased;

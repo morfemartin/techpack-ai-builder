@@ -12,9 +12,9 @@ tech pack generator. Two pillars, built on a hardened, secret-safe backend.
 - [x] Single-source design tokens (`src/design/tokens.js`) → injected CSS vars + imported by SVG builders, so UI and printed page share one palette/type/grid
 - [x] **Computational color model:** color = attention role, not decoration — red = numeric index markers, blue = priority blocks (white text), yellow = small high-priority highlights (always keylined), ink/white = 80% structure
 - [x] Palette tuned to stay legible in **black & white / photocopy** (distinct grayscale levels); printable surface is pure white
-- [x] Two typefaces / three roles: Space Grotesk (display+ui) + JetBrains Mono (data); Material Symbols icons, zero emojis, zero border-radius
+- [x] Two typefaces / three roles, both **system fonts** (no webfont download): Helvetica/Arial (display+ui) + native OS monospace (data); Material Symbols icons (the one true webfont - it's an icon set, no system equivalent), zero emojis, zero border-radius
 - [x] Layout engine extended to resolve **percentage** basis/gap/padding — the "márgenes por porcentaje entre retículas"
-- [ ] Recolor the generated SVG pages with the same role tokens (currently only the wizard UI uses them)
+- [x] Recolor the generated SVG pages with the same role tokens (the printed tech pack, not just the wizard UI)
 
 ### Phase 0 — Security & backend scaffold
 - [x] Server-side proxy (`api/deepseek.js`) so the NVIDIA/DeepSeek key never reaches the browser
