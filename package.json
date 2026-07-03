@@ -6,7 +6,8 @@
   "description": "Open-source, multi-garment fashion tech pack (ficha tecnica) generator with AI-assisted translation and embroidery-spec extraction.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:vite-only": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
