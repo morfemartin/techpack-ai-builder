@@ -29,9 +29,9 @@ tech pack generator. Two pillars, built on a hardened, secret-safe backend.
 - [x] Unit tests for the solver (`src/layout/solve.test.js`, 16 cases: grow/shrink/clamping/nesting/justify/align/data-volume flexing)
 
 ### Phase 2 — AI intake (DeepSeek)
-- [ ] Adaptive, garment-aware questionnaire that offers options as it goes
-- [ ] Shared general survey (cover-page fields common to almost every tech pack) + garment-specific specs
-- [ ] Client logo intake + file uploads
+- [x] **Fase A — DeepSeek client foundation** (`src/core/deepseekClient.js`): `deepseekChat`/`extractStructured` against the proxy, with automatic retry on the NVIDIA free-tier's frequent transient `ResourceExhausted` 503s. Local dev gap closed: `api/deepseek.js` is a Vercel function that plain `vite dev` never executes - `npm run dev` now runs `scripts/dev.mjs`, a small local shim (same handler code, no Vercel account needed) proxied through Vite (`vite.config.js`). Verified with real end-to-end calls against the live NVIDIA endpoint, not just mocks.
+- [ ] **Fase B — CSV import** (registered garments): upload one CSV, DeepSeek (not a rigid column parser - people fill these out however makes sense to them) extracts `{parts, designs}` and pre-fills the existing Piezas/Diseños steps for review.
+- [ ] **Fase C — "Prenda desde 0"**: a DeepSeek chat builds a garment definition question by question (parts, positions, design/embroidery intent), generic-silhouette fallback in `buildPages.js`/`Preview.jsx` for garments with no hand-drawn `guides`/`callouts`, then the existing Diseños step for image+dimension upload. Draft is downloadable as a `garments/<id>.js` scaffold (placeholder silhouette, `// TODO` pointing at CONTRIBUTING.md) so it can be PR'd in as an officially-supported garment.
 
 ### Phase 3 — DeepSeek translation
 - [ ] Replace the Anthropic translation path with DeepSeek via the proxy
