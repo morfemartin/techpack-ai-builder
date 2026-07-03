@@ -58,26 +58,36 @@ export const role = {
 }
 
 // ── Typography — 2 families, 3 roles ─────────────────────────────────────────
-// display + ui share one geometric grotesque; data uses a mono to signal the
-// computational nature of the values (codes, hex, mm, POMs).
+// Both faces are SYSTEM fonts on purpose - no webfont download, no flash of
+// unstyled text, and (the part that actually matters for this tool) the
+// generated SVG opens with the right typeface in Illustrator/Preview on a
+// factory's machine even though nobody there installed a Google Font.
+// display + ui share Helvetica's lineage (the grotesque the International
+// Typographic Style / late Bauhaus is built on) via the classic cross-platform
+// stack; data uses each OS's native monospace to signal the computational
+// nature of the values (codes, hex, mm, POMs) - see docs/UX-DESIGN.md §4.
+const FONT_UI = '"Helvetica Neue", Helvetica, Arial, sans-serif'
+const FONT_DATA = 'ui-monospace, Menlo, Consolas, "Courier New", monospace'
+
 export const type = {
   fonts: {
-    display: "'Space Grotesk', system-ui, sans-serif",
-    ui: "'Space Grotesk', system-ui, sans-serif",
-    data: "'JetBrains Mono', ui-monospace, monospace",
+    display: FONT_UI,
+    ui: FONT_UI,
+    data: FONT_DATA,
   },
-  // SVG-safe variants (double-quoted family names) for the generated tech-pack
-  // SVG, whose text attributes are themselves single-quoted XML — nesting the
-  // single-quoted family strings above inside them would break the markup.
+  // Same values, kept as a separate export so callers that need "the SVG-safe
+  // font string" stay explicit about it - both are already double-quoted /
+  // quote-free internally, so they're safe to embed in the generated SVG's
+  // single-quoted XML attributes as-is (font-family='<value>').
   svgFonts: {
-    ui: '"Space Grotesk", system-ui, sans-serif',
-    data: '"JetBrains Mono", ui-monospace, monospace',
+    ui: FONT_UI,
+    data: FONT_DATA,
   },
   // Three hierarchies. Sizes in px; tracking in em.
-  display: { family: "'Space Grotesk', system-ui, sans-serif", weight: 700, tracking: "-0.01em", transform: "uppercase" },
-  ui: { family: "'Space Grotesk', system-ui, sans-serif", weight: 500, tracking: "0" },
-  label: { family: "'Space Grotesk', system-ui, sans-serif", weight: 700, tracking: "0.08em", transform: "uppercase" },
-  data: { family: "'JetBrains Mono', ui-monospace, monospace", weight: 500, tracking: "0" },
+  display: { family: FONT_UI, weight: 700, tracking: "-0.01em", transform: "uppercase" },
+  ui: { family: FONT_UI, weight: 500, tracking: "0" },
+  label: { family: FONT_UI, weight: 700, tracking: "0.08em", transform: "uppercase" },
+  data: { family: FONT_DATA, weight: 500, tracking: "0" },
   size: { xs: 11, sm: 12, base: 14, md: 16, lg: 20, xl: 28, xxl: 40 },
 }
 
