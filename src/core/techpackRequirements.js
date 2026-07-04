@@ -1,0 +1,129 @@
+// The shared "tech-pack reasoning core". Given a garment type plus whatever
+// data we already have (a seed from a name, a CSV, or a vision extraction),
+// this figures out what a real factory tech pack for THAT garment needs,
+// what's already known, what's obvious/standard (dumb to ask), and what's
+// still missing - so the chat only asks the questions that actually matter,
+// one at a time, with numbered options.
+//
+// Design note (computational model): analyzeRequirements() makes ONE DeepSeek
+// call up front to produce the whole field list with options. The client then
+// WALKS that list locally (pendingFields/applyAnswer/isComplete) instead of
+// hitting DeepSeek every turn - bounded, predictable, and cheap at runtime no
+// matter how long the conversation gets.
+
+import { deepseekChat, DeepSeekError } from "./deepseekClient.js"
+
+// A field's status:
+// - "known"   : value came from the seed (CSV/vision/earlier answer) - don't ask
+// - "assumed" : standard/obvious for this garment - pre-filled, don't ask
+// - "ask"     : genuinely needs the user - present as a question with options
+export const FIELD_STATUS = { KNOWN: "known", ASSUMED: "assumed", ASK: "ask" }
+
+/**
+ * One DeepSeek call: reason like a textile technician about what a tech pack
+ * for `garmentType` needs, fold in the `seed` we already have, and return the
+ * full field list. Throws DeepSeekError on an unusable response (no silent
+ * fallback - without requirements there's nothing to walk).
+ *
+ * @returns {{garmentType: string, fields: Array<{
+ *   key: string, label: string, category: "general"|"design",
+ *   status: "known"|"assumed"|"ask", value?: string,
+ *   options?: string[], why?: string }>}}
+ */
+export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES" }) {
+  const seedText = seed && Object.keys(seed).length > 0 ? JSON.stringify(seed) : "(sin datos previos)"
+  const instructions =
+    "Sos un tecnico textil experto armando la ficha tecnica de una prenda tipo '" + garmentType + "'. " +
+    "Pensa como ingeniero de produccion: que datos necesita SI o SI una fabrica para producir bien esta prenda. " +
+    "Razona en tres grupos:\n" +
+    "1) Lo que ya es ESTANDAR u OBVIO para este tipo de prenda (una fabrica ya lo sabe, seria tonto preguntarlo) -> status \"assumed\", con un value por defecto razonable.\n" +
+    "2) Lo que YA sabemos por los datos previos -> status \"known\", con ese value.\n" +
+    "3) Lo que realmente hay que PREGUNTAR porque define el producto y no se puede asumir -> status \"ask\".\n\n" +
+    "Datos previos que ya tenemos: " + seedText + ".\n" +
+    "Tecnicas de aplicacion validas (por si aplican): " + (tecs || []).join(", ") + ".\n\n" +
+    "Para cada campo 'ask', incluye 'options': entre 2 y 4 etiquetas CORTAS (2-4 palabras cada una) " +
+    "(el usuario podra elegir una numerada o escribir la suya). Para 'assumed'/'known' no hacen falta options.\n" +
+    "Enfocate en campos de construccion GENERAL de la prenda (tela, cuello, manga, cierre, bajo, forro, etc.), NO en " +
+    "disenos/estampados/bordados todavia - eso se define despues.\n\n" +
+    "IMPORTANTE - se conciso para que quepa la respuesta: devolve solo los 6 a 10 campos MAS decisivos (no todos los " +
+    "imaginables), 'why' de maximo 10 palabras, y usa la categoria \"general\" para todos los campos de construccion. " +
+    "El campo 'category' solo puede ser \"general\" o \"design\".\n\n" +
+    "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
+    '{"garmentType": "' + garmentType + '", "fields": [' +
+    '{"key": "identificadorEnIngles", "label": "Etiqueta en espanol", "category": "general", ' +
+    '"status": "ask", "value": "", "options": ["Opcion A", "Opcion B"], "why": "por que importa (breve)"}]}'
+
+  const raw = await deepseekChat({
+    messages: [{ role: "user", content: instructions }],
+    maxTokens: 3000,
+    temperature: 0.2,
+  })
+  const cleaned = raw.replace(/```json|```/g, "").trim()
+  let parsed
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch (e) {
+    throw new DeepSeekError("El asistente de IA no devolvio un analisis de requisitos valido.", { raw })
+  }
+  return normalizeRequirements(parsed, garmentType)
+}
+
+// Defensive shaping so the walker helpers can trust the structure regardless
+// of small model deviations (missing arrays, bad status strings, etc.).
+export function normalizeRequirements(parsed, garmentType) {
+  const validStatus = new Set([FIELD_STATUS.KNOWN, FIELD_STATUS.ASSUMED, FIELD_STATUS.ASK])
+  const rawFields = parsed && Array.isArray(parsed.fields) ? parsed.fields : []
+  const fields = rawFields
+    .filter((f) => f && typeof f.key === "string" && f.key.trim())
+    .map((f) => ({
+      key: f.key.trim(),
+      label: typeof f.label === "string" && f.label.trim() ? f.label.trim() : f.key.trim(),
+      category: f.category === "design" ? "design" : "general",
+      status: validStatus.has(f.status) ? f.status : FIELD_STATUS.ASK,
+      value: typeof f.value === "string" ? f.value : "",
+      options: Array.isArray(f.options) ? f.options.filter((o) => typeof o === "string" && o.trim()) : [],
+      why: typeof f.why === "string" ? f.why : "",
+    }))
+  return { garmentType: (parsed && parsed.garmentType) || garmentType, fields }
+}
+
+// ── Pure walker helpers (no DeepSeek). Delegated spec, see techpackRequirements.test.js ──
+
+// The next fields the user still needs to answer, in order. If `category` is
+// given, only that category ("general" | "design"); otherwise all categories.
+export function pendingFields(reqs, category) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  return fields.filter((f) => f.status === FIELD_STATUS.ASK && (category ? f.category === category : true))
+}
+
+// Returns a NEW reqs with field `key` set to `value` and marked "known".
+// If `key` isn't a known field, appends it as a custom known field (so a
+// free-typed answer to something the model didn't list is never lost).
+export function applyAnswer(reqs, key, value) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  let found = false
+  const next = fields.map((f) => {
+    if (f.key !== key) return f
+    found = true
+    return { ...f, status: FIELD_STATUS.KNOWN, value: value }
+  })
+  if (!found) {
+    next.push({ key, label: key, category: "general", status: FIELD_STATUS.KNOWN, value: value, options: [], why: "" })
+  }
+  return { ...reqs, fields: next }
+}
+
+// True when nothing in `category` (or overall) still needs asking.
+export function isComplete(reqs, category) {
+  return pendingFields(reqs, category).length === 0
+}
+
+// Bridges the reasoning core to what the rest of the app consumes: turns the
+// non-"ask" general fields (known + assumed) into the parts[] shape that
+// buildCustomGarment / the Piezas step already use.
+export function reqsToParts(reqs) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  return fields
+    .filter((f) => f.category === "general" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim())
+    .map((f) => ({ label: f.label, val: f.value }))
+}
