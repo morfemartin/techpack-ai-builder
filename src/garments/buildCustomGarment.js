@@ -27,8 +27,25 @@ export function buildCustomGarment(draft) {
     partLabels: { ES: partLabelsES },
     positions: { ES: positions },
     // No guides/callouts on purpose - see genericSilhouette.js.
-    designNotes: draft.designs || "",
+    designNotes: draft.notes || "",
   }
+}
+
+// Converts the chat's structured draft.designs (name/pos/tec/driveLink -
+// see GarmentChat.jsx's system prompt) into the partial shape App.jsx merges
+// onto newDesign() via Object.assign(newDesign(), mapped) - same pattern
+// csvImport.js's designs already use. Kept here as a pure, exported function
+// so this mapping is unit-testable without mounting App.jsx.
+export function mapChatDesignsToDesigns(draftDesigns, fallbackPosition) {
+  const list = Array.isArray(draftDesigns) ? draftDesigns : []
+  if (list.length === 0) return [{ pos: fallbackPosition }]
+  return list.map((dd) => ({
+    name: dd.name || "Nuevo Diseno",
+    pos: dd.pos || fallbackPosition,
+    posDetail: dd.posDetail || "",
+    tec: dd.tec || "Bordado 3D",
+    driveLink: dd.driveLink || "",
+  }))
 }
 
 function slugify(s) {
