@@ -32,8 +32,14 @@ function sleep(ms) {
 // (observed repeatedly in manual testing) - it clears up within a few
 // seconds. Worth a couple of automatic retries rather than surfacing a
 // scary error for what's usually just shared-capacity noise.
-function isRetryable(status, detail) {
-  return status === 503 || /ResourceExhausted/i.test(detail || "")
+//
+// A `fetch()` that throws outright (network drop, DNS hiccup, a brief
+// Vercel cold-start) is just as transient in practice - it has no
+// `status`/`detail` at all, so it's flagged via `networkError` instead and
+// retried the same way (observed live: a real "No se pudo contactar" that
+// turned out to be a one-off blip, not a real outage).
+function isRetryable(err) {
+  return !!err.networkError || err.status === 503 || /ResourceExhausted/i.test(err.detail || "")
 }
 
 async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
@@ -45,7 +51,9 @@ async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, chat_template_kwargs: { thinking } }),
     })
   } catch (e) {
-    throw new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
+    const err = new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
+    err.networkError = true
+    throw err
   }
   if (!res.ok) {
     let detail = ""
@@ -75,7 +83,7 @@ export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0
       return await callOnce({ messages, maxTokens, temperature, model, thinking })
     } catch (e) {
       lastErr = e
-      const retryable = e instanceof DeepSeekError && isRetryable(e.status, e.detail)
+      const retryable = e instanceof DeepSeekError && isRetryable(e)
       if (!retryable || attempt === RETRYABLE_MAX_ATTEMPTS) break
       await sleep(RETRYABLE_BASE_DELAY_MS * attempt)
     }
