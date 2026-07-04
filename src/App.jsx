@@ -3,7 +3,7 @@ import { uid } from "./core/idGen.js"
 import { T } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
 import { translateContent } from "./core/claudeApi.js"
-import { importGarmentCSV, readFileText, buildExampleCSV } from "./core/csvImport.js"
+import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns } from "./core/csvImport.js"
 import { DeepSeekError } from "./core/deepseekClient.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
@@ -143,6 +143,8 @@ export default function App() {
   const [svgPages, setSvgPages] = useState(null)
   const [csvImporting, setCsvImporting] = useState(false)
   const [csvError, setCsvError] = useState(null)
+  const [csvImages, setCsvImages] = useState([])
+  const [csvImageNote, setCsvImageNote] = useState(null)
   const tl = T.ES
 
   function selectGarment(id) {
@@ -188,18 +190,53 @@ export default function App() {
     r.readAsDataURL(f)
   }
 
+  // Reads one image file into the same shape ImageUploader.jsx produces
+  // (base64 without the data: prefix, natural dimensions via Image()), plus
+  // its fileName so DeepSeek's text-only extraction can reference it by name.
+  function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+      var issvg = file.type === "image/svg+xml"
+      var reader = new FileReader()
+      reader.onload = function (ev) {
+        var result = ev.target.result
+        var img = new Image()
+        img.onload = function () {
+          resolve({ fileName: file.name, imageData: result.split(",")[1], imageType: issvg ? "svg" : "png", imgNatW: img.naturalWidth, imgNatH: img.naturalHeight })
+        }
+        img.onerror = reject
+        img.src = result
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function handleCsvImages(e) {
+    var files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+    var read = await Promise.all(files.map(readImageFile))
+    setCsvImages((prev) => [...prev, ...read])
+    e.target.value = ""
+  }
+
   async function handleCsvUpload(e) {
     var f = e.target.files[0]
     if (!f) return
     setCsvImporting(true)
     setCsvError(null)
+    setCsvImageNote(null)
     try {
       var text = await readFileText(f)
-      var result = await importGarmentCSV(text, { garment, lang: "ES", tecs: tl.tecs })
+      var result = await importGarmentCSV(text, { garment, lang: "ES", tecs: tl.tecs, imageFileNames: csvImages.map((i) => i.fileName) })
       setParts(result.parts)
       if (result.designs.length > 0) {
-        setDesigns(result.designs.map((d) => Object.assign(newDesign(), d)))
+        var matched = matchImagesToDesigns(result.designs, csvImages)
+        setDesigns(matched.designs.map((d) => Object.assign(newDesign(), d)))
+        if (matched.unmatchedImages.length > 0) {
+          setCsvImageNote(matched.unmatchedImages.length + " imagen(es) no se pudieron emparejar automaticamente - agregalas a mano en el paso Disenos.")
+        }
       }
+      setCsvImages([])
     } catch (err) {
       setCsvError(err instanceof DeepSeekError ? err.message : "No se pudo leer o interpretar el CSV.")
     } finally {
@@ -375,6 +412,10 @@ export default function App() {
                 <button onClick={downloadCsvTemplate} style={secondaryBtnStyle}>
                   <Icon name="description" size={16} /> Ver ejemplo
                 </button>
+                <label style={secondaryBtnStyle}>
+                  <Icon name="add_photo_alternate" size={16} /> {csvImages.length > 0 ? csvImages.length + " foto(s)" : "Subir fotos (opcional)"}
+                  <input type="file" accept="image/png,image/jpeg,image/svg+xml" multiple onChange={handleCsvImages} style={{ display: "none" }} />
+                </label>
                 <label style={{ ...primaryBtnStyle(true), cursor: csvImporting ? "wait" : "pointer", opacity: csvImporting ? 0.6 : 1 }}>
                   <Icon name="upload_file" size={16} color={C.white.hex} /> {csvImporting ? "Analizando..." : "Subir CSV"}
                   <input type="file" accept=".csv,text/csv" onChange={handleCsvUpload} disabled={csvImporting} style={{ display: "none" }} />
@@ -384,6 +425,11 @@ export default function App() {
             {csvError && (
               <div style={{ marginTop: space(2), display: "flex", alignItems: "center", gap: space(2), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>
                 <Icon name="error" size={16} color={role.index.fill} /> {csvError}
+              </div>
+            )}
+            {csvImageNote && (
+              <div style={{ marginTop: space(2), display: "flex", alignItems: "center", gap: space(2), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.75 }}>
+                <Icon name="info" size={16} /> {csvImageNote}
               </div>
             )}
           </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { importGarmentCSV, buildExampleCSV } from "./csvImport.js"
+import { importGarmentCSV, buildExampleCSV, matchImagesToDesigns } from "./csvImport.js"
 import { capGarment } from "../garments/cap.js"
 
 vi.mock("./deepseekClient.js", () => ({
@@ -70,6 +70,60 @@ describe("csvImport", () => {
     const result = await importGarmentCSV("csv", { garment: capGarment, lang: "ES", tecs: [] })
     expect(result.parts).toHaveLength(capGarment.defaultParts.length)
     expect(result.designs).toEqual([])
+  })
+
+  it("asks for a Wilcom-style embroidery spec object with an exact-technique rule", async () => {
+    extractStructured.mockResolvedValue({ parts: [], designs: [] })
+    await importGarmentCSV("csv", { garment: capGarment, lang: "ES", tecs: ["Bordado 3D", "Sublimacion"] })
+    const call = extractStructured.mock.calls[0][0]
+    expect(call.instructions).toContain("stitches")
+    expect(call.instructions).toContain("stopSeq")
+    expect(call.instructions).toContain("DEBE ser exactamente uno de bordado")
+  })
+
+  it("only mentions uploaded image filenames in the prompt when imageFileNames is given", async () => {
+    extractStructured.mockResolvedValue({ parts: [], designs: [] })
+    await importGarmentCSV("csv", { garment: capGarment, lang: "ES", tecs: [], imageFileNames: ["logo_frontal.png"] })
+    const withImages = extractStructured.mock.calls[0][0]
+    expect(withImages.instructions).toContain("logo_frontal.png")
+    expect(withImages.instructions).toContain("imageHint")
+
+    vi.clearAllMocks()
+    extractStructured.mockResolvedValue({ parts: [], designs: [] })
+    await importGarmentCSV("csv", { garment: capGarment, lang: "ES", tecs: [] })
+    const withoutImages = extractStructured.mock.calls[0][0]
+    expect(withoutImages.instructions).not.toContain("imageHint")
+  })
+})
+
+describe("matchImagesToDesigns", () => {
+  const img = (fileName) => ({ fileName, imageData: "data-" + fileName, imageType: "png", imgNatW: 100, imgNatH: 100 })
+
+  it("matches by imageHint case-insensitively", () => {
+    const designs = [{ name: "Botones", imageHint: "Boton_Dorado.PNG" }]
+    const { designs: result, unmatchedImages } = matchImagesToDesigns(designs, [img("boton_dorado.png")])
+    expect(result[0].imageData).toBe("data-boton_dorado.png")
+    expect(unmatchedImages).toEqual([])
+  })
+
+  it("falls back to pairing leftover images and imageless designs by order", () => {
+    const designs = [{ name: "Logo Frontal" }, { name: "Logo Trasero" }]
+    const { designs: result, unmatchedImages } = matchImagesToDesigns(designs, [img("a.png"), img("b.png")])
+    expect(result[0].imageData).toBe("data-a.png")
+    expect(result[1].imageData).toBe("data-b.png")
+    expect(unmatchedImages).toEqual([])
+  })
+
+  it("reports leftover images that couldn't be matched instead of dropping them", () => {
+    const designs = [{ name: "Logo Frontal" }]
+    const { unmatchedImages } = matchImagesToDesigns(designs, [img("a.png"), img("b.png")])
+    expect(unmatchedImages).toEqual([img("b.png")])
+  })
+
+  it("does not throw when there are images but no designs", () => {
+    const { designs: result, unmatchedImages } = matchImagesToDesigns([], [img("a.png")])
+    expect(result).toEqual([])
+    expect(unmatchedImages).toEqual([img("a.png")])
   })
 })
 
