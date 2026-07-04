@@ -59,9 +59,30 @@ describe("deepseekClient", () => {
     vi.useRealTimers()
   })
 
-  it("deepseekChat throws DeepSeekError when the network request itself fails", async () => {
+  it("deepseekChat retries a one-off network failure (fetch() throwing outright), then succeeds", async () => {
+    vi.useFakeTimers()
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "ok" } }] }) })
+
+    const promise = deepseekChat({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("ok")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it("deepseekChat throws DeepSeekError after exhausting retries on a persistent network failure", async () => {
+    vi.useFakeTimers()
     global.fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
-    await expect(deepseekChat({ messages: [] })).rejects.toBeInstanceOf(DeepSeekError)
+    const promise = deepseekChat({ messages: [] })
+    const assertion = expect(promise).rejects.toBeInstanceOf(DeepSeekError)
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(global.fetch).toHaveBeenCalledTimes(3)
+    vi.useRealTimers()
   })
 
   it("deepseekChat throws DeepSeekError when the response has no content", async () => {
@@ -76,9 +97,13 @@ describe("deepseekClient", () => {
   })
 
   it("deepseekJSON returns the fallback instead of throwing on failure", async () => {
+    vi.useFakeTimers()
     global.fetch = vi.fn().mockRejectedValue(new Error("boom"))
-    const result = await deepseekJSON({ messages: [] }, { safe: true })
+    const promise = deepseekJSON({ messages: [] }, { safe: true })
+    await vi.runAllTimersAsync()
+    const result = await promise
     expect(result).toEqual({ safe: true })
+    vi.useRealTimers()
   })
 
   it("extractStructured returns the parsed object on success", async () => {
