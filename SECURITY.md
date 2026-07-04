@@ -28,8 +28,8 @@ intake and translation features. The key is treated as follows:
 - `.gitignore` covers `.env`, `.env.local`, `*.local`, and `.vercel`.
 - CI runs [gitleaks](https://github.com/gitleaks/gitleaks) on every push/PR to
   catch accidentally committed secrets.
-- The proxy caps `max_tokens` and message count so a discovered endpoint cannot
-  be used to run up unbounded charges on the account.
+- The proxy caps `max_tokens` per request so a discovered endpoint cannot be
+  used to run up unbounded charges on a single call.
 - Dependabot watches npm and GitHub Actions dependencies for known vulnerabilities.
 - GitHub secret scanning + push protection are enabled on the repository.
 
@@ -37,6 +37,12 @@ intake and translation features. The key is treated as follows:
 
 - Rate limiting / abuse protection on the proxy (KV-based limiter or Vercel's
   built-in protection) before any public, unauthenticated deployment.
+- **Per-request message-count cap**: temporarily removed during development
+  (the multi-phase systemic-thinking chat resends the whole conversation each
+  turn, and long real chats were hitting the old 40-message limit mid-flow).
+  Restore it before the public launch — ideally paired with client-side history
+  trimming/summarization so we cap abuse without truncating legitimate long
+  conversations. See the TODO in `api/deepseek.js`.
 - **Known accepted risk:** `vite`/`esbuild`/`vitest` dev-tooling vulnerabilities
   (GHSA-67mh-4wv8-2f99 and related, including a GitHub-flagged *critical* in
   `vitest` about its optional UI server allowing arbitrary file read/execute)

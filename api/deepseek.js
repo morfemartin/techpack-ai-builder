@@ -6,8 +6,8 @@
 //
 // Security measures baked in:
 // - POST only (405 otherwise)
-// - hard caps on max_tokens and message count (so anyone who discovers the
-//   endpoint cannot drain the NVIDIA account with huge or unlimited requests)
+// - hard cap on max_tokens (so anyone who discovers the endpoint cannot drain
+//   the NVIDIA account with huge requests)
 // - optional CORS origin allowlist via ALLOWED_ORIGIN
 // - the key is never logged, never echoed, and upstream auth errors are not
 //   leaked verbatim to the client
@@ -15,11 +15,17 @@
 // Rate limiting is intentionally NOT implemented here yet — see SECURITY.md
 // "Hardening backlog". For production put this behind Vercel's built-in
 // protection or a KV-based limiter.
+//
+// TODO before public launch (see SECURITY.md "Hardening backlog"): the
+// message-count cap (MAX_MESSAGES) was removed on purpose during development
+// - GarmentChat.jsx resends the full conversation every turn, and long
+// real conversations were hitting a 40-message cap mid-chat. Restore a cap
+// (ideally paired with client-side history trimming/summarization instead of
+// resending everything verbatim) before the public launch.
 
 const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1"
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v3.1"
 const MAX_TOKENS_CAP = 4000
-const MAX_MESSAGES = 40
 
 export default async function handler(req, res) {
   const allowed = process.env.ALLOWED_ORIGIN
@@ -43,7 +49,6 @@ export default async function handler(req, res) {
 
   const messages = Array.isArray(body.messages) ? body.messages : null
   if (!messages || messages.length === 0) return res.status(400).json({ error: "messages_required" })
-  if (messages.length > MAX_MESSAGES) return res.status(400).json({ error: "too_many_messages" })
 
   const payload = {
     model: typeof body.model === "string" ? body.model : NVIDIA_MODEL,
