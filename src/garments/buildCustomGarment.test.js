@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildCustomGarment } from "./buildCustomGarment.js"
+import { buildCustomGarment, mapChatDesignsToDesigns } from "./buildCustomGarment.js"
 
 describe("buildCustomGarment", () => {
   it("builds the same shape a registered garment has, minus guides/callouts", () => {
@@ -11,7 +11,8 @@ describe("buildCustomGarment", () => {
         { label: "Cola de pato", val: "Si" },
       ],
       positions: ["Pecho izquierdo", "Manga"],
-      designs: "Un bordado en el pecho, PANTONE 286 C",
+      designs: [{ name: "Logo", pos: "Pecho izquierdo", tec: "Bordado 3D", driveLink: "" }],
+      notes: "Un bordado en el pecho, PANTONE 286 C",
     }
     const g = buildCustomGarment(draft)
 
@@ -42,5 +43,26 @@ describe("buildCustomGarment", () => {
     const g = buildCustomGarment({ label: "Test" })
     expect(g.defaultParts).toEqual([])
     expect(g.partLabels.ES).toEqual({})
+  })
+
+  it("degrades gracefully on the old draft shape (designs as a string, no notes)", () => {
+    const g = buildCustomGarment({ label: "Test", parts: [], positions: [], designs: "resumen viejo" })
+    expect(g.designNotes).toBe("")
+  })
+})
+
+describe("mapChatDesignsToDesigns", () => {
+  it("falls back to one blank design at the fallback position when the chat drafted none", () => {
+    expect(mapChatDesignsToDesigns([], "Toda la prenda")).toEqual([{ pos: "Toda la prenda" }])
+    expect(mapChatDesignsToDesigns(undefined, "Toda la prenda")).toEqual([{ pos: "Toda la prenda" }])
+  })
+
+  it("maps drafted designs to the newDesign()-mergeable shape with sane defaults", () => {
+    const result = mapChatDesignsToDesigns(
+      [{ name: "Botones", pos: "Frente", tec: "Bordado 3D", driveLink: "drive.google.com/xyz" }, { name: "Logo" }],
+      "Toda la prenda"
+    )
+    expect(result[0]).toEqual({ name: "Botones", pos: "Frente", posDetail: "", tec: "Bordado 3D", driveLink: "drive.google.com/xyz" })
+    expect(result[1]).toEqual({ name: "Logo", pos: "Toda la prenda", posDetail: "", tec: "Bordado 3D", driveLink: "" })
   })
 })

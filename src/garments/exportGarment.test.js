@@ -8,7 +8,7 @@ describe("generateGarmentFileText", () => {
     label: "Polo Clasico",
     parts: [{ label: "Botones", val: "3, nacar" }],
     positions: ["Pecho izquierdo"],
-    designs: "Bordado en el pecho",
+    notes: "Bordado en el pecho",
   })
 
   it("produces valid, importable JS defining a garment matching cap.js's shape", async () => {

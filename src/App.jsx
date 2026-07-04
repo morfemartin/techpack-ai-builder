@@ -7,7 +7,7 @@ import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns }
 import { DeepSeekError } from "./core/deepseekClient.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
-import { buildCustomGarment } from "./garments/buildCustomGarment.js"
+import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
 import { downloadGarmentFile } from "./garments/exportGarment.js"
 import { Inp, Sel, Fld } from "./components/FormControls.jsx"
 import { ColorsEditor } from "./components/ColorsEditor.jsx"
@@ -167,7 +167,8 @@ export default function App() {
     const g = buildCustomGarment(draft)
     setCustomGarment(g)
     setParts(g.defaultParts.map((p) => Object.assign({}, p)))
-    setDesigns([Object.assign(newDesign(), { pos: g.positions.ES[0] })])
+    const mapped = mapChatDesignsToDesigns(draft.designs, g.positions.ES[0])
+    setDesigns(mapped.map((d) => Object.assign(newDesign(), d)))
   }
   function toggleLang(c) {
     setLangs((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]))
@@ -392,7 +393,7 @@ export default function App() {
     }
 
     if (step === 3 && garmentId === "custom") {
-      return <GarmentChat onComplete={handleGarmentChatComplete} />
+      return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} />
     }
 
     if (step === 3) {
