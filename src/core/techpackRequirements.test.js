@@ -13,7 +13,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { analyzeRequirements } from "./techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns } from "./techpackRequirements.js"
 
 describe("normalizeRequirements", () => {
   it("drops fields with no valid key and applies defaults", () => {
@@ -183,5 +183,134 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(seen[0].lastLabel).toBe("Tela")
     expect(result.garmentType).toBe("Camisa")
     expect(result.fields[0].label).toBe("Tela")
+  })
+})
+
+describe("mergeDesignFields", () => {
+  it("appends designFields to reqs.fields without mutating original reqs", () => {
+    const reqs = { garmentType: "Camisa", fields: [{ key: "tela", label: "Tela", category: "general", status: "known", value: "Algodon", options: [], why: "" }] }
+    const designFields = [{ key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "ask", value: "", options: ["Logo A", "Logo B"], why: "", designSlot: "logo_pecho", designField: "name" }]
+    const merged = mergeDesignFields(reqs, designFields)
+    expect(merged.fields).toHaveLength(2)
+    expect(merged.fields[1]).toEqual(designFields[0])
+    expect(reqs.fields).toHaveLength(1)
+  })
+
+  it("handles null/undefined reqs by treating as empty fields array", () => {
+    const designFields = [{ key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "ask", value: "", options: [], why: "", designSlot: "logo_pecho", designField: "name" }]
+    const merged = mergeDesignFields(null, designFields)
+    expect(merged.fields).toEqual(designFields)
+    expect(merged.garmentType).toBeUndefined()
+  })
+})
+
+describe("reqsToDesigns", () => {
+  it("groups fields by designSlot into correct shape", () => {
+    const reqs = {
+      fields: [
+        { key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "known", value: "Logo Pecho", options: [], why: "", designSlot: "logo_pecho", designField: "name" },
+        { key: "logo_pecho_posicion", label: "Posicion", category: "design", status: "known", value: "Pecho izquierdo", options: [], why: "", designSlot: "logo_pecho", designField: "position" },
+        { key: "logo_pecho_tecnica", label: "Tecnica", category: "design", status: "known", value: "Bordado 3D", options: [], why: "", designSlot: "logo_pecho", designField: "technique" },
+        { key: "logo_pecho_drive", label: "Drive", category: "design", status: "known", value: "https://drive.com/logo", options: [], why: "", designSlot: "logo_pecho", designField: "driveLink" },
+        { key: "logo_pecho_detalle", label: "Tamano", category: "design", status: "known", value: "5cm", options: [], why: "", designSlot: "logo_pecho", designField: "detail" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs).toHaveLength(1)
+    expect(designs[0]).toEqual({
+      name: "Logo Pecho",
+      pos: "Pecho izquierdo",
+      tec: "Bordado 3D",
+      driveLink: "https://drive.com/logo",
+      posDetail: "5cm",
+      notes: "Tamano: 5cm",
+    })
+  })
+
+  it("falls back to humanized designSlot name when no name field exists", () => {
+    const reqs = {
+      fields: [
+        { key: "botones_cantidad", label: "Cantidad", category: "design", status: "known", value: "4", options: [], why: "", designSlot: "botones_personalizados", designField: "detail" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs[0].name).toBe("Botones Personalizados")
+  })
+
+  it("excludes ask status fields and empty-value fields", () => {
+    const reqs = {
+      fields: [
+        { key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "ask", value: "", options: [], why: "", designSlot: "logo_pecho", designField: "name" },
+        { key: "logo_pecho_posicion", label: "Posicion", category: "design", status: "known", value: "", options: [], why: "", designSlot: "logo_pecho", designField: "position" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs).toHaveLength(0)
+  })
+
+  it("joins multiple detail fields into notes correctly", () => {
+    const reqs = {
+      fields: [
+        { key: "botones_cantidad", label: "Cantidad", category: "design", status: "known", value: "4", options: [], why: "", designSlot: "botones", designField: "detail" },
+        { key: "botones_material", label: "Material", category: "design", status: "known", value: "Nacar", options: [], why: "", designSlot: "botones", designField: "detail" },
+        { key: "botones_nombre", label: "Nombre", category: "design", status: "known", value: "Botones", options: [], why: "", designSlot: "botones", designField: "name" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs[0].notes).toBe("Cantidad: 4, Material: Nacar")
+    expect(designs[0].posDetail).toBe("4")
+  })
+
+  it("ignores fields with missing/unrecognized designSlot or designField without throwing", () => {
+    const reqs = {
+      fields: [
+        { key: "sin_slot", label: "Sin Slot", category: "design", status: "known", value: "x", options: [], why: "", designSlot: "", designField: "name" },
+        { key: "campo_raro", label: "Raro", category: "design", status: "known", value: "y", options: [], why: "", designSlot: "raro", designField: "color" },
+        { key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "known", value: "Logo", options: [], why: "", designSlot: "logo_pecho", designField: "name" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs).toHaveLength(1)
+    expect(designs[0].name).toBe("Logo")
+  })
+})
+
+describe("analyzeDesignExpression", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("calls deepseekChat when no onProgress is given", async () => {
+    deepseekChat.mockResolvedValue(JSON.stringify({ garmentType: "Camisa", fields: [] }))
+    const result = await analyzeDesignExpression({ garmentType: "Camisa", generalFields: [], tecs: ["Bordado 3D"] })
+    expect(deepseekChat).toHaveBeenCalledOnce()
+    expect(deepseekChatStream).not.toHaveBeenCalled()
+    expect(result).toHaveProperty("garmentType", "Camisa")
+    expect(result).toHaveProperty("fields")
+  })
+
+  it("calls deepseekChatStream when onProgress is given", async () => {
+    deepseekChatStream.mockResolvedValue(JSON.stringify({ garmentType: "Camisa", fields: [] }))
+    const onProgress = vi.fn()
+    const result = await analyzeDesignExpression({ garmentType: "Camisa", generalFields: [], tecs: ["Bordado 3D"], onProgress })
+    expect(deepseekChatStream).toHaveBeenCalledOnce()
+    expect(deepseekChat).not.toHaveBeenCalled()
+    expect(result).toHaveProperty("garmentType", "Camisa")
+  })
+
+  it("throws DeepSeekError on invalid JSON response", async () => {
+    deepseekChat.mockResolvedValue("esto no es json")
+    await expect(analyzeDesignExpression({ garmentType: "Camisa", generalFields: [], tecs: [] })).rejects.toThrow("El asistente de IA no devolvio un analisis de disenos valido.")
+  })
+
+  it("returns normalized result with fields array from parsed response", async () => {
+    const mockFields = [
+      { key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "ask", value: "", options: ["Logo A"], why: "importante", designSlot: "logo_pecho", designField: "name" },
+    ]
+    deepseekChat.mockResolvedValue(JSON.stringify({ garmentType: "Camisa", fields: mockFields }))
+    const result = await analyzeDesignExpression({ garmentType: "Camisa", generalFields: [{ label: "Tela", val: "Algodon" }], tecs: ["Bordado 3D"] })
+    expect(result.fields).toHaveLength(1)
+    expect(result.fields[0].key).toBe("logo_pecho_nombre")
+    expect(result.fields[0].category).toBe("design")
   })
 })
