@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { importGarmentCSV, buildExampleCSV, matchImagesToDesigns } from "./csvImport.js"
+import { importGarmentCSV, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./csvImport.js"
 import { capGarment } from "../garments/cap.js"
 
 vi.mock("./deepseekClient.js", () => ({
@@ -134,5 +134,33 @@ describe("buildExampleCSV", () => {
     expect(lines[0]).toBe("tipo,etiqueta,valor,posicion,tecnica,pantone,hex,ancho_mm,alto_mm")
     expect(lines.some((l) => l.startsWith("pieza,Estilo,"))).toBe(true)
     expect(lines.some((l) => l.startsWith("diseno,"))).toBe(true)
+  })
+})
+
+describe("importGarmentCSV rawParts", () => {
+  it("exposes the pre-reconciliation {label, val} pairs alongside the merged parts", async () => {
+    extractStructured.mockResolvedValue({
+      parts: [{ label: "Boton", val: "Boton Dorado", on: true }],
+      designs: [],
+    })
+    const result = await importGarmentCSV("csv", { garment: capGarment, lang: "ES", tecs: [] })
+    expect(result.rawParts).toEqual([{ label: "Boton", val: "Boton Dorado", on: true }])
+  })
+})
+
+describe("csvSeedToRequirementsSeed", () => {
+  it("builds a {label: val} seed from rawParts", () => {
+    const seed = csvSeedToRequirementsSeed({ rawParts: [{ label: "Boton", val: "Dorado" }, { label: "Tela Copa", val: "100% Poliester" }] })
+    expect(seed).toEqual({ Boton: "Dorado", "Tela Copa": "100% Poliester" })
+  })
+
+  it("skips entries with a missing label or value", () => {
+    const seed = csvSeedToRequirementsSeed({ rawParts: [{ label: "", val: "x" }, { label: "Boton", val: "" }, { label: "Cierre", val: "Snapback" }] })
+    expect(seed).toEqual({ Cierre: "Snapback" })
+  })
+
+  it("returns an empty object when rawParts is missing", () => {
+    expect(csvSeedToRequirementsSeed({})).toEqual({})
+    expect(csvSeedToRequirementsSeed(null)).toEqual({})
   })
 })
