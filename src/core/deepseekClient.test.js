@@ -32,6 +32,30 @@ function mockStreamResponse(chunks, { ok = true, status = 200, errorBody } = {})
   }
 }
 
+// Like mockStreamResponse, but once `chunks` runs out, the next read() call
+// throws instead of signaling done:true - mirrors a connection that's cut
+// off mid-stream (e.g. a serverless function's execution timeout) rather
+// than one that closes cleanly.
+function mockStreamResponseThatDrops(chunks) {
+  const encoder = new TextEncoder()
+  let i = 0
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({}),
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (i >= chunks.length) throw new TypeError("network error")
+          const value = encoder.encode(chunks[i])
+          i++
+          return { done: false, value }
+        },
+      }),
+    },
+  }
+}
+
 function sseEvent(content, finishReason) {
   const delta = finishReason ? {} : { content, role: "assistant" }
   const choice = finishReason ? { delta, finish_reason: finishReason } : { delta }
@@ -145,6 +169,27 @@ describe("deepseekClient", () => {
     mockFetchOnce({ choices: [{ message: { content: "esto no es json" } }] })
     await expect(extractStructured({ instructions: "x", content: "y" })).rejects.toBeInstanceOf(DeepSeekError)
   })
+
+  it("deepseekChat wraps a res.json() parse failure as a retryable DeepSeekError instead of a raw exception", async () => {
+    vi.useFakeTimers()
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError("Unexpected end of JSON input")
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "ok" } }] }) })
+
+    const promise = deepseekChat({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("ok")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
 })
 
 describe("deepseekChatStream", () => {
@@ -191,6 +236,12 @@ describe("deepseekChatStream", () => {
     global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("truncado a la mitad"), sseEvent(null, "length")]))
     const result = await deepseekChatStream({ messages: [] })
     expect(result).toBe("truncado a la mitad")
+  })
+
+  it("salvages accumulated content when reader.read() throws mid-stream instead of crashing the call", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponseThatDrops([sseEvent("parcial")]))
+    const result = await deepseekChatStream({ messages: [] })
+    expect(result).toBe("parcial")
   })
 
   it("skips a malformed SSE event without breaking the rest of the stream", async () => {

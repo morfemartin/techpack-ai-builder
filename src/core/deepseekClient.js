@@ -66,7 +66,18 @@ async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
     err.detail = detail
     throw err
   }
-  const data = await res.json()
+  let data
+  try {
+    data = await res.json()
+  } catch (e) {
+    // A 200 with a body that never fully arrives or isn't valid JSON (e.g. a
+    // connection cut short by a serverless timeout) throws a raw parse error
+    // here, not a DeepSeekError - wrap it so callers get a friendly message
+    // instead of a generic "algo salio mal" further up the chain.
+    const err = new DeepSeekError("El asistente de IA no devolvio una respuesta valida.", e)
+    err.networkError = true // same transient-blip treatment as a fetch() that throws outright - worth a retry
+    throw err
+  }
   const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
   if (!content) throw new DeepSeekError("El asistente de IA devolvio una respuesta vacia.", data)
   return content
@@ -160,7 +171,16 @@ export async function deepseekChatStream({ messages, maxTokens = 1000, temperatu
   let finishReason = null
 
   while (!finished) {
-    const { done: readerDone, value } = await reader.read()
+    let readerDone, value
+    try {
+      ;({ done: readerDone, value } = await reader.read())
+    } catch {
+      // Connection dropped mid-stream (e.g. a serverless function's execution
+      // timeout killing a long completion) - treat exactly like a stream that
+      // closed without [DONE]: fall through to the salvage logic below with
+      // whatever content already arrived, instead of crashing the whole call.
+      break
+    }
     if (readerDone) break
     buffer += decoder.decode(value, { stream: true })
     const parts = buffer.split("\n\n")
