@@ -132,6 +132,7 @@ export function normalizeRequirements(parsed, garmentType) {
         options: Array.isArray(f.options) ? f.options.filter((o) => typeof o === "string" && o.trim()) : [],
         why: typeof f.why === "string" ? f.why : "",
       }
+      if (f.optional === true) base.optional = true
       // designSlot/designField only ever come from analyzeDesignExpression()'s
       // "design" category fields - added conditionally so analyzeRequirements()'s
       // plain general fields keep their exact original shape (no stray keys).
@@ -166,6 +167,17 @@ export function applyAnswer(reqs, key, value) {
     next.push({ key, label: key, category: "general", status: FIELD_STATUS.KNOWN, value: value, options: [], why: "" })
   }
   return { ...reqs, fields: next }
+}
+
+export function skipField(reqs, key) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  return {
+    ...reqs,
+    fields: fields.map((f) => {
+      if (!f || f.key !== key) return f
+      return { ...f, status: FIELD_STATUS.ASSUMED, value: "" }
+    }),
+  }
 }
 
 // True when nothing in `category` (or overall) still needs asking.
@@ -212,6 +224,9 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "El 'key' de cada campo debe ser globalmente unico, usando el designSlot como prefijo (ej: 'botones_cantidad', 'logo_pecho_tecnica').\n" +
     "Cada campo sigue la misma forma de siempre: key, label, category (SIEMPRE 'design' para todo lo que emita esta funcion), status, value, options, why.\n" +
     "Para campos 'ask', inclui 'options' con 2 a 4 etiquetas CORTAS.\n\n" +
+    "Sub-preguntas condicionales: si el elemento implica detalles tecnicos que cambian produccion, agrega campos 'detail' especificos. " +
+    "Ejemplos: capucha de dos caras -> archivo dividido, union y margen de seguridad; cierre personalizado -> troquel vs archivo existente; diseno diferente frente/espalda -> archivo por lado. " +
+    "Cuando una sub-pregunta sea util pero no obligatoria, marca optional:true (boolean). Si es necesaria para fabricar bien, optional:false u omitido.\n\n" +
     "IMPORTANTE - se conciso: una prenda tipica tiene 1 a 4 elementos de diseno reales que merecen su propia pagina. " +
     "No inventes elementos que no tengan sentido para esta prenda especifica y los campos generales ya definidos. " +
     "Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +

@@ -342,6 +342,36 @@ export default function App() {
     return tx
   }
 
+  function svgSafeText(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/'/g, "&apos;")
+  }
+
+  function plannedPageName(page, i) {
+    var raw = (page && (page.id || page.title)) || "page-" + (i + 1)
+    return String(raw).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "page_" + (i + 1)
+  }
+
+  function placeholderSvg(page, i, total) {
+    var W = 1200
+    var H = 900
+    var title = svgSafeText((page && page.title) || "Pagina " + (i + 1))
+    var label = "Desarrollando pagina " + (i + 1) + " de " + total
+    return (
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>" +
+      "<rect width='" + W + "' height='" + H + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1.5'/>" +
+      "<rect x='80' y='80' width='1040' height='740' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
+      "<rect x='80' y='80' width='8' height='740' fill='" + role.highlight.fill + "'/>" +
+      "<text x='120' y='160' font-family='" + type.svgFonts.ui + "' font-size='32' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
+      "<text x='120' y='214' font-family='" + type.svgFonts.data + "' font-size='18' fill='" + role.priority.fill + "'>" + label + "</text>" +
+      "<text x='120' y='264' font-family='" + type.svgFonts.ui + "' font-size='16' fill='" + C.ink.hex + "'>La IA esta asignando bloques, pesos y notas tecnicas.</text>" +
+      "</svg>"
+    )
+  }
+
   function fallbackPageLayout(page) {
     return {
       ...page,
@@ -361,7 +391,10 @@ export default function App() {
     setDocumentPlanStatus("Estructurando el documento...")
     try {
       var outline = await planDocumentOutline({ garmentType, parts, designs, lang })
+      var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, outline.pages.length) }))
+      setSvgPages(placeholders)
       var plannedPages = []
+      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment }
       for (var i = 0; i < outline.pages.length; i++) {
         var page = outline.pages[i]
         setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
@@ -379,8 +412,10 @@ export default function App() {
         } catch {
           plannedPages.push(fallbackPageLayout(page))
         }
+        var rendered = buildPlannedPages({ pages: plannedPages }, ctx)
+        setSvgPages(outline.pages.map((p, idx) => (idx < rendered.length ? rendered[idx] : placeholders[idx])))
       }
-      return buildPlannedPages({ pages: plannedPages }, { lang, hdr, parts, designs, logo, txData: tx, garment })
+      return buildPlannedPages({ pages: plannedPages }, ctx)
     } finally {
       setDocumentPlanning(false)
       setDocumentPlanStatus("")

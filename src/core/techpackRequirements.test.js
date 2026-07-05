@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, pendingFields, applyAnswer, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, pendingFields, applyAnswer, skipField, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -52,6 +52,12 @@ describe("normalizeRequirements", () => {
     expect(result.fields[0].status).toBe("ask")
     expect(result.fields[0].value).toBe("")
   })
+
+  it("preserves optional only when it is the boolean true", () => {
+    const result = normalizeRequirements({ fields: [{ key: "margen", optional: true }, { key: "archivo", optional: "true" }] }, "x")
+    expect(result.fields[0].optional).toBe(true)
+    expect(result.fields[1].optional).toBeUndefined()
+  })
 })
 
 describe("pendingFields", () => {
@@ -94,6 +100,28 @@ describe("applyAnswer", () => {
     expect(updated.fields).toHaveLength(2)
     const added = updated.fields.find((f) => f.key === "largo")
     expect(added).toEqual({ key: "largo", label: "largo", category: "general", status: "known", value: "Tobillero", options: [], why: "" })
+  })
+})
+
+describe("skipField", () => {
+  const reqs = {
+    garmentType: "campera",
+    fields: [
+      { key: "archivo_cierre", status: "ask", value: "", options: [], why: "", label: "Archivo cierre", category: "design", optional: true },
+      { key: "otro", status: "ask", value: "", options: [], why: "", label: "Otro", category: "design" },
+    ],
+  }
+
+  it("removes a field from the ask queue without assigning a value", () => {
+    const skipped = skipField(reqs, "archivo_cierre")
+    expect(skipped.fields[0].status).toBe("assumed")
+    expect(skipped.fields[0].value).toBe("")
+    expect(pendingFields(skipped, "design").map((f) => f.key)).toEqual(["otro"])
+  })
+
+  it("does not mutate the input", () => {
+    skipField(reqs, "archivo_cierre")
+    expect(reqs.fields[0].status).toBe("ask")
   })
 })
 
