@@ -102,20 +102,30 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
 
 // Defensive shaping so the walker helpers can trust the structure regardless
 // of small model deviations (missing arrays, bad status strings, etc.).
+const DESIGN_FIELD_KINDS = new Set(["name", "position", "technique", "driveLink", "detail"])
+
 export function normalizeRequirements(parsed, garmentType) {
   const validStatus = new Set([FIELD_STATUS.KNOWN, FIELD_STATUS.ASSUMED, FIELD_STATUS.ASK])
   const rawFields = parsed && Array.isArray(parsed.fields) ? parsed.fields : []
   const fields = rawFields
     .filter((f) => f && typeof f.key === "string" && f.key.trim())
-    .map((f) => ({
-      key: f.key.trim(),
-      label: typeof f.label === "string" && f.label.trim() ? f.label.trim() : f.key.trim(),
-      category: f.category === "design" ? "design" : "general",
-      status: validStatus.has(f.status) ? f.status : FIELD_STATUS.ASK,
-      value: typeof f.value === "string" ? f.value : "",
-      options: Array.isArray(f.options) ? f.options.filter((o) => typeof o === "string" && o.trim()) : [],
-      why: typeof f.why === "string" ? f.why : "",
-    }))
+    .map((f) => {
+      const base = {
+        key: f.key.trim(),
+        label: typeof f.label === "string" && f.label.trim() ? f.label.trim() : f.key.trim(),
+        category: f.category === "design" ? "design" : "general",
+        status: validStatus.has(f.status) ? f.status : FIELD_STATUS.ASK,
+        value: typeof f.value === "string" ? f.value : "",
+        options: Array.isArray(f.options) ? f.options.filter((o) => typeof o === "string" && o.trim()) : [],
+        why: typeof f.why === "string" ? f.why : "",
+      }
+      // designSlot/designField only ever come from analyzeDesignExpression()'s
+      // "design" category fields - added conditionally so analyzeRequirements()'s
+      // plain general fields keep their exact original shape (no stray keys).
+      if (typeof f.designSlot === "string" && f.designSlot.trim()) base.designSlot = f.designSlot.trim()
+      if (DESIGN_FIELD_KINDS.has(f.designField)) base.designField = f.designField
+      return base
+    })
   return { garmentType: (parsed && parsed.garmentType) || garmentType, fields }
 }
 
@@ -158,4 +168,122 @@ export function reqsToParts(reqs) {
   return fields
     .filter((f) => f.category === "general" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim())
     .map((f) => ({ label: f.label, val: f.value }))
+}
+
+/**
+ * Second DeepSeek call in the design-level pass (F3.2): given the garment
+ * type plus the general construction answers already collected, reason like
+ * a technical designer about which DISCRETE elements (embroidered logo,
+ * printed graphic, woven/printed label, personalized hardware, etc.) need
+ * their own dedicated design page - each as a group of 2-4 related fields
+ * sharing a `designSlot` id, tagged with `designField` ("name"/"position"/
+ * "technique"/"driveLink"/"detail") so reqsToDesigns() below can reassemble
+ * them into real design objects. Reuses normalizeRequirements() - same field
+ * shape as analyzeRequirements(), just with the two extra design-only keys.
+ */
+export async function analyzeDesignExpression({ garmentType, generalFields, tecs, lang = "ES", onProgress }) {
+  const generalText = generalFields && generalFields.length > 0 ? JSON.stringify(generalFields) : "(sin datos de construccion)"
+  const instructions =
+    "Sos un disenador tecnico textil experto definiendo las paginas de diseno de una ficha tecnica para una prenda tipo '" + garmentType + "'. " +
+    "Ya tenemos definidos los campos de construccion general (tela, cuello, manga, etc.): " + generalText + ". " +
+    "Ahora pensa SOLO en elementos DISCRETOS que necesitan su propia pagina de diseno en la ficha tecnica: " +
+    "cosas con su propio arte/referencia, un link de Drive, o una especificacion de bordado/estampado/parche/etiqueta/herraje personalizado. " +
+    "NO preguntes de nuevo por atributos de construccion planos (esos ya estan).\n\n" +
+    "Para cada elemento de diseno, pensalo como un GRUPO de 2 a 4 campos relacionados que juntos describen ESE elemento. " +
+    "Todos los campos de un mismo grupo comparten un mismo 'designSlot': un identificador corto, url-safe, en ingles y lowercase (ej: 'logo_pecho', 'botones', 'etiqueta_interior').\n" +
+    "Cada campo del grupo debe incluir 'designField', que es uno de exactamente: 'name' (nombre humano del elemento, ej: 'Logo bordado pecho'), " +
+    "'position' (donde va en la prenda), 'technique' (tecnica de aplicacion, DEBE ser una de esta lista exacta si aplica: " + (tecs || []).join(", ") + "), " +
+    "'driveLink' (URL de Drive si el usuario menciona una - normalmente solo si es plausible que exista, la mayoria de elementos no necesitan este campo), " +
+    "o 'detail' (cualquier otro atributo relevante para ese elemento especifico, ej: para botones 'cuantos huecos tiene, que material'). " +
+    "Puede haber MULTIPLES campos con 'designField: detail' en un mismo designSlot, pero solo UNO de cada uno de los otros tipos.\n\n" +
+    "El 'key' de cada campo debe ser globalmente unico, usando el designSlot como prefijo (ej: 'botones_cantidad', 'logo_pecho_tecnica').\n" +
+    "Cada campo sigue la misma forma de siempre: key, label, category (SIEMPRE 'design' para todo lo que emita esta funcion), status, value, options, why.\n" +
+    "Para campos 'ask', inclui 'options' con 2 a 4 etiquetas CORTAS.\n\n" +
+    "IMPORTANTE - se conciso: una prenda tipica tiene 1 a 4 elementos de diseno reales que merecen su propia pagina. " +
+    "No inventes elementos que no tengan sentido para esta prenda especifica y los campos generales ya definidos. " +
+    "Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +
+    "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
+    '{"garmentType": "' + garmentType + '", "fields": [' +
+    '{"key": "identificadorUnico", "label": "Etiqueta en espanol", "category": "design", "designSlot": "slot_id", "designField": "name|position|technique|driveLink|detail", ' +
+    '"status": "ask", "value": "", "options": ["Opcion A", "Opcion B"], "why": "por que importa (breve)"}]}'
+
+  const raw = onProgress
+    ? await deepseekChatStream({
+        messages: [{ role: "user", content: instructions }],
+        maxTokens: 3000,
+        temperature: 0.2,
+        onEvent: ({ contentSoFar, tokensSoFar }) => {
+          onProgress({
+            percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
+            lastLabel: extractLastCompletedLabel(contentSoFar),
+          })
+        },
+      })
+    : await deepseekChat({
+        messages: [{ role: "user", content: instructions }],
+        maxTokens: 3000,
+        temperature: 0.2,
+      })
+  const cleaned = raw.replace(/```json|```/g, "").trim()
+  let parsed
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch (e) {
+    throw new DeepSeekError("El asistente de IA no devolvio un analisis de disenos valido.", { raw })
+  }
+  return normalizeRequirements(parsed, garmentType)
+}
+
+// Merges freshly-analyzed design fields into an existing reqs object without
+// mutating it - same defensive null-handling style as applyAnswer/pendingFields.
+export function mergeDesignFields(reqs, designFields) {
+  const base = reqs && Array.isArray(reqs.fields) ? { ...reqs, fields: [...reqs.fields] } : { fields: [] }
+  const additions = Array.isArray(designFields) ? designFields : []
+  base.fields.push(...additions)
+  return base
+}
+
+// Bridges the design-level reasoning pass to what mapChatDesignsToDesigns()
+// (buildCustomGarment.js) expects: groups known/assumed "design" fields by
+// designSlot and reassembles each group into one {name, pos, tec, driveLink,
+// posDetail, notes} object - one per design element, in first-appearance order.
+export function reqsToDesigns(reqs) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  const designFields = fields.filter(
+    (f) => f.category === "design" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim()
+  )
+  const slotMap = new Map()
+  const slotOrder = []
+  for (const f of designFields) {
+    const slot = f.designSlot
+    if (!slot || typeof slot !== "string" || !slot.trim()) continue
+    const df = f.designField
+    if (!df || !["name", "position", "technique", "driveLink", "detail"].includes(df)) continue
+    if (!slotMap.has(slot)) {
+      slotMap.set(slot, { name: "", pos: "", tec: "", driveLink: "", posDetail: "", details: [] })
+      slotOrder.push(slot)
+    }
+    const group = slotMap.get(slot)
+    const val = String(f.value || "").trim()
+    if (df === "name") group.name = val
+    else if (df === "position") group.pos = val
+    else if (df === "technique") group.tec = val
+    else if (df === "driveLink") group.driveLink = val
+    else if (df === "detail") {
+      if (!group.posDetail) group.posDetail = val
+      group.details.push((f.label || "") + ": " + val)
+    }
+  }
+  return slotOrder.map((slot) => {
+    const g = slotMap.get(slot)
+    const name = g.name || slot.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+    return {
+      name,
+      pos: g.pos,
+      tec: g.tec,
+      driveLink: g.driveLink,
+      posDetail: g.posDetail,
+      notes: g.details.join(", "),
+    }
+  })
 }

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react"
 import { DeepSeekError } from "../core/deepseekClient.js"
-import { analyzeRequirements, pendingFields, applyAnswer, isComplete, reqsToParts, FIELD_STATUS } from "../core/techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, isComplete, reqsToParts, reqsToDesigns, FIELD_STATUS } from "../core/techpackRequirements.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -16,8 +16,14 @@ const OPENING = "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa
 // product, one at a time, with numbered options. Cheap and predictable at
 // runtime no matter how long the intake gets.
 //
-// Phases: "naming" (ask what garment) -> "analyzing" (the one DeepSeek call)
-// -> "asking" (walk pending general fields) -> "ready" (build + continue).
+// Phases: "naming" (ask what garment) -> "analyzing" (general requirements
+// call) -> "asking" (walk pending general fields) -> "designAnalyzing" (F3.2:
+// a second DeepSeek call reasons about which discrete elements - logo,
+// embroidery, personalized hardware, etc. - need their own design page) ->
+// "designing" (walk pending design fields, same numbered-options UI) ->
+// "ready" (build + continue). Design-level fields share the same `reqs.fields`
+// array as general ones (tagged `category: "design"`), so pendingFields/
+// applyAnswer/isComplete need zero changes to work for both passes.
 
 function Bubble({ role: msgRole, children }) {
   const isUser = msgRole === "user"
@@ -76,12 +82,18 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
     return field.why ? field.label + " — " + field.why : field.label
   }
 
-  function askNext(nextReqs) {
-    const pending = pendingFields(nextReqs, "general")
+  function askNext(nextReqs, category) {
+    const pending = pendingFields(nextReqs, category)
     if (pending.length === 0) {
       setCurrentField(null)
-      setPhase("ready")
-      post("assistant", "Listo, ya tengo lo esencial de construcción. Podés continuar y después definir los diseños.")
+      if (category === "general") {
+        post("assistant", "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…")
+        setPhase("designAnalyzing")
+        runDesignAnalysis(nextReqs)
+      } else {
+        setPhase("ready")
+        post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha. Podés continuar.")
+      }
       return
     }
     setCurrentField(pending[0])
@@ -106,10 +118,41 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
         post("assistant", "Para una " + (analysis.garmentType || garmentType) + " doy por estándar: " + assumed.map((f) => f.label + " (" + f.value + ")").join(", ") + ". Si algo no aplica lo corregís después. Ahora, lo que define tu prenda:")
       }
       setPhase("asking")
-      askNext(analysis)
+      askNext(analysis, "general")
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : "No se pudo analizar la prenda. Probá de nuevo.")
       analyzedFor.current = null // allow a retry
+    } finally {
+      setSending(false)
+      setProgress(null)
+    }
+  }
+
+  // Second DeepSeek call (F3.2): reasons about which discrete elements of
+  // THIS garment need their own design page, given the general answers just
+  // collected. A failure here degrades gracefully - it's an enhancement over
+  // the F3.1 flow, not a hard requirement, so the user can still finish with
+  // no designs (App.jsx already falls back to one blank design in that case).
+  async function runDesignAnalysis(generalReqs) {
+    setSending(true)
+    setError(null)
+    setProgress({ percent: 0, lastLabel: null })
+    try {
+      const designAnalysis = await analyzeDesignExpression({
+        garmentType: garmentLabel || generalReqs.garmentType,
+        generalFields: reqsToParts(generalReqs),
+        tecs,
+        lang: "ES",
+        onProgress: (p) => setProgress(p),
+      })
+      const merged = mergeDesignFields(generalReqs, designAnalysis.fields)
+      setReqs(merged)
+      setPhase("designing")
+      askNext(merged, "design")
+    } catch (e) {
+      setError(e instanceof DeepSeekError ? e.message : "No se pudieron analizar los diseños. Podés continuar igual.")
+      setPhase("ready")
+      post("assistant", "No pude analizar los diseños todavía, pero podés continuar igual y agregarlos después.")
     } finally {
       setSending(false)
       setProgress(null)
@@ -126,7 +169,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
     post("user", value)
     const nextReqs = applyAnswer(reqs, currentField.key, value)
     setReqs(nextReqs)
-    askNext(nextReqs)
+    askNext(nextReqs, currentField.category)
   }
 
   function send(valueOverride) {
@@ -134,7 +177,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
     if (!value || sending) return
     setInput("")
     if (phase === "naming") return submitName(value)
-    if (phase === "asking") return submitAnswer(value)
+    if (phase === "asking" || phase === "designing") return submitAnswer(value)
   }
 
   function buildDraft() {
@@ -143,14 +186,16 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
       label: garmentLabel,
       parts: reqsToParts(reqs),
       positions: ["Toda la prenda"],
-      designs: [], // design-level pass comes in F3.2; App seeds one blank for now
+      designs: reqsToDesigns(reqs),
       notes: "",
     }
   }
 
-  const inputActive = phase === "naming" || phase === "asking"
+  const inputActive = phase === "naming" || phase === "asking" || phase === "designing"
   const knownParts = reqs ? reqsToParts(reqs) : []
-  const pendingCount = reqs ? pendingFields(reqs, "general").length : 0
+  const designsSoFar = reqs ? reqsToDesigns(reqs) : []
+  const pendingCategory = phase === "designAnalyzing" || phase === "designing" ? "design" : "general"
+  const pendingCount = reqs ? pendingFields(reqs, pendingCategory).length : 0
 
   return (
     <div style={{ display: "flex", gap: space(4), flexWrap: "wrap" }}>
@@ -162,7 +207,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
             </Bubble>
           ))}
           {/* Numbered option chips for the current question - click to answer, or type your own. */}
-          {phase === "asking" && currentField && currentField.options && currentField.options.length > 0 && !sending && (
+          {(phase === "asking" || phase === "designing") && currentField && currentField.options && currentField.options.length > 0 && !sending && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), alignSelf: "flex-start", maxWidth: "90%" }}>
               {currentField.options.map((opt, i) => (
                 <button
@@ -241,6 +286,21 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
                 </div>
               ))}
             </div>
+            {designsSoFar.length > 0 && (
+              <div style={{ marginTop: space(2), paddingTop: space(2), borderTop: "1px solid #E6E8EC" }}>
+                <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(1) }}>Diseños (páginas propias)</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: space(1) }}>
+                  {designsSoFar.map((d, i) => (
+                    <div key={i} style={{ display: "flex", gap: space(1), alignItems: "flex-start", fontSize: type.size.xs }}>
+                      <span style={{ width: 16, height: 16, flexShrink: 0, background: role.priority.fill, color: role.priority.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>{i + 1}</span>
+                      <span style={{ color: C.ink.hex }}>
+                        <b>{d.name}</b> — {d.pos || "?"} — {d.tec || "?"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {pendingCount > 0 && (
               <div style={{ marginTop: space(2), paddingTop: space(2), borderTop: "1px solid #E6E8EC", fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}>
                 Faltan {pendingCount} pregunta{pendingCount === 1 ? "" : "s"}.
