@@ -70,35 +70,67 @@ export function parseVisionSeed(raw) {
   return { garmentType, seed }
 }
 
-// One DeepSeek vision call: given one or more downscaled images (from
-// downscaleImage() above), asks the vision model what garment it sees and
-// what's visible about it, returning a seed in the exact shape
-// analyzeRequirements() consumes - vision is just another door into the same
-// reasoning core the CSV import and "prenda desde 0" chat already share.
+// Pure: combines one {garmentType, seed} result per photo into a single
+// seed - the first photo's garmentType wins (usually the primary/front
+// shot), and for each attribute key, whichever photo reported it FIRST
+// wins too, so a later, less-certain angle can't overwrite a clear reading
+// from an earlier one. A detail only a later photo caught (e.g. a back-view
+// closure) still gets folded in under its own key.
+export function mergeVisionSeeds(results) {
+  const withType = results.find((r) => r.garmentType)
+  const garmentType = withType ? withType.garmentType : ""
+  const seed = {}
+  for (const r of results) {
+    for (const key of Object.keys(r.seed || {})) {
+      if (!(key in seed)) seed[key] = r.seed[key]
+    }
+  }
+  return { garmentType, seed }
+}
+
+function buildVisionMessages(base64) {
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text:
+            "Sos un tecnico textil experto mirando una foto de una prenda real. Identifica que tipo de prenda es " +
+            "y extrae SOLO los atributos que se ven con certeza en la foto: color, tela aparente, cuello, " +
+            "manga, cierre, bolsillos, costuras visibles, etc. No inventes nada que no se vea con claridad. " +
+            "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown: " +
+            '{"garmentType": "nombre de la prenda en espanol", "seed": {"Atributo": "valor visible"}}',
+        },
+        { type: "image_url", image_url: { url: "data:image/jpeg;base64," + base64 } },
+      ],
+    },
+  ]
+}
+
+// One DeepSeek vision call per photo - the vision model NVIDIA serves here
+// only accepts a single image per request (confirmed live: sending more than
+// one throws "At most 1 image(s) may be provided in one request"), so a
+// multi-photo upload runs one call per photo in parallel and merges the
+// results via mergeVisionSeeds() instead of packing every image into one
+// message. Vision is still just another door into the same reasoning core
+// the CSV import and "prenda desde 0" chat already share - only the shape of
+// the DeepSeek call changed, not what comes out of it.
 export async function extractGarmentFromImages(images, { lang = "ES", model } = {}) {
   if (!Array.isArray(images) || images.length === 0) {
     throw new DeepSeekError("No hay imagenes para analizar.", { images })
   }
 
-  const content = [
-    {
-      type: "text",
-      text:
-        "Sos un tecnico textil experto mirando foto(s) de una prenda real. Identifica que tipo de prenda es " +
-        "y extrae SOLO los atributos que se ven con certeza en la(s) foto(s): color, tela aparente, cuello, " +
-        "manga, cierre, bolsillos, costuras visibles, etc. No inventes nada que no se vea con claridad. " +
-        "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown: " +
-        '{"garmentType": "nombre de la prenda en espanol", "seed": {"Atributo": "valor visible"}}',
-    },
-    ...images.map((img) => ({ type: "image_url", image_url: { url: "data:image/jpeg;base64," + img.base64 } })),
-  ]
+  const results = await Promise.all(
+    images.map((img) =>
+      deepseekChat({
+        messages: buildVisionMessages(img.base64),
+        model: model || DEFAULT_VISION_MODEL,
+        maxTokens: 1200,
+        temperature: 0.2,
+      }).then(parseVisionSeed)
+    )
+  )
 
-  const raw = await deepseekChat({
-    messages: [{ role: "user", content }],
-    model: model || DEFAULT_VISION_MODEL,
-    maxTokens: 1200,
-    temperature: 0.2,
-  })
-
-  return parseVisionSeed(raw)
+  return mergeVisionSeeds(results)
 }

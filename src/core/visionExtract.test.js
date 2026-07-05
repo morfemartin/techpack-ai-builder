@@ -6,7 +6,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat } from "./deepseekClient.js"
-import { computeDownscaleDims, parseVisionSeed, extractGarmentFromImages } from "./visionExtract.js"
+import { computeDownscaleDims, parseVisionSeed, mergeVisionSeeds, extractGarmentFromImages } from "./visionExtract.js"
 
 describe("computeDownscaleDims", () => {
   it("passes through an image already within the max dimension", () => {
@@ -59,6 +59,22 @@ describe("parseVisionSeed", () => {
   })
 })
 
+describe("mergeVisionSeeds", () => {
+  it("keeps the first non-empty garmentType across results", () => {
+    const merged = mergeVisionSeeds([{ garmentType: "", seed: {} }, { garmentType: "Camisa", seed: {} }, { garmentType: "Polo", seed: {} }])
+    expect(merged.garmentType).toBe("Camisa")
+  })
+
+  it("lets a later photo add a key an earlier one missed, without overwriting existing keys", () => {
+    const merged = mergeVisionSeeds([{ garmentType: "Camisa", seed: { Color: "Azul" } }, { garmentType: "Camisa", seed: { Color: "Rojo", Cierre: "Botones" } }])
+    expect(merged.seed).toEqual({ Color: "Azul", Cierre: "Botones" }) // first photo's Color wins, second's new key still folds in
+  })
+
+  it("returns empty garmentType/seed when every result is empty", () => {
+    expect(mergeVisionSeeds([{ garmentType: "", seed: {} }])).toEqual({ garmentType: "", seed: {} })
+  })
+})
+
 describe("extractGarmentFromImages", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -69,14 +85,33 @@ describe("extractGarmentFromImages", () => {
     expect(deepseekChat).not.toHaveBeenCalled()
   })
 
-  it("sends a vision content-block per image and returns the parsed seed", async () => {
+  it("sends one single-image call for a single photo and returns the parsed seed", async () => {
     deepseekChat.mockResolvedValue('{"garmentType":"Camisa","seed":{"Color":"Azul"}}')
-    const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }, { fileName: "b.jpg", base64: "BBB" }])
+    const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }])
 
     expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul" } })
+    expect(deepseekChat).toHaveBeenCalledTimes(1)
     const call = deepseekChat.mock.calls[0][0]
-    expect(call.messages[0].content).toHaveLength(3) // 1 text block + 2 images
+    expect(call.messages[0].content).toHaveLength(2) // 1 text block + 1 image
     expect(call.messages[0].content[1]).toEqual({ type: "image_url", image_url: { url: "data:image/jpeg;base64,AAA" } })
     expect(call.model).toMatch(/vision/i)
+  })
+
+  // NVIDIA's vision model only accepts one image per request ("At most 1
+  // image(s) may be provided in one request", confirmed live) - a multi-photo
+  // upload must fan out into one call per photo instead of one call carrying
+  // every image, or the whole request gets rejected.
+  it("sends one call per photo (never bundles multiple images into one request) and merges the results", async () => {
+    deepseekChat
+      .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Color":"Azul"}}')
+      .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Cierre":"Botones"}}')
+
+    const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }, { fileName: "b.jpg", base64: "BBB" }])
+
+    expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" } })
+    expect(deepseekChat).toHaveBeenCalledTimes(2)
+    for (const call of deepseekChat.mock.calls) {
+      expect(call[0].messages[0].content).toHaveLength(2) // never more than 1 image per call
+    }
   })
 })

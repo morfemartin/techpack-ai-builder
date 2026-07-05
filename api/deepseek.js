@@ -27,6 +27,15 @@ const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || "https://integrate.api.nv
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v3.1"
 const MAX_TOKENS_CAP = 4000
 
+// NVIDIA doesn't use one consistent error shape: most rejections nest under
+// {error: {message}} (OpenAI-style), but at least the vision models' vLLM
+// backend replies with {message} at the top level instead (confirmed live:
+// "At most 1 image(s) may be provided in one request..."). Check both so a
+// real reason reaches the client instead of the generic "request failed".
+function upstreamErrorDetail(data) {
+  return (data && data.error && data.error.message) || (data && data.message) || "request failed"
+}
+
 export default async function handler(req, res) {
   const allowed = process.env.ALLOWED_ORIGIN
   if (allowed) {
@@ -69,8 +78,12 @@ export default async function handler(req, res) {
     if (!wantsStream) {
       const data = await upstream.json().catch(() => ({}))
       if (!upstream.ok) {
+        // Logged server-side only (Vercel function logs) - never sent to the
+        // client, no key/auth header in it. Without this, an upstream
+        // rejection with no data.error.message is a dead end to debug.
+        console.error("NVIDIA upstream error", upstream.status, JSON.stringify(data))
         // Surface a useful-but-sanitized message; never forward auth headers/keys.
-        return res.status(upstream.status).json({ error: "upstream_error", detail: (data && data.error && data.error.message) || "request failed" })
+        return res.status(upstream.status).json({ error: "upstream_error", detail: upstreamErrorDetail(data) })
       }
       return res.status(200).json(data)
     }
@@ -84,7 +97,8 @@ export default async function handler(req, res) {
     // a JSON error response (accepted simplification - see deepseekClient.js).
     if (!upstream.ok) {
       const data = await upstream.json().catch(() => ({}))
-      return res.status(upstream.status).json({ error: "upstream_error", detail: (data && data.error && data.error.message) || "request failed" })
+      console.error("NVIDIA upstream error", upstream.status, JSON.stringify(data))
+      return res.status(upstream.status).json({ error: "upstream_error", detail: upstreamErrorDetail(data) })
     }
 
     res.statusCode = 200
