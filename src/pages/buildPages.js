@@ -6,11 +6,16 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { palette, type } from "../design/tokens.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-export function renderPartsList(box, { parts, partLabels, txParts, labels } = {}) {
+export function renderPartsList(box, { parts, partLabels, txParts, labels, compact } = {}) {
   var safeParts = Array.isArray(parts) ? parts.filter(function (p) { return p && p.on !== false }) : []
   var pn = partLabels || {}
   var txP = Array.isArray(txParts) ? txParts : null
   var lx = labels || {}
+  // `compact` (used by the AI-planned pages): fixed, tight row height, top-
+  // aligned, so a short parts list reads as a clean table with breathing room
+  // instead of a few rows stretched tall with tiny text floating in huge cells.
+  // The registered Cap keeps the default flex-fill rows (grow:1) untouched.
+  var rowSizing = compact ? { basis: 30, grow: 0, min: 24 } : { grow: 1, min: 16 }
 
   var tableHeaderRow = leaf({
     basis: 20,
@@ -24,8 +29,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels } = {}
 
   var partRows = safeParts.map((p, i) =>
     leaf({
-      grow: 1,
-      min: 16,
+      ...rowSizing,
       render: (b) => {
         var bg = i % 2 === 0 ? palette.white.hex : "#F7F7F8"
         var nm = pn[p.id] || p.customName || "P" + p.id
@@ -123,14 +127,16 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
 export function renderIllustrationZone(box, { slots, refs, note } = {}) {
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
   var noteText = note || ""
-  var noteH = noteText ? Math.min(110, Math.max(54, box.height * 0.18)) : 0
-  var gridH = box.height - noteH
+  // The illustration is the hero: it takes the WHOLE box (no note band carved
+  // out). The illustrator brief lives INSIDE the primary art board, muted,
+  // exactly where the drawing goes - so it's replaced in place with nothing to
+  // re-flow, and it costs zero extra layout height.
   var cols = Math.ceil(Math.sqrt(slotCount))
   var rows = Math.ceil(slotCount / cols)
   var gap = 12
   var cellW = (box.width - gap * (cols + 1)) / cols
-  var cellH = (gridH - gap * (rows + 1)) / rows
-  var s = R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+  var cellH = (box.height - gap * (rows + 1)) / rows
+  var s = ""
 
   for (var i = 0; i < slotCount; i++) {
     var c = i % cols
@@ -138,30 +144,32 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
     var x = box.x + gap + c * (cellW + gap)
     var y = box.y + gap + r * (cellH + gap)
     var chip = 18
-    var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Referencia " + (i + 1)
-    // A quiet full frame plus inward corner registration ticks: the empty slot
-    // reads as an art board / crop-marked drawing frame ("place artwork here"),
-    // not a blank box. Ticks are a structure gray, not a role color - the red
-    // index chip stays the only attention mark in the cell.
+    var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Vista " + (i + 1)
+    // Crop-marked art board: a hairline frame with inward corner registration
+    // ticks reads as "place artwork here", not a blank box.
     s += R(x, y, cellW, cellH, "none", "#E4E6EA", "0.8")
     var tk = 12
-    ;[[x, y, 1, 1], [x + cellW, y, -1, 1], [x, y + cellH, 1, -1], [x + cellW, y + cellH, -1, -1]].forEach(function (c) {
-      s += "<line x1='" + c[0] + "' y1='" + c[1] + "' x2='" + (c[0] + tk * c[2]) + "' y2='" + c[1] + "' stroke='#B7BCC6' stroke-width='1'/>"
-      s += "<line x1='" + c[0] + "' y1='" + c[1] + "' x2='" + c[0] + "' y2='" + (c[1] + tk * c[3]) + "' stroke='#B7BCC6' stroke-width='1'/>"
+    ;[[x, y, 1, 1], [x + cellW, y, -1, 1], [x, y + cellH, 1, -1], [x + cellW, y + cellH, -1, -1]].forEach(function (p) {
+      s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + (p[0] + tk * p[2]) + "' y2='" + p[1] + "' stroke='#B7BCC6' stroke-width='1'/>"
+      s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + p[0] + "' y2='" + (p[1] + tk * p[3]) + "' stroke='#B7BCC6' stroke-width='1'/>"
     })
+    // Red index chip + uppercase view label, top-left (the tech-pack "FRONT
+    // VIEW" / "BACK VIEW" caption). The chip stays the cell's only attention mark.
     s += R(x + 8, y + 8, chip, chip, palette.red.hex, palette.red.hex, "0")
     s += TX(x + 8 + chip / 2, y + 8 + chip / 2, i + 1, 8, true, "middle", palette.white.hex, type.svgFonts.data)
-    s += TX(x + cellW / 2, y + cellH / 2, refLabel, 9, false, "middle", "#B7BCC6")
-  }
+    s += TX(x + 8 + chip + 8, y + 8 + chip / 2, String(refLabel).toUpperCase(), 9, true, "start", palette.ink.hex)
 
-  if (noteText) {
-    var noteY = box.y + box.height - noteH
-    s += R(box.x + 12, noteY + 8, box.width - 24, noteH - 16, palette.white.hex, palette.ink.hex, "0.8")
-    s += R(box.x + 12, noteY + 8, 4, noteH - 16, palette.yellow.hex, palette.yellow.hex, "0")
-    var lines = wrapLines(noteText, box.width - 52, 10)
-    lines.slice(0, Math.max(1, Math.floor((noteH - 28) / 14))).forEach(function (line, i) {
-      s += TX(box.x + 26, noteY + 22 + i * 14, line, 10, false, "start")
-    })
+    if (i === 0 && noteText) {
+      var innerW = Math.max(40, cellW - 44)
+      var lines = wrapLines(noteText, innerW, 11)
+      var maxLines = Math.max(1, Math.floor((cellH * 0.55) / 15))
+      var shown = lines.slice(0, maxLines)
+      var startY = y + cellH / 2 - (shown.length * 15) / 2 + 10
+      s += TX(x + cellW / 2, startY - 20, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
+      shown.forEach(function (line, li) {
+        s += TX(x + cellW / 2, startY + li * 15, line, 11, false, "middle", "#9AA0AB")
+      })
+    }
   }
 
   return s

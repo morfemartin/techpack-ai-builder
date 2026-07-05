@@ -98,10 +98,13 @@ export async function planPageLayout(pageOutline, context, { onProgress } = {}) 
       designs: context && context.designs,
       lang: context && context.lang,
     }) + "\n\n" +
-    "Cada region hoja necesita type y weight. illustration puede incluir slots, refs y note. note debe ser una instruccion breve para el disenador humano.\n" +
-    "IMPORTANTE - composicion: ademas de apilar bloques, podés poner bloques LADO A LADO con un bloque compositor \"split\", cuyo weight es su alto y cuyo array \"regions\" son columnas (cada una con su weight = ancho relativo). " +
-    "Usá split para composiciones asimetricas tipo ficha real: una lista o specs angosta junto a una ilustracion ancha. Evitá que TODA la pagina sea una sola pila de bandas full-width - variá la silueta segun el proposito de la pagina.\n" +
-    "Ejemplo con composicion 2D: {\"regions\":[{\"type\":\"header\",\"weight\":10},{\"type\":\"titleBar\",\"weight\":6},{\"type\":\"split\",\"weight\":64,\"regions\":[{\"type\":\"partsList\",\"weight\":34},{\"type\":\"illustration\",\"weight\":66,\"slots\":2,\"note\":\"Frente y espalda a escala.\"}]},{\"type\":\"disclaimer\",\"weight\":10}]}\n\n" +
+    "Pensá como un disenador de fichas tecnicas REAL. Reglas de oro:\n" +
+    "1) La ILUSTRACION es la heroina de casi toda pagina: dale la mayor parte del espacio (weight alto). En illustration, 'slots' = cuantas vistas/detalles del dibujo hacen falta (frente, espalda, interior, close-up de un detalle), 'refs' = el nombre de cada vista, y 'note' = un brief CONCRETO y accionable para el ilustrador humano (que dibujar, desde que vista, que medir/acotar, donde ubicar el arte). El brief NO ocupa espacio propio: va DENTRO de la ilustracion, asi que nunca uses un bloque 'note' suelto para eso.\n" +
+    "2) Elegí solo los bloques que ESTA pagina necesita segun su proposito y las piezas/disenos relevantes a ella (no repitas todo en cada pagina). header/titleBar/disclaimer son finos y automaticos: dales weight bajo, el espacio real es para el contenido.\n" +
+    "3) Composicion: para poner bloques LADO A LADO usá el compositor \"split\" (su weight es alto; su array \"regions\" son columnas, cada una con weight = ancho relativo). Componé asimetrico tipo ficha: specs/lista angosta junto a ilustracion ancha. Variá la silueta segun el proposito - no hagas todas las paginas igual.\n" +
+    "4) Si un bloque quedaria sobre-saturado de datos, es mejor menos densidad: repartí en menos filas o dejá que ocupe su columna, priorizando legibilidad.\n\n" +
+    "Vocabulario hoja: header, titleBar, illustration, partsList, colorSpecs, embSpecs, spacer, disclaimer.\n" +
+    "Ejemplo (overview de un hoodie): {\"regions\":[{\"type\":\"header\",\"weight\":10},{\"type\":\"titleBar\",\"weight\":5},{\"type\":\"split\",\"weight\":75,\"regions\":[{\"type\":\"partsList\",\"weight\":32},{\"type\":\"illustration\",\"weight\":68,\"slots\":2,\"refs\":[\"Frente\",\"Espalda\"],\"note\":\"Dibujar el hoodie en plano tecnico frente y espalda a la misma escala; acotar el ancho de bolsillo canguro y el largo total desde el hombro.\"}]},{\"type\":\"disclaimer\",\"weight\":8}]}\n\n" +
     "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
     '{"regions":[{"type":"header","weight":10}]}'
 

@@ -105,7 +105,7 @@ describe("interpretPagePlan", () => {
     garment: { partLabels: { ES: { body: "Cuerpo" } } },
   }
 
-  it("returns a column tree with normalized grows for each planned region", () => {
+  it("keeps structural chrome (header/disclaimer) at a fixed height and lets content grow", () => {
     const root = interpretPagePlan(
       {
         id: "overview",
@@ -122,9 +122,14 @@ describe("interpretPagePlan", () => {
 
     expect(root.direction).toBe("column")
     expect(root.children).toHaveLength(3)
-    expect(root.children[0].grow).toBe(20)
+    // header: fixed strip, does not grow
+    expect(root.children[0].grow).toBe(0)
+    expect(root.children[0].basis).toBe(82)
+    // partsList: content, grows to fill
     expect(root.children[1].grow).toBe(60)
-    expect(root.children[2].grow).toBe(20)
+    // disclaimer: fixed strip, does not grow
+    expect(root.children[2].grow).toBe(0)
+    expect(root.children[2].basis).toBe(30)
   })
 
   it("renders planned pages into the same [{name,svg}] shape as buildAllPages", () => {
@@ -152,7 +157,7 @@ describe("interpretPagePlan", () => {
     expect(pages[0].name).toBe("custom_overview")
     expect(pages[0].svg).toContain("<svg")
     expect(pages[0].svg).toContain("Custom Overview")
-    expect(pages[0].svg).toContain("Front")
+    expect(pages[0].svg).toContain("FRONT")
     expect(pages[0].svg).toContain("Cuerpo")
     expect(pages[0].svg).toContain("Todos los disenos")
   })
@@ -224,6 +229,18 @@ describe("split composition (2D layout)", () => {
       ctx
     )
     expect(pages[0].svg).toContain("Cuerpo") // partsList column
-    expect(pages[0].svg).toContain("Frente") // illustration column
+    expect(pages[0].svg).toContain("FRENTE") // illustration column
+  })
+
+  it("renders a grayscale document when { mono: true } - no brand hues survive", () => {
+    const plan = { pages: [{ id: "p", title: "P", purpose: "overview", regions: [{ type: "titleBar", weight: 6 }, { type: "partsList", weight: 80 }, { type: "disclaimer", weight: 8 }] }] }
+    const color = buildPlannedPages(plan, ctx)[0].svg
+    const gray = buildPlannedPages(plan, ctx, { mono: true })[0].svg
+    // the color version carries brand red/blue; the mono version carries neither
+    expect(color).toContain("#E11D3A")
+    expect(gray).not.toContain("#E11D3A")
+    expect(gray).not.toContain("#1A3FB0")
+    expect(gray).toContain("<svg")
+    expect(gray).toContain("Cuerpo")
   })
 })

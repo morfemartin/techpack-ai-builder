@@ -13,6 +13,7 @@ import { T } from "../core/i18n.js"
 import { R, TX, sv, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
+import { toGrayscale } from "../core/colorUtils.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
@@ -27,6 +28,14 @@ const PAGE_PAD = 26
 const PAGE_GAP = 14
 // Gutter between the columns of a `split` (side-by-side) region.
 const SPLIT_GAP = 14
+
+// Structural blocks are chrome, not content: a real tech pack keeps the header,
+// the section title, and the disclaimer as THIN, FIXED strips and lets the
+// illustration / data grow to fill everything left over. Fixing their height
+// (instead of letting a model weight bloat them) is what kills the oversized
+// blue title bar and the dead whitespace at the bottom of a page in one move -
+// the model's weights now only distribute the CONTENT area.
+const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 30 }
 
 // A page that lost all its regions still needs to render something sane.
 const FALLBACK_REGIONS = [
@@ -144,8 +153,11 @@ function leafForRegion(region, page, ctx) {
   const txData = ctx && ctx.txData ? ctx.txData : null
   const hdr = ctx && ctx.hdr ? ctx.hdr : {}
 
+  // Structural chrome takes a fixed height; content blocks grow by their weight.
+  var fixed = FIXED_BASIS[region.type]
+  var sizing = fixed ? { basis: fixed, grow: 0, shrink: 0 } : { grow: region.grow }
   return leaf({
-    grow: region.grow,
+    ...sizing,
     min: region.type === "spacer" ? 0 : 20,
     render: (box) => {
       if (region.type === "header") {
@@ -174,6 +186,7 @@ function leafForRegion(region, page, ctx) {
           partLabels,
           txParts: txData && txData.parts,
           labels: { spec: t.sp, detail: t.dt, file: "Archivo / Drive" },
+          compact: true,
         })
       }
       if (region.type === "colorSpecs") return renderColorSpecs(box, { colors: design && design.colors })
@@ -212,7 +225,8 @@ function pageName(page, i) {
   return String(base).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "page_" + (i + 1)
 }
 
-export function buildPlannedPages(plan, ctx) {
+export function buildPlannedPages(plan, ctx, opts) {
+  const mono = !!(opts && opts.mono)
   const normalized = normalizePlan(plan)
   const W = 1200
   const H = 900
@@ -223,6 +237,9 @@ export function buildPlannedPages(plan, ctx) {
     svg += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
     svg += renderLayoutToSVG(resolved)
     svg += "</svg>"
+    // Grayscale is a pure post-process on the finished page (see toGrayscale) -
+    // no renderer needs a parallel "mono" path.
+    if (mono) svg = toGrayscale(svg)
     return { name: pageName(page, i), svg }
   })
 }
