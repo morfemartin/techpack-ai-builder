@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { uid } from "./core/idGen.js"
 import { T } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
@@ -8,6 +8,8 @@ import { DeepSeekError } from "./core/deepseekClient.js"
 import { downscaleImage, extractGarmentFromImages } from "./core/visionExtract.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
+import { buildPlannedPages } from "./pages/interpretPlan.js"
+import { planDocumentOutline, planPageLayout } from "./core/documentPlan.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
 import { downloadGarmentFile } from "./garments/exportGarment.js"
@@ -151,9 +153,15 @@ export default function App() {
   const [visionEntry, setVisionEntry] = useState(false) // true once "Prenda desde foto" is chosen at step 0
   const [visionExtracting, setVisionExtracting] = useState(false)
   const [visionError, setVisionError] = useState(null)
+  const [visionProgress, setVisionProgress] = useState(null)
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
   const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
+  const [documentPlanning, setDocumentPlanning] = useState(false)
+  const [documentPlanStatus, setDocumentPlanStatus] = useState("")
+  const [plannedPreviewPages, setPlannedPreviewPages] = useState(null)
+  const [plannedPreviewKey, setPlannedPreviewKey] = useState("")
+  const [plannedPreviewError, setPlannedPreviewError] = useState(null)
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -163,6 +171,7 @@ export default function App() {
     if (!vision) {
       setVisionSeed(null)
       setVisionError(null)
+      setVisionProgress(null)
     }
     if (id === "custom") {
       setCustomGarment(null)
@@ -175,6 +184,9 @@ export default function App() {
     }
     setTxCache({})
     setPrevPage(0)
+    setPlannedPreviewPages(null)
+    setPlannedPreviewKey("")
+    setPlannedPreviewError(null)
   }
 
   // F1: "ficha desde foto" entry point - downscales each photo client-side
@@ -188,14 +200,19 @@ export default function App() {
     if (files.length === 0) return
     setVisionExtracting(true)
     setVisionError(null)
+    setVisionProgress(null)
     try {
       var downscaled = await Promise.all(files.map((f) => downscaleImage(f)))
-      var result = await extractGarmentFromImages(downscaled, { lang: "ES" })
+      var result = await extractGarmentFromImages(downscaled, {
+        lang: "ES",
+        onProgress: (progress) => setVisionProgress(progress),
+      })
       setVisionSeed(result)
     } catch (err) {
       setVisionError(err instanceof DeepSeekError ? err.message : "No se pudo analizar la foto.")
     } finally {
       setVisionExtracting(false)
+      setVisionProgress(null)
       e.target.value = ""
     }
   }
@@ -206,6 +223,9 @@ export default function App() {
     setParts(g.defaultParts.map((p) => Object.assign({}, p)))
     const mapped = mapChatDesignsToDesigns(draft.designs, g.positions.ES[0])
     setDesigns(mapped.map((d) => Object.assign(newDesign(), d)))
+    setPlannedPreviewPages(null)
+    setPlannedPreviewKey("")
+    setPlannedPreviewError(null)
   }
   function toggleLang(c) {
     setLangs((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]))
@@ -331,11 +351,164 @@ export default function App() {
     return tx
   }
 
+  function svgSafeText(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/'/g, "&apos;")
+  }
+
+  function plannedPageName(page, i) {
+    var raw = (page && (page.id || page.title)) || "page-" + (i + 1)
+    return String(raw).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "page_" + (i + 1)
+  }
+
+  function placeholderSvg(page, i, total) {
+    var W = 1200
+    var H = 900
+    var title = svgSafeText((page && page.title) || "Pagina " + (i + 1))
+    var label = "Desarrollando pagina " + (i + 1) + " de " + total
+    return (
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>" +
+      "<rect width='" + W + "' height='" + H + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1.5'/>" +
+      "<rect x='80' y='80' width='1040' height='740' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
+      "<rect x='80' y='80' width='8' height='740' fill='" + role.highlight.fill + "'/>" +
+      "<text x='120' y='160' font-family='" + type.svgFonts.ui + "' font-size='32' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
+      "<text x='120' y='214' font-family='" + type.svgFonts.data + "' font-size='18' fill='" + role.priority.fill + "'>" + label + "</text>" +
+      "<text x='120' y='264' font-family='" + type.svgFonts.ui + "' font-size='16' fill='" + C.ink.hex + "'>La IA esta asignando bloques, pesos y notas tecnicas.</text>" +
+      "</svg>"
+    )
+  }
+
+  function fallbackPageLayout(page) {
+    return {
+      ...page,
+      regions: [
+        { type: "header", weight: 10 },
+        { type: "titleBar", weight: 6 },
+        { type: "illustration", weight: 48, slots: 2, note: "Preparar ilustracion tecnica de esta pagina." },
+        { type: "partsList", weight: 26 },
+        { type: "disclaimer", weight: 10 },
+      ],
+    }
+  }
+
+  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages } = {}) {
+    var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+    function publishPages(pages) {
+      if (onPages) onPages(pages)
+      if (showModal) setSvgPages(pages)
+    }
+    setDocumentPlanning(true)
+    setDocumentPlanStatus("Estructurando el documento...")
+    try {
+      var outline = await planDocumentOutline({ garmentType, parts, designs, lang })
+      var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, outline.pages.length) }))
+      publishPages(placeholders)
+      var plannedPages = []
+      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment }
+      for (var i = 0; i < outline.pages.length; i++) {
+        var page = outline.pages[i]
+        setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
+        try {
+          var planned = await planPageLayout(
+            page,
+            { garmentType, parts, designs, lang },
+            {
+              onProgress: (progress) => {
+                setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+              },
+            }
+          )
+          plannedPages.push(planned)
+        } catch {
+          plannedPages.push(fallbackPageLayout(page))
+        }
+        var rendered = buildPlannedPages({ pages: plannedPages }, ctx)
+        publishPages(outline.pages.map((p, idx) => (idx < rendered.length ? rendered[idx] : placeholders[idx])))
+      }
+      return buildPlannedPages({ pages: plannedPages }, ctx)
+    } finally {
+      setDocumentPlanning(false)
+      setDocumentPlanStatus("")
+    }
+  }
+
   async function handleGenerate(lang) {
     var tx = await ensureTx(lang)
-    var pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+    var pages
+    if (garmentId === "custom" && customGarment) {
+      try {
+        pages = await buildCustomDocumentPages(lang, tx)
+      } catch {
+        pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+      }
+    } else {
+      pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+    }
     setSvgPages(pages)
   }
+
+  var previewPlanKey = step === 5 && garmentId === "custom" && customGarment
+    ? JSON.stringify({
+        lang: prevLang,
+        hdr,
+        parts,
+        designs: designs.map((d) => ({
+          name: d.name,
+          pos: d.pos,
+          posDetail: d.posDetail,
+          tec: d.tec,
+          colors: d.colors,
+          driveLink: d.driveLink,
+          fileName: d.fileName,
+          illustrationBrief: d.illustrationBrief,
+          emb: d.emb,
+        })),
+        hasLogo: !!logo,
+      })
+    : ""
+
+  useEffect(() => {
+    if (!previewPlanKey) {
+      setPlannedPreviewPages(null)
+      setPlannedPreviewKey("")
+      setPlannedPreviewError(null)
+      return
+    }
+    if (plannedPreviewKey === previewPlanKey && plannedPreviewPages && plannedPreviewPages.length > 0) return
+
+    var active = true
+    setPlannedPreviewKey(previewPlanKey)
+    setPlannedPreviewPages(null)
+    setPlannedPreviewError(null)
+    ensureTx(prevLang)
+      .then((tx) => buildCustomDocumentPages(prevLang, tx, {
+        showModal: false,
+        onPages: (pages) => {
+          if (!active) return
+          setPlannedPreviewPages(pages)
+          setPrevPage((p) => Math.min(p, Math.max(0, pages.length - 1)))
+        },
+      }))
+      .then((pages) => {
+        if (!active) return
+        setPlannedPreviewPages(pages)
+        setPrevPage((p) => Math.min(p, Math.max(0, pages.length - 1)))
+      })
+      .catch(() => {
+        if (!active) return
+        const tx = txCache[prevLang] || null
+        setPlannedPreviewError("No se pudo diseñar el documento con IA; mostrando fallback clásico.")
+        setPlannedPreviewPages(buildAllPages(prevLang, hdr, parts, designs, logo, tx, garment))
+      })
+
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewPlanKey])
 
   function canNext() {
     if (step === 0) return !!garmentId && !visionExtracting
@@ -410,6 +583,12 @@ export default function App() {
                 {visionExtracting ? "Analizando foto(s)…" : visionSeed ? "Cambiar foto(s)" : "Subir foto(s)"}
                 <input type="file" accept="image/png,image/jpeg" multiple disabled={visionExtracting} onChange={handleVisionUpload} style={{ display: "none" }} />
               </label>
+              {visionExtracting && visionProgress && (
+                <div style={{ border: hair, padding: space(2), fontSize: type.size.xs, color: C.ink.hex, background: C.white.hex }}>
+                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>{visionProgress.label}</div>
+                  {visionProgress.partialText && <div style={{ fontFamily: type.fonts.data, opacity: 0.75, wordBreak: "break-word" }}>{visionProgress.partialText}</div>}
+                </div>
+              )}
               {visionError && (
                 <p style={{ fontSize: type.size.xs, color: role.index.fill, margin: 0 }}>
                   <Icon name="error" size={14} color={role.index.fill} /> {visionError}
@@ -654,7 +833,13 @@ export default function App() {
     }
 
     if (step === 5) {
-      var allPgs = [{ l: "Pag. Principal", i: 0 }, ...designs.map((d, i) => ({ l: "Diseno " + (i + 1), i: i + 1 }))]
+      var plannedMode = garmentId === "custom" && customGarment
+      var activePlannedPages = plannedMode && plannedPreviewPages ? plannedPreviewPages : []
+      var allPgs = plannedMode
+        ? activePlannedPages.map((p, i) => ({ l: p.name || "pagina_" + (i + 1), i }))
+        : [{ l: "Pag. Principal", i: 0 }, ...designs.map((d, i) => ({ l: "Diseno " + (i + 1), i: i + 1 }))]
+      var activePlannedIndex = activePlannedPages.length > 0 ? Math.min(prevPage, activePlannedPages.length - 1) : 0
+      var activePlannedPage = activePlannedPages[activePlannedIndex]
       const miniBtn = (active, activeColor) => ({
         padding: `${space(1)}px ${space(2)}px`,
         background: active ? activeColor : C.white.hex,
@@ -670,11 +855,13 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: space(3), flexWrap: "wrap", gap: space(2) }}>
             <div style={{ display: "flex", gap: space(1), flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, marginRight: space(1), textTransform: "uppercase", letterSpacing: "0.08em" }}>Vista</span>
-              {allPgs.map((p) => (
+              {allPgs.length > 0 ? allPgs.map((p) => (
                 <button key={p.i} onClick={() => { setPrevPage(p.i); ensureTx(prevLang) }} style={miniBtn(prevPage === p.i, role.priority.fill)}>
                   {p.l}
                 </button>
-              ))}
+              )) : (
+                <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}>Diseñando páginas…</span>
+              )}
               <span style={{ width: 1, alignSelf: "stretch", background: C.ink.hex, margin: `0 ${space(1)}px` }} />
               {langs.map((l) => (
                 <button key={l} onClick={() => { setPrevLang(l); ensureTx(l) }} style={miniBtn(prevLang === l, C.ink.hex)}>
@@ -684,6 +871,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
               {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
+              {documentPlanning && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{documentPlanStatus || "Disenando documento..."}</span>}
               {garmentId === "custom" && customGarment && (
                 <button
                   onClick={() => downloadGarmentFile(customGarment)}
@@ -694,13 +882,38 @@ export default function App() {
                 </button>
               )}
               {langs.map((l) => (
-                <button key={l} onClick={() => handleGenerate(l)} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on, border: hair, borderColor: role.priority.fill, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                <button key={l} onClick={() => handleGenerate(l)} disabled={documentPlanning} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning ? C.canvas.hex : role.priority.fill, color: documentPlanning ? "#9AA0AB" : role.priority.on, border: hair, borderColor: documentPlanning ? "#C6CAD2" : role.priority.fill, fontSize: type.size.xs, cursor: documentPlanning ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   <Icon name="bolt" size={16} color={C.white.hex} /> Generar SVG [{l}]
                 </button>
               ))}
             </div>
           </div>
-          <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={prevPage} txCache={txCache} garment={garment} />
+          {plannedMode ? (
+            <div style={{ overflow: "auto", background: C.canvas.hex, padding: 10 }}>
+              {plannedPreviewError && (
+                <div style={{ marginBottom: space(2), padding: space(2), border: hair, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, background: C.white.hex, color: C.ink.hex, fontSize: type.size.xs }}>
+                  {plannedPreviewError}
+                </div>
+              )}
+              {activePlannedPage ? (
+                <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
+                  <div
+                    style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                    dangerouslySetInnerHTML={{ __html: activePlannedPage.svg }}
+                  />
+                </div>
+              ) : (
+                <div style={{ height: 900 * 0.54, border: hair, background: C.white.hex, color: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: space(2) }}>
+                  <div style={{ height: 6, width: 260, background: C.canvas.hex, border: hair }}>
+                    <div style={{ height: "100%", width: documentPlanning ? "45%" : "0%", background: role.priority.fill }} />
+                  </div>
+                  <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data }}>{documentPlanStatus || "Estructurando el documento..."}</div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={prevPage} txCache={txCache} garment={garment} />
+          )}
         </div>
       )
     }

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react"
 import { DeepSeekError } from "../core/deepseekClient.js"
-import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, isComplete, reqsToParts, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, FIELD_STATUS } from "../core/techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, reqsToParts, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, FIELD_STATUS } from "../core/techpackRequirements.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -214,6 +214,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     askNext(nextReqs, currentField.category)
   }
 
+  function skipCurrentField() {
+    if (!currentField || !currentField.optional || sending) return
+    post("user", "Saltar")
+    const nextReqs = skipField(reqs, currentField.key)
+    setReqs(nextReqs)
+    askNext(nextReqs, currentField.category)
+  }
+
   function send(valueOverride) {
     const value = (valueOverride !== undefined ? valueOverride : input).trim()
     if (!value || sending) return
@@ -238,6 +246,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const designsSoFar = reqs ? reqsToDesigns(reqs) : []
   const pendingCategory = phase === "designAnalyzing" || phase === "designing" ? "design" : "general"
   const pendingCount = reqs ? pendingFields(reqs, pendingCategory).length : 0
+  const designGroupFields = reqs && currentField && currentField.category === "design" && currentField.designSlot
+    ? reqs.fields.filter((f) => f.category === "design" && f.designSlot === currentField.designSlot)
+    : []
 
   return (
     <div style={{ display: "flex", gap: space(4), flexWrap: "wrap" }}>
@@ -248,16 +259,56 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               {m.content}
             </Bubble>
           ))}
+          {phase === "designing" && currentField && designGroupFields.length > 0 && (
+            <div style={{ alignSelf: "flex-start", maxWidth: "92%", border: hair, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, background: C.white.hex, color: C.ink.hex, padding: space(2) }}>
+              <div style={{ fontSize: type.size.xs, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(1) }}>
+                Sub-preguntas: {currentField.designSlot.replace(/_/g, " ")}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: space(1) }}>
+                {designGroupFields.map((f, i) => {
+                  const isCurrent = f.key === currentField.key
+                  const answered = f.status !== FIELD_STATUS.ASK
+                  return (
+                    <div
+                      key={f.key}
+                      style={{
+                        display: "flex",
+                        gap: space(1),
+                        alignItems: "center",
+                        color: answered ? "#8A909A" : C.ink.hex,
+                        fontSize: isCurrent ? type.size.base : type.size.xs,
+                        fontWeight: isCurrent ? 700 : 500,
+                        background: isCurrent ? role.highlight.fill : "transparent",
+                        padding: isCurrent ? `${space(1)}px ${space(2)}px` : 0,
+                      }}
+                    >
+                      <span style={{ width: 15, height: 15, flexShrink: 0, background: answered ? "#8A909A" : role.index.fill, color: C.white.hex, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                      <span>{f.label}{f.optional ? " (opcional)" : ""}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           {/* Numbered option chips for the current question - click to answer, or type your own. */}
           {(phase === "asking" || phase === "designing") && currentField && currentField.options && currentField.options.length > 0 && !sending && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), alignSelf: "flex-start", maxWidth: "90%" }}>
+              {currentField.optional && (
+                <button
+                  onClick={skipCurrentField}
+                  style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
+                >
+                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>1</span>
+                  Saltar
+                </button>
+              )}
               {currentField.options.map((opt, i) => (
                 <button
                   key={i}
                   onClick={() => send(opt)}
                   style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
                 >
-                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + (currentField.optional ? 2 : 1)}</span>
                   {opt}
                 </button>
               ))}

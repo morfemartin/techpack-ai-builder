@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildPage1 } from "./buildPages.js"
+import { buildPage1, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 import { capGarment } from "../garments/cap.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
@@ -104,5 +104,66 @@ describe("buildPage1 with a garment that has no hand-drawn guides/callouts", () 
   it("draws no callout circles (no invented pointer coordinates)", () => {
     const svg = buildPage1("ES", hdr, bareGarment.defaultParts, null, null, bareGarment)
     expect(svg).not.toContain("<circle")
+  })
+})
+
+describe("reusable page block helpers", () => {
+  it("renders the parts list with numbered chips, translated labels, and data values", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 320, height: 100 },
+      {
+        parts: [{ id: "body", val: "Cotton twill", on: true }],
+        partLabels: { body: "Body Panel" },
+        txParts: ["Sarga de algodon"],
+        labels: { spec: "SPECS", detail: "DETAILS", file: "Archivo / Drive" },
+      }
+    )
+
+    expect(svg).toContain("SPECS")
+    expect(svg).toContain("Body Panel")
+    expect(svg).toContain("Sarga de algodon")
+    expect(svg).toContain("fill='#E11D3A'")
+  })
+
+  it("renders color specs with CMYK conversion and escapes color labels", () => {
+    const svg = renderColorSpecs({ x: 0, y: 0, width: 370, height: 120 }, { colors: [{ name: "Blue & White", hex: "#003DA5" }] })
+
+    expect(svg).toContain("PANTONE / CMYK")
+    expect(svg).toContain("Blue &amp; White")
+    expect(svg).toContain("| #003DA5")
+  })
+
+  it("renders embroidery specs and stop sequences from partial data", () => {
+    const svg = renderEmbSpecs(
+      { x: 0, y: 0, width: 430, height: 340 },
+      {
+        title: "Ficha Tecnica de Bordado",
+        emb: {
+          machine: "Tajima",
+          stitches: "12000",
+          stops: 2,
+          trims: 5,
+          stopSeq: [{ stop: 1, name: "Rojo", stitches: 5000 }],
+        },
+      }
+    )
+
+    expect(svg).toContain("Ficha Tecnica de Bordado")
+    expect(svg).toContain("Tajima")
+    expect(svg).toContain("12000")
+    expect(svg).toContain("Stop 1: Rojo (5000 pt.)")
+  })
+
+  it("renders illustration placeholders without drawing garment vectors", () => {
+    const svg = renderIllustrationZone(
+      { x: 10, y: 20, width: 300, height: 180 },
+      { slots: 3, refs: ["Front", "Back"], note: "Show front and back construction notes." }
+    )
+
+    expect(svg).toContain("Front")
+    expect(svg).toContain("Back")
+    expect(svg).toContain("Referencia 3")
+    expect(svg).toContain("Show front and back construction notes.")
+    expect(svg).not.toContain("<path")
   })
 })
