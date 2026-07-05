@@ -32,8 +32,10 @@ function mockStreamResponse(chunks, { ok = true, status = 200, errorBody } = {})
   }
 }
 
-function sseEvent(content) {
-  return "data: " + JSON.stringify({ choices: [{ delta: { content, role: "assistant" } }] }) + "\n\n"
+function sseEvent(content, finishReason) {
+  const delta = finishReason ? {} : { content, role: "assistant" }
+  const choice = finishReason ? { delta, finish_reason: finishReason } : { delta }
+  return "data: " + JSON.stringify({ choices: [choice] }) + "\n\n"
 }
 
 describe("deepseekClient", () => {
@@ -174,9 +176,21 @@ describe("deepseekChatStream", () => {
     expect(onEvent).not.toHaveBeenCalled()
   })
 
-  it("rejects when the stream ends without [DONE] (a truncated generation)", async () => {
-    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("incompleto")]))
+  it("rejects when the stream ends with no content at all (dropped before anything arrived)", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([]))
     await expect(deepseekChatStream({ messages: [] })).rejects.toBeInstanceOf(DeepSeekError)
+  })
+
+  it("returns the accumulated content when the stream ends without [DONE] (dropped mid-response)", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("incompleto")]))
+    const result = await deepseekChatStream({ messages: [] })
+    expect(result).toBe("incompleto")
+  })
+
+  it("returns the accumulated content when the model hits the token cap (finish_reason: length)", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("truncado a la mitad"), sseEvent(null, "length")]))
+    const result = await deepseekChatStream({ messages: [] })
+    expect(result).toBe("truncado a la mitad")
   })
 
   it("skips a malformed SSE event without breaking the rest of the stream", async () => {

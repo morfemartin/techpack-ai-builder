@@ -131,10 +131,13 @@ async function openStream({ messages, maxTokens, temperature, model, thinking })
 // tokensSoFar counts SSE EVENTS, not real tokens - NVIDIA batches several
 // tokens per event, so this is only ever an estimate for a progress bar.
 //
-// Resolves with the final assembled content string once "[DONE]" arrives.
+// Resolves with the final assembled content string once the stream ends
+// cleanly - either "[DONE]" arrives, or an event carries
+// `finish_reason: "length"` (the model hit maxTokens; content up to that
+// point is still real and worth handing back for a JSON-repair attempt).
 // Throws DeepSeekError if the retries opening the stream are exhausted, on a
-// network failure, or if the stream ends without "[DONE]" (a truncated
-// generation - e.g. a dropped connection mid-response).
+// network failure, or if the stream ends with no recognized finish signal
+// and no content at all (a dropped connection before anything came through).
 export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent } = {}) {
   let res
   for (let attempt = 1; attempt <= RETRYABLE_MAX_ATTEMPTS; attempt++) {
@@ -154,6 +157,7 @@ export async function deepseekChatStream({ messages, maxTokens = 1000, temperatu
   let content = ""
   let eventCount = 0
   let finished = false
+  let finishReason = null
 
   while (!finished) {
     const { done: readerDone, value } = await reader.read()
@@ -176,18 +180,39 @@ export async function deepseekChatStream({ messages, maxTokens = 1000, temperatu
       } catch {
         continue // skip a malformed/partial event rather than crashing the stream
       }
-      const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta
-      const deltaText = (delta && delta.content) || ""
+      const choice = evt && evt.choices && evt.choices[0]
+      const deltaText = (choice && choice.delta && choice.delta.content) || ""
       if (deltaText) {
         content += deltaText
         eventCount++
         if (onEvent) onEvent({ contentSoFar: content, deltaText, tokensSoFar: eventCount })
       }
+      // OpenAI-compatible streams carry the terminal reason on the last chunk:
+      // "stop" = clean end (some providers omit the "[DONE]" sentinel, so trust
+      // this too), "length" = the model hit max_tokens (JSON is truncated but
+      // usually near-complete). Either way the generation is over.
+      if (choice && choice.finish_reason) {
+        finishReason = choice.finish_reason
+        if (finishReason === "stop") finished = true
+        break
+      }
     }
   }
 
-  if (!finished) throw new DeepSeekError("La respuesta del asistente de IA se corto antes de terminar.", { content })
-  if (!content) throw new DeepSeekError("El asistente de IA devolvio una respuesta vacia.", { streamed: true })
+  // Any accumulated content is worth returning even when the stream ended on a
+  // "length" cap or dropped mid-response: the caller parses with a truncated-JSON
+  // salvage pass (repairTruncatedJSON), so a nearly-complete answer is recovered
+  // instead of thrown away. Only a genuinely empty result is an error - and the
+  // message distinguishes a clean-but-empty completion from a real cutoff.
+  if (!content) {
+    const cleanEnd = finished || finishReason === "stop"
+    throw new DeepSeekError(
+      cleanEnd
+        ? "El asistente de IA devolvio una respuesta vacia."
+        : "La respuesta del asistente de IA se corto antes de terminar.",
+      { streamed: true, finishReason }
+    )
+  }
   return content
 }
 

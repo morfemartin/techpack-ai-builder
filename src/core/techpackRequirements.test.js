@@ -184,6 +184,19 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(result.garmentType).toBe("Camisa")
     expect(result.fields[0].label).toBe("Tela")
   })
+
+  it("salvages a usable field list when the stream hit the token cap mid-JSON", async () => {
+    // deepseekChatStream now resolves with whatever content it accumulated
+    // even on a finish_reason:"length" cutoff (see deepseekClient.js) - this
+    // simulates that: 8 complete fields, cut mid-way through the 9th.
+    const fields = Array.from({ length: 8 }, (_, i) => `{"key":"f${i}","label":"F${i}","category":"general","status":"ask","options":["A"],"why":"x"}`).join(",")
+    deepseekChatStream.mockResolvedValue(`{"garmentType":"Camisa","fields":[${fields},{"key":"f8`)
+
+    const result = await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [], onProgress: () => {} })
+    expect(result.garmentType).toBe("Camisa")
+    expect(result.fields).toHaveLength(8)
+    expect(result.fields[7].key).toBe("f7")
+  })
 })
 
 describe("mergeDesignFields", () => {

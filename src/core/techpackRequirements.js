@@ -12,6 +12,25 @@
 // matter how long the conversation gets.
 
 import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
+import { repairTruncatedJSON } from "./jsonSalvage.js"
+
+// Shared by the three DeepSeek calls below: a response cut off by the token
+// cap (finish_reason: "length") still carries real, mostly-complete JSON -
+// try to salvage it before giving up, so a truncated 9th field doesn't throw
+// away the 8 that already generated cleanly.
+function parseJSONOrRepair(raw, errorMessage) {
+  const cleaned = raw.replace(/```json|```/g, "").trim()
+  try {
+    return JSON.parse(cleaned)
+  } catch {}
+  const repaired = repairTruncatedJSON(cleaned)
+  if (repaired) {
+    try {
+      return JSON.parse(repaired)
+    } catch {}
+  }
+  throw new DeepSeekError(errorMessage, { raw })
+}
 
 // Rough calibration for the progress estimate below: a typical analysis
 // completion runs ~600-700 tokens against the 3000-token cap, and NVIDIA
@@ -76,7 +95,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
   const raw = onProgress
     ? await deepseekChatStream({
         messages: [{ role: "user", content: instructions }],
-        maxTokens: 3000,
+        maxTokens: 3800,
         temperature: 0.2,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
@@ -87,16 +106,10 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
       })
     : await deepseekChat({
         messages: [{ role: "user", content: instructions }],
-        maxTokens: 3000,
+        maxTokens: 3800,
         temperature: 0.2,
       })
-  const cleaned = raw.replace(/```json|```/g, "").trim()
-  let parsed
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch (e) {
-    throw new DeepSeekError("El asistente de IA no devolvio un analisis de requisitos valido.", { raw })
-  }
+  const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de requisitos valido.")
   return normalizeRequirements(parsed, garmentType)
 }
 
@@ -210,7 +223,7 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
   const raw = onProgress
     ? await deepseekChatStream({
         messages: [{ role: "user", content: instructions }],
-        maxTokens: 3000,
+        maxTokens: 3800,
         temperature: 0.2,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
@@ -221,16 +234,10 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
       })
     : await deepseekChat({
         messages: [{ role: "user", content: instructions }],
-        maxTokens: 3000,
+        maxTokens: 3800,
         temperature: 0.2,
       })
-  const cleaned = raw.replace(/```json|```/g, "").trim()
-  let parsed
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch (e) {
-    throw new DeepSeekError("El asistente de IA no devolvio un analisis de disenos valido.", { raw })
-  }
+  const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de disenos valido.")
   return normalizeRequirements(parsed, garmentType)
 }
 
@@ -324,7 +331,7 @@ export async function authorIllustrationBriefs({ garmentType, designs, lang = "E
   const raw = onProgress
     ? await deepseekChatStream({
         messages: [{ role: "user", content: instructions }],
-        maxTokens: 3000,
+        maxTokens: 3800,
         temperature: 0.2,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
@@ -335,18 +342,11 @@ export async function authorIllustrationBriefs({ garmentType, designs, lang = "E
       })
     : await deepseekChat({
         messages: [{ role: "user", content: instructions }],
-        maxTokens: 3000,
+        maxTokens: 3800,
         temperature: 0.2,
       })
 
-  const cleaned = raw.replace(/```json|```/g, "").trim()
-  let parsed
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch (e) {
-    throw new DeepSeekError("El asistente de IA no devolvio briefs de ilustracion validos.", { raw })
-  }
-
+  const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio briefs de ilustracion validos.")
   const briefs = parsed && Array.isArray(parsed.briefs) ? parsed.briefs : []
   return {
     briefs: briefs
