@@ -6,44 +6,23 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { palette, type } from "../design/tokens.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-/* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
- * Built on the flexbox-style layout engine (src/layout/) instead of hand-computed
- * pixel math. The spec-table row heights in particular used to be a manual
- * `Math.floor(bodyH / partsCount)` formula that had to be re-derived any time the
- * page geometry changed - now every row is just `leaf({ grow: 1, min: 16 })` and
- * the solver distributes the available height across however many parts are
- * active. That's the "flex by data volume" property the engine exists for.
- */
-export function buildPage1(lang, hdr, parts, logo, txData, garment) {
-  var t = T[lang] || T.ES
-  var pn = garment.partLabels[lang] || garment.partLabels.ES
-  var W = 1200, H = 900, hH = 80, discH = 28
-  var lW = 320
-  var ap = parts.filter(function (p) { return p.on })
-  var txP = txData && txData.parts ? txData.parts : null
-
-  var headerLeaf = leaf({
-    basis: hH,
-    render: (b) => "<g transform='translate(" + b.x + " " + b.y + ")'>" + svgHeader(hdr, logo, b.width, b.height) + "</g>",
-  })
-
-  var detailsBar = leaf({
-    basis: 22,
-    // role.priority: a section header bar spanning the page - solid blue, white text.
-    render: (b) => R(b.x, b.y, b.width, b.height, palette.blue.hex, palette.ink.hex, "0.8") + TX(b.x + b.width / 2, b.y + b.height / 2, "DETAILS", 11, true, "middle", palette.white.hex),
-  })
+export function renderPartsList(box, { parts, partLabels, txParts, labels } = {}) {
+  var safeParts = Array.isArray(parts) ? parts.filter(function (p) { return p && p.on !== false }) : []
+  var pn = partLabels || {}
+  var txP = Array.isArray(txParts) ? txParts : null
+  var lx = labels || {}
 
   var tableHeaderRow = leaf({
     basis: 20,
     render: (b) =>
       R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
       TX(b.x + b.width * 0.11, b.y + b.height / 2, "#", 8, true, "middle") +
-      TX(b.x + b.width * 0.32, b.y + b.height / 2, t.sp, 8, true, "middle") +
-      TX(b.x + b.width * 0.62, b.y + b.height / 2, t.dt, 8, true, "middle") +
-      TX(b.x + b.width * 0.82, b.y + b.height / 2, "Archivo / Drive", 7, true, "middle"),
+      TX(b.x + b.width * 0.32, b.y + b.height / 2, lx.spec || "SPECS", 8, true, "middle") +
+      TX(b.x + b.width * 0.62, b.y + b.height / 2, lx.detail || "DETAILS", 8, true, "middle") +
+      TX(b.x + b.width * 0.82, b.y + b.height / 2, lx.file || "Archivo / Drive", 7, true, "middle"),
   })
 
-  var partRows = ap.map((p, i) =>
+  var partRows = safeParts.map((p, i) =>
     leaf({
       grow: 1,
       min: 16,
@@ -72,7 +51,144 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
     })
   )
 
-  var specTable = col({ basis: lW }, [tableHeaderRow, ...partRows])
+  return renderLayoutToSVG(solveLayout(col({}, [tableHeaderRow, ...partRows]), box))
+}
+
+export function renderColorSpecs(box, { colors } = {}) {
+  var s = ""
+  var ty = box.y
+  var W = box.width
+  var limitY = box.y + box.height
+
+  s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
+  ty += 16
+  // role.priority bar, same treatment as the embroidery title below it.
+  s += R(box.x + 10, ty - 10, W - 20, 18, palette.blue.hex, "none")
+  s += TX(box.x + W / 2, ty - 1, "PANTONE / CMYK", 9, true, "middle", palette.white.hex)
+  ty += 18
+  ;(colors || []).forEach(function (col) {
+    if (!col.hex || ty > limitY - 32) return
+    var cm = h2c(col.hex)
+    s += R(box.x + 12, ty - 10, 20, 20, col.hex, palette.ink.hex, "0.5")
+    s += TX(box.x + 38, ty - 2, col.name || col.hex, 8, true, "start")
+    s += TX(box.x + 38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
+    ty += 30
+  })
+  return s
+}
+
+function colorSpecsHeight(colors, startY, limitY) {
+  var ty = startY + 34
+  ;(colors || []).forEach(function (col) {
+    if (!col.hex || ty > limitY - 32) return
+    ty += 30
+  })
+  return ty - startY
+}
+
+export function renderEmbSpecs(box, { emb, title } = {}) {
+  if (!emb) return ""
+  var s = ""
+  var ef = emb
+  var ty = box.y
+  var W = box.width
+  var limitY = box.y + box.height
+
+  s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
+  ty += 16
+  s += R(box.x + 10, ty - 10, W - 20, 18, palette.blue.hex, "none")
+  s += TX(box.x + W / 2, ty - 1, title || "Embroidery Tech Sheet", 9, true, "middle", palette.white.hex)
+  ty += 18
+  var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
+  er.forEach(function (row) {
+    if (ty > limitY - 16) return
+    s += TX(box.x + 12, ty, row[0] + ":", 8, true, "start") + TX(box.x + W * 0.55, ty, row[1] || NA, 8, false, "start", undefined, type.svgFonts.data)
+    ty += 16
+  })
+  if (ef.stopSeq && ef.stopSeq.length > 0 && ty < limitY - 40) {
+    ty += 4
+    s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#eee' stroke-width='0.8'/>"
+    ty += 14
+    s += TX(box.x + 12, ty, "Secuencia:", 8, true, "start")
+    ty += 14
+    ef.stopSeq.forEach(function (st) {
+      if (ty > limitY - 14) return
+      s += TX(box.x + 14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", 8, false, "start", undefined, type.svgFonts.data)
+      ty += 13
+    })
+  }
+  return s
+}
+
+export function renderIllustrationZone(box, { slots, refs, note } = {}) {
+  var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
+  var noteText = note || ""
+  var noteH = noteText ? Math.min(110, Math.max(54, box.height * 0.18)) : 0
+  var gridH = box.height - noteH
+  var cols = Math.ceil(Math.sqrt(slotCount))
+  var rows = Math.ceil(slotCount / cols)
+  var gap = 12
+  var cellW = (box.width - gap * (cols + 1)) / cols
+  var cellH = (gridH - gap * (rows + 1)) / rows
+  var s = R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+
+  for (var i = 0; i < slotCount; i++) {
+    var c = i % cols
+    var r = Math.floor(i / cols)
+    var x = box.x + gap + c * (cellW + gap)
+    var y = box.y + gap + r * (cellH + gap)
+    var chip = 18
+    var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Referencia " + (i + 1)
+    s += R(x, y, cellW, cellH, "none", "#ddd", "0.8")
+    s += R(x + 8, y + 8, chip, chip, palette.red.hex, palette.red.hex, "0")
+    s += TX(x + 8 + chip / 2, y + 8 + chip / 2, i + 1, 8, true, "middle", palette.white.hex, type.svgFonts.data)
+    s += TX(x + cellW / 2, y + cellH / 2, refLabel, 9, false, "middle", "#B7BCC6")
+  }
+
+  if (noteText) {
+    var noteY = box.y + box.height - noteH
+    s += R(box.x + 12, noteY + 8, box.width - 24, noteH - 16, palette.white.hex, palette.ink.hex, "0.8")
+    s += R(box.x + 12, noteY + 8, 4, noteH - 16, palette.yellow.hex, palette.yellow.hex, "0")
+    var lines = wrapLines(noteText, box.width - 52, 10)
+    lines.slice(0, Math.max(1, Math.floor((noteH - 28) / 14))).forEach(function (line, i) {
+      s += TX(box.x + 26, noteY + 22 + i * 14, line, 10, false, "start")
+    })
+  }
+
+  return s
+}
+
+/* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
+ * Built on the flexbox-style layout engine (src/layout/) instead of hand-computed
+ * pixel math. The spec-table row heights in particular used to be a manual
+ * `Math.floor(bodyH / partsCount)` formula that had to be re-derived any time the
+ * page geometry changed - now every row is just `leaf({ grow: 1, min: 16 })` and
+ * the solver distributes the available height across however many parts are
+ * active. That's the "flex by data volume" property the engine exists for.
+ */
+export function buildPage1(lang, hdr, parts, logo, txData, garment) {
+  var t = T[lang] || T.ES
+  var pn = garment.partLabels[lang] || garment.partLabels.ES
+  var W = 1200, H = 900, hH = 80, discH = 28
+  var lW = 320
+  var ap = parts.filter(function (p) { return p.on })
+  var txP = txData && txData.parts ? txData.parts : null
+
+  var headerLeaf = leaf({
+    basis: hH,
+    render: (b) => "<g transform='translate(" + b.x + " " + b.y + ")'>" + svgHeader(hdr, logo, b.width, b.height) + "</g>",
+  })
+
+  var detailsBar = leaf({
+    basis: 22,
+    // role.priority: a section header bar spanning the page - solid blue, white text.
+    render: (b) => R(b.x, b.y, b.width, b.height, palette.blue.hex, palette.ink.hex, "0.8") + TX(b.x + b.width / 2, b.y + b.height / 2, "DETAILS", 11, true, "middle", palette.white.hex),
+  })
+
+  var specTable = leaf({
+    basis: lW,
+    render: (b) => renderPartsList(b, { parts: ap, partLabels: pn, txParts: txP, labels: { spec: t.sp, detail: t.dt, file: "Archivo / Drive" } }),
+  })
 
   function buildViewCell(vi) {
     return leaf({
@@ -179,47 +295,12 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   }
 
   ty += 6
-  s += "<line x1='10' y1='" + ty + "' x2='" + (LW - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
-  ty += 16
-  // role.priority bar, same treatment as the embroidery title below it.
-  s += R(10, ty - 10, LW - 20, 18, palette.blue.hex, "none")
-  s += TX(LW / 2, ty - 1, "PANTONE / CMYK", 9, true, "middle", palette.white.hex)
-  ty += 18
-  ;(d.colors || []).forEach(function (col) {
-    if (!col.hex || ty > by + bodyH - 32) return
-    var cm = h2c(col.hex)
-    s += R(12, ty - 10, 20, 20, col.hex, palette.ink.hex, "0.5")
-    s += TX(38, ty - 2, col.name || col.hex, 8, true, "start")
-    s += TX(38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
-    ty += 30
-  })
+  s += renderColorSpecs({ x: 0, y: ty, width: LW, height: by + bodyH - ty }, { colors: d.colors })
+  ty += colorSpecsHeight(d.colors, ty, by + bodyH)
 
   if (isEmb && d.emb) {
-    var ef = d.emb
     ty += 8
-    s += "<line x1='10' y1='" + ty + "' x2='" + (LW - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
-    ty += 16
-    s += R(10, ty - 10, LW - 20, 18, palette.blue.hex, "none")
-    s += TX(LW / 2, ty - 1, t.embTitle, 9, true, "middle", palette.white.hex)
-    ty += 18
-    var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
-    er.forEach(function (row) {
-      if (ty > by + bodyH - 16) return
-      s += TX(12, ty, row[0] + ":", 8, true, "start") + TX(LW * 0.55, ty, row[1] || NA, 8, false, "start", undefined, type.svgFonts.data)
-      ty += 16
-    })
-    if (ef.stopSeq && ef.stopSeq.length > 0 && ty < by + bodyH - 40) {
-      ty += 4
-      s += "<line x1='10' y1='" + ty + "' x2='" + (LW - 10) + "' y2='" + ty + "' stroke='#eee' stroke-width='0.8'/>"
-      ty += 14
-      s += TX(12, ty, "Secuencia:", 8, true, "start")
-      ty += 14
-      ef.stopSeq.forEach(function (st) {
-        if (ty > by + bodyH - 14) return
-        s += TX(14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", 8, false, "start", undefined, type.svgFonts.data)
-        ty += 13
-      })
-    }
+    s += renderEmbSpecs({ x: 0, y: ty, width: LW, height: by + bodyH - ty }, { emb: d.emb, title: t.embTitle })
   }
 
   var pad = 30
