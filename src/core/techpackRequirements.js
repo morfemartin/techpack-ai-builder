@@ -287,3 +287,88 @@ export function reqsToDesigns(reqs) {
     }
   })
 }
+
+// Third DeepSeek call in the design-level pass (F3.3): once a design element's
+// fields are fully answered, ask the model to author a concrete instruction
+// - a "brief" - describing exactly what the illustration/artwork for that
+// page should show, informed by the real details already collected (not a
+// generic placeholder). This is authored text for a human illustrator, never
+// a question - no options/status/ask semantics, so it doesn't reuse the
+// fields/normalizeRequirements shape at all.
+export async function authorIllustrationBriefs({ garmentType, designs, lang = "ES", onProgress }) {
+  if (!Array.isArray(designs) || designs.length === 0) return { briefs: [] }
+
+  const designsList = designs
+    .map((d, i) => {
+      const name = (d && d.name) || "elemento_" + i
+      const pos = (d && d.pos) || ""
+      const tec = (d && d.tec) || ""
+      const posDetail = (d && d.posDetail) || ""
+      const notes = (d && d.notes) || ""
+      return '- "' + name + '": posicion="' + pos + '", tecnica="' + tec + '", detallePos="' + posDetail + '", notas="' + notes + '"'
+    })
+    .join("\n")
+
+  const instructions =
+    "Sos un tecnico textil experto redactando briefs de ilustracion para fichas tecnicas de una prenda tipo '" + garmentType + "'. " +
+    "A continuacion te doy una lista de elementos de diseno YA DEFINIDOS (nombre, posicion, tecnica, detalle de posicion, notas). " +
+    "Para CADA elemento, redacta UN brief de ilustracion concreto y especifico de 1 a 3 oraciones en espanol, " +
+    "describiendo EXACTAMENTE lo que debe mostrar la ilustracion/arte para la pagina de ficha tecnica de ese elemento. " +
+    "El brief debe basarse en los detalles reales proporcionados (materiales, cantidades, colores, dimensiones, ubicacion exacta) " +
+    "mencionandolos explicitamente, NO generico. Es un brief PARA un ilustrador/disenador humano, no una pregunta al usuario. " +
+    "No incluyas opciones, estados ni semantica de pregunta.\n\n" +
+    "Elementos de diseno:\n" + designsList + "\n\n" +
+    "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
+    '{"briefs": [{"name": "...", "illustrationBrief": "..."}]}'
+
+  const raw = onProgress
+    ? await deepseekChatStream({
+        messages: [{ role: "user", content: instructions }],
+        maxTokens: 3000,
+        temperature: 0.2,
+        onEvent: ({ contentSoFar, tokensSoFar }) => {
+          onProgress({
+            percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
+            lastLabel: extractLastCompletedLabel(contentSoFar),
+          })
+        },
+      })
+    : await deepseekChat({
+        messages: [{ role: "user", content: instructions }],
+        maxTokens: 3000,
+        temperature: 0.2,
+      })
+
+  const cleaned = raw.replace(/```json|```/g, "").trim()
+  let parsed
+  try {
+    parsed = JSON.parse(cleaned)
+  } catch (e) {
+    throw new DeepSeekError("El asistente de IA no devolvio briefs de ilustracion validos.", { raw })
+  }
+
+  const briefs = parsed && Array.isArray(parsed.briefs) ? parsed.briefs : []
+  return {
+    briefs: briefs
+      .filter((b) => b && typeof b.name === "string" && b.name.trim())
+      .map((b) => ({
+        name: b.name.trim(),
+        illustrationBrief: typeof b.illustrationBrief === "string" ? b.illustrationBrief : "",
+      })),
+  }
+}
+
+// Pure: attaches each design's matching brief (by exact name) without
+// mutating the input array - defaults to "" when nothing matched (a failed/
+// skipped brief authoring pass shouldn't block the rest of the draft).
+export function attachIllustrationBriefs(designs, briefs) {
+  const safeDesigns = Array.isArray(designs) ? designs : []
+  const safeBriefs = Array.isArray(briefs) ? briefs : []
+  const briefMap = new Map()
+  safeBriefs.forEach((b) => {
+    if (b && typeof b.name === "string" && b.name) {
+      briefMap.set(b.name, typeof b.illustrationBrief === "string" ? b.illustrationBrief : "")
+    }
+  })
+  return safeDesigns.map((d) => ({ ...d, illustrationBrief: briefMap.has(d && d.name) ? briefMap.get(d.name) : "" }))
+}

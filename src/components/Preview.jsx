@@ -210,6 +210,18 @@ export function Preview({ lang, hdr, parts, designs, logo, page, txCache, garmen
                     </div>
                   )}
                 </div>
+              ) : d.illustrationBrief ? (
+                // role.highlight: same white-box/ink-keyline/thick-yellow-left-accent
+                // note language used for the "covers the whole garment" callout
+                // above - here it carries the AI-authored illustration brief (F3.3)
+                // instead of inventing vector art the model can't actually draw.
+                <div style={{ display: "flex", width: "90%", maxHeight: "80%", border: `1px solid ${C.ink.hex}`, background: C.white.hex }}>
+                  <div style={{ width: 4, flexShrink: 0, background: role.highlight.fill }} />
+                  <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8, overflow: "hidden" }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em", color: C.ink.hex }}>Ilustración a realizar</div>
+                    <div style={{ fontSize: 11, fontFamily: type.fonts.ui, color: C.ink.hex, lineHeight: 1.4 }}>{d.illustrationBrief}</div>
+                  </div>
+                </div>
               ) : (
                 <div style={{ textAlign: "center", color: "#B7BCC6", fontSize: 11 }}>
                   <div style={{ fontSize: 24, marginBottom: 8 }}>+</div>

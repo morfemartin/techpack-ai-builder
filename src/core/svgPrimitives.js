@@ -83,3 +83,28 @@ export function svgHeader(hdr, logo, W, hH) {
 export function svgDisc(t, hdr, W, dy, discH) {
   return R(0, dy, W, discH, palette.white.hex, palette.ink.hex, "0.8") + TX(W / 2, dy + discH / 2, t.disc + " " + (hdr.brand || "[Marca]") + t.discSfx, 9, false, "middle", palette.ink.hex)
 }
+
+// Word-wraps plain text into lines that roughly fit `maxWidth` px at
+// `fontSize`. No real text measurement is available here (this builds raw
+// SVG <text> strings, in both browser and Node/vitest) - avgCharWidth is a
+// practical heuristic for this project's UI sans-serif, not exact metrics.
+export const wrapLines = (text, maxWidth, fontSize) => {
+  if (text == null || text === "") return []
+  const avgCharWidth = fontSize * 0.55
+  const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth))
+  const words = String(text).split(/\s+/)
+  const lines = []
+  let currentLine = ""
+  for (const word of words) {
+    if (currentLine === "") {
+      currentLine = word
+    } else if ((currentLine + " " + word).length <= maxCharsPerLine) {
+      currentLine += " " + word
+    } else {
+      lines.push(currentLine)
+      currentLine = word
+    }
+  }
+  if (currentLine !== "") lines.push(currentLine)
+  return lines
+}

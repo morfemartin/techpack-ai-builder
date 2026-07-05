@@ -62,7 +62,7 @@ describe("mapChatDesignsToDesigns", () => {
       [{ name: "Botones", pos: "Frente", tec: "Bordado 3D", driveLink: "drive.google.com/xyz" }, { name: "Logo" }],
       "Toda la prenda"
     )
-    expect(result[0]).toEqual({ name: "Botones", pos: "Frente", posDetail: "", tec: "Bordado 3D", driveLink: "drive.google.com/xyz" })
-    expect(result[1]).toEqual({ name: "Logo", pos: "Toda la prenda", posDetail: "", tec: "Bordado 3D", driveLink: "" })
+    expect(result[0]).toEqual({ name: "Botones", pos: "Frente", posDetail: "", tec: "Bordado 3D", driveLink: "drive.google.com/xyz", illustrationBrief: "" })
+    expect(result[1]).toEqual({ name: "Logo", pos: "Toda la prenda", posDetail: "", tec: "Bordado 3D", driveLink: "", illustrationBrief: "" })
   })
 })

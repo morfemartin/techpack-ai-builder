@@ -1,5 +1,5 @@
 import { T } from "../core/i18n.js"
-import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc } from "../core/svgPrimitives.js"
+import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
@@ -243,6 +243,31 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
     var hLabel = (d.h ? d.h + " mm" : "h")
     s += dimLine(imgX, imgY, imgX + dw, imgY + dh, wLabel, dh + 30, true)
     s += dimLine(imgX, imgY, imgX + dw, imgY + dh, hLabel, dw + 30, false)
+  } else if (d.illustrationBrief) {
+    // role.highlight: same white-box/ink-keyline/thick-yellow-left-accent
+    // treatment as the "covers the whole garment" note above - here it
+    // carries the AI-authored illustration brief (F3.3) instead of inventing
+    // vector art: a concrete instruction for a human illustrator to execute,
+    // composed with the layout engine so it respects the page's grid/spacing.
+    var briefRoot = row({}, [
+      leaf({ basis: 4, render: (b) => R(b.x, b.y, b.width, b.height, palette.yellow.hex, palette.yellow.hex, "0") }),
+      col({ grow: 1, padding: 16, gap: 8 }, [
+        leaf({ basis: 14, render: (b) => TX(b.x, b.y + 7, "ILUSTRACION A REALIZAR", 9, true, "start") }),
+        leaf({
+          grow: 1,
+          render: (b) => {
+            var lines = wrapLines(d.illustrationBrief, b.width, 11)
+            var lh = 16
+            var s2 = ""
+            lines.forEach(function (line, i) {
+              s2 += TX(b.x, b.y + 10 + i * lh, line, 11, false, "start")
+            })
+            return s2
+          },
+        }),
+      ]),
+    ])
+    s += renderLayoutToSVG(solveLayout(briefRoot, { x: RX, y: by, width: RW, height: RH }))
   } else {
     s += TX(RX + RW / 2, by + RH / 2, t.illZone, 11, false, "middle", "#B7BCC6")
     var cors = [[RX + 20, by + 20], [RX + 20, by + RH - 20], [RX + RW - 20, by + 20], [RX + RW - 20, by + RH - 20]]
