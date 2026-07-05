@@ -48,6 +48,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
   const [currentField, setCurrentField] = useState(null)
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
+  const [progress, setProgress] = useState(null) // { percent, lastLabel } | null - only set while streaming the analysis
   const [error, setError] = useState(null)
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
@@ -90,8 +91,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
   async function runAnalysis(garmentType) {
     setSending(true)
     setError(null)
+    setProgress({ percent: 0, lastLabel: null })
     try {
-      const analysis = await analyzeRequirements({ garmentType, seed: seed || {}, tecs, lang: "ES" })
+      const analysis = await analyzeRequirements({
+        garmentType,
+        seed: seed || {},
+        tecs,
+        lang: "ES",
+        onProgress: (p) => setProgress(p),
+      })
       setReqs(analysis)
       const assumed = analysis.fields.filter((f) => f.status === FIELD_STATUS.ASSUMED && String(f.value || "").trim())
       if (assumed.length > 0) {
@@ -104,6 +112,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
       analyzedFor.current = null // allow a retry
     } finally {
       setSending(false)
+      setProgress(null)
     }
   }
 
@@ -167,7 +176,16 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
               ))}
             </div>
           )}
-          {sending && <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6, fontFamily: type.fonts.data }}>Pensando...</span>}
+          {sending && (
+            <div style={{ display: "flex", flexDirection: "column", gap: space(1), alignSelf: "flex-start", maxWidth: "90%", width: 260 }}>
+              <div style={{ height: 6, background: C.canvas.hex, border: hair }}>
+                <div style={{ height: "100%", width: (progress ? progress.percent : 0) + "%", background: role.priority.fill, transition: "width 160ms linear" }} />
+              </div>
+              <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6, fontFamily: type.fonts.data }}>
+                {progress && progress.lastLabel ? "Analizando: " + progress.lastLabel + "…" : "Analizando la prenda…"}
+              </span>
+            </div>
+          )}
         </div>
         {error && (
           <div style={{ padding: `${space(2)}px ${space(3)}px`, borderTop: hair, display: "flex", alignItems: "center", gap: space(2), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>

@@ -11,7 +11,27 @@
 // hitting DeepSeek every turn - bounded, predictable, and cheap at runtime no
 // matter how long the conversation gets.
 
-import { deepseekChat, DeepSeekError } from "./deepseekClient.js"
+import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
+
+// Rough calibration for the progress estimate below: a typical analysis
+// completion runs ~600-700 tokens against the 3000-token cap, and NVIDIA
+// batches several tokens per SSE event - observed live around ~50-70 events
+// for a full run. Not exact (event count != token count), just a live signal
+// for a progress bar, same spirit as the retry-delay constants in
+// deepseekClient.js.
+const ESTIMATED_EVENT_BUDGET = 60
+
+// Only trusts a field's "label" once its whole object has closed - anchored
+// on "why" because it's the LAST key in this prompt's fixed field shape (see
+// the JSON template below), so seeing it means the field just finished
+// generating, never a label caught mid-write.
+export function extractLastCompletedLabel(text) {
+  const re = /"label"\s*:\s*"([^"]+)"[^{}]*"why"\s*:\s*"[^"]*"\s*\}/g
+  let match
+  let last = null
+  while ((match = re.exec(text))) last = match[1]
+  return last
+}
 
 // A field's status:
 // - "known"   : value came from the seed (CSV/vision/earlier answer) - don't ask
@@ -30,7 +50,7 @@ export const FIELD_STATUS = { KNOWN: "known", ASSUMED: "assumed", ASK: "ask" }
  *   status: "known"|"assumed"|"ask", value?: string,
  *   options?: string[], why?: string }>}}
  */
-export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES" }) {
+export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES", onProgress }) {
   const seedText = seed && Object.keys(seed).length > 0 ? JSON.stringify(seed) : "(sin datos previos)"
   const instructions =
     "Sos un tecnico textil experto armando la ficha tecnica de una prenda tipo '" + garmentType + "'. " +
@@ -53,11 +73,23 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
     '{"key": "identificadorEnIngles", "label": "Etiqueta en espanol", "category": "general", ' +
     '"status": "ask", "value": "", "options": ["Opcion A", "Opcion B"], "why": "por que importa (breve)"}]}'
 
-  const raw = await deepseekChat({
-    messages: [{ role: "user", content: instructions }],
-    maxTokens: 3000,
-    temperature: 0.2,
-  })
+  const raw = onProgress
+    ? await deepseekChatStream({
+        messages: [{ role: "user", content: instructions }],
+        maxTokens: 3000,
+        temperature: 0.2,
+        onEvent: ({ contentSoFar, tokensSoFar }) => {
+          onProgress({
+            percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
+            lastLabel: extractLastCompletedLabel(contentSoFar),
+          })
+        },
+      })
+    : await deepseekChat({
+        messages: [{ role: "user", content: instructions }],
+        maxTokens: 3000,
+        temperature: 0.2,
+      })
   const cleaned = raw.replace(/```json|```/g, "").trim()
   let parsed
   try {

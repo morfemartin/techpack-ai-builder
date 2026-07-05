@@ -1,8 +1,19 @@
-import { describe, it, expect } from "vitest"
-import { normalizeRequirements, pendingFields, applyAnswer, isComplete, reqsToParts } from "./techpackRequirements.js"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { normalizeRequirements, pendingFields, applyAnswer, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
-// Note: analyzeRequirements is NOT tested here - it hits the network. Only the
-// pure walker helpers + the defensive normalizer are covered.
+// Note: analyzeRequirements's real network behavior isn't tested here -
+// deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
+// Only the pure walker helpers, the defensive normalizer, the label-extraction
+// heuristic, and analyzeRequirements's onProgress wiring (mocked) are covered.
+
+vi.mock("./deepseekClient.js", () => ({
+  deepseekChat: vi.fn(),
+  deepseekChatStream: vi.fn(),
+  DeepSeekError: class DeepSeekError extends Error {},
+}))
+
+import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
+import { analyzeRequirements } from "./techpackRequirements.js"
 
 describe("normalizeRequirements", () => {
   it("drops fields with no valid key and applies defaults", () => {
@@ -122,5 +133,55 @@ describe("reqsToParts", () => {
     expect(labels).not.toContain("Cierre") // still ask
     expect(labels).not.toContain("Forro") // whitespace value
     expect(labels).not.toContain("Logo") // design category
+  })
+})
+
+describe("extractLastCompletedLabel", () => {
+  it("returns the label of the last field whose object has fully closed (anchored on \"why\")", () => {
+    const partial = '{"garmentType":"Camisa","fields":[{"key":"fabric","label":"Tela principal","category":"general","status":"ask","value":"","options":["A","B"],"why":"Define drapeado"},{"key":"collar","label":"Tipo de cuello","category":"general","status":"ask","value":"","options":["Italiano"'
+    expect(extractLastCompletedLabel(partial)).toBe("Tela principal") // "collar" object hasn't reached "why" yet
+  })
+
+  it("returns null when no field has closed yet", () => {
+    const partial = '{"garmentType":"Camisa","fields":[{"key":"fabric","label":"Tela principal","category":"general","status":"ask"'
+    expect(extractLastCompletedLabel(partial)).toBeNull()
+  })
+
+  it("advances to the newly completed label once a later field also closes", () => {
+    const partial = '{"fields":[{"label":"Tela principal","why":"x"},{"label":"Tipo de cuello","why":"y"}'
+    expect(extractLastCompletedLabel(partial)).toBe("Tipo de cuello")
+  })
+})
+
+describe("analyzeRequirements onProgress wiring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const validResponse = '{"garmentType":"Camisa","fields":[{"key":"fabric","label":"Tela","category":"general","status":"ask","value":"","options":["A"],"why":"x"}]}'
+
+  it("uses the plain (non-streaming) call when no onProgress callback is given", async () => {
+    deepseekChat.mockResolvedValue(validResponse)
+    await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [] })
+    expect(deepseekChat).toHaveBeenCalledTimes(1)
+    expect(deepseekChatStream).not.toHaveBeenCalled()
+  })
+
+  it("streams and reports increasing progress when onProgress is given, still returning a valid result", async () => {
+    deepseekChatStream.mockImplementation(async ({ onEvent }) => {
+      onEvent({ contentSoFar: '{"fields":[{"label":"Tela","why":"x"}', tokensSoFar: 10 })
+      onEvent({ contentSoFar: validResponse, tokensSoFar: 30 })
+      return validResponse
+    })
+    const seen = []
+    const result = await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [], onProgress: (p) => seen.push(p) })
+
+    expect(deepseekChatStream).toHaveBeenCalledTimes(1)
+    expect(deepseekChat).not.toHaveBeenCalled()
+    expect(seen.length).toBe(2)
+    expect(seen[1].percent).toBeGreaterThan(seen[0].percent)
+    expect(seen[0].lastLabel).toBe("Tela")
+    expect(result.garmentType).toBe("Camisa")
+    expect(result.fields[0].label).toBe("Tela")
   })
 })
