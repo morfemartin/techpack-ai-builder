@@ -180,3 +180,50 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("12000")
   })
 })
+
+describe("split composition (2D layout)", () => {
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: [{ id: "body", val: "French terry", on: true }],
+    designs: [{ name: "Chest Logo", colors: [{ name: "Blue", hex: "#003DA5" }], illustrationBrief: "Left chest." }],
+    logo: null,
+    txData: null,
+    garment: { partLabels: { ES: { body: "Cuerpo" } } },
+  }
+
+  it("keeps a split region and normalizes its inner leaf regions, dropping unknown ones", () => {
+    const raw = { pages: [{ regions: [{ type: "split", weight: 60, regions: [{ type: "partsList", weight: 30 }, { type: "bogus", weight: 10 }, { type: "illustration", weight: 70, slots: 2 }] }] }] }
+    const regions = normalizePlan(raw).pages[0].regions
+    expect(regions).toHaveLength(1)
+    expect(regions[0].type).toBe("split")
+    expect(regions[0].regions.map((r) => r.type)).toEqual(["partsList", "illustration"])
+  })
+
+  it("drops a split whose inner regions are all invalid (renders as a blank row otherwise)", () => {
+    const raw = { pages: [{ regions: [{ type: "split", weight: 50, regions: [{ type: "bogus" }] }, { type: "header", weight: 10 }] }] }
+    expect(normalizePlan(raw).pages[0].regions.map((r) => r.type)).toEqual(["header"])
+  })
+
+  it("builds a horizontal row for a split, inner grows taken from inner weights", () => {
+    const root = interpretPagePlan(
+      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      ctx
+    )
+    expect(root.children).toHaveLength(3)
+    const splitNode = root.children[1]
+    expect(splitNode.direction).toBe("row")
+    expect(splitNode.children).toHaveLength(2)
+    expect(splitNode.children[0].grow).toBe(25)
+    expect(splitNode.children[1].grow).toBe(75)
+  })
+
+  it("renders both columns of a split into the same page svg", () => {
+    const pages = buildPlannedPages(
+      { pages: [{ id: "split-page", title: "Split", purpose: "overview", regions: [{ type: "split", weight: 100, regions: [{ type: "partsList", weight: 40 }, { type: "illustration", weight: 60, slots: 1, refs: ["Frente"] }] }] }] },
+      ctx
+    )
+    expect(pages[0].svg).toContain("Cuerpo") // partsList column
+    expect(pages[0].svg).toContain("Frente") // illustration column
+  })
+})

@@ -10,14 +10,23 @@
 // layout engine or a DeepSeek call.
 
 import { T } from "../core/i18n.js"
-import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
-import { col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
-import { palette } from "../design/tokens.js"
+import { R, TX, sv, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
+import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
+import { palette, type } from "../design/tokens.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 
-// The only region types the interpreter knows how to render. Anything else the
-// model invents is dropped by normalizePlan rather than risking a broken page.
+// The only LEAF region types the interpreter knows how to render. Anything else
+// the model invents is dropped by normalizePlan rather than risking a broken
+// page. `split` (below) is a COMPOSITE, handled separately: it is not a leaf.
 export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "note", "spacer", "disclaimer"]
+
+// Page-level breathing room: a consistent outer margin + gutter between bands is
+// what turns a stack of blocks into a *composed* page instead of bands welded to
+// the frame edge. Percent-free px because the solver already resolves them.
+const PAGE_PAD = 26
+const PAGE_GAP = 14
+// Gutter between the columns of a `split` (side-by-side) region.
+const SPLIT_GAP = 14
 
 // A page that lost all its regions still needs to render something sane.
 const FALLBACK_REGIONS = [
@@ -57,6 +66,23 @@ export function weightsToGrow(regions) {
   return weights.map((w) => (w / total) * 100)
 }
 
+// Sanitizes a single region without mutating it. Returns null for anything the
+// interpreter can't render, so the caller can filter it out. A `split` is kept
+// only if at least one of its inner leaf regions survives - an empty split would
+// render as a blank row, so it's dropped like any other unusable region.
+function normalizeRegion(r) {
+  if (!r || typeof r !== "object") return null
+  if (r.type === "split") {
+    const inner = (Array.isArray(r.regions) ? r.regions : [])
+      .filter((c) => c && typeof c === "object" && VOCAB.includes(c.type))
+      .map((c) => ({ ...c, weight: safeWeight(c.weight) }))
+    if (inner.length === 0) return null
+    return { ...r, type: "split", weight: safeWeight(r.weight), regions: inner }
+  }
+  if (VOCAB.includes(r.type)) return { ...r, weight: safeWeight(r.weight) }
+  return null
+}
+
 // Turns whatever the model returned into an always-valid plan, without
 // mutating the input. Unknown region types are dropped; a page emptied by that
 // filtering falls back to a minimal header+disclaimer so it still renders;
@@ -71,9 +97,7 @@ export function normalizePlan(raw) {
     const purpose = typeof p.purpose === "string" ? p.purpose : "overview"
 
     let regions = Array.isArray(p.regions) ? p.regions : []
-    regions = regions
-      .filter((r) => r && typeof r === "object" && VOCAB.includes(r.type))
-      .map((r) => ({ ...r, weight: safeWeight(r.weight) }))
+    regions = regions.map(normalizeRegion).filter(Boolean)
     if (regions.length === 0) regions = FALLBACK_REGIONS.map((r) => ({ ...r }))
 
     return { id, title, purpose, regions }
@@ -128,7 +152,18 @@ function leafForRegion(region, page, ctx) {
         return "<g transform='translate(" + box.x + " " + box.y + ")'>" + svgHeader(hdr, ctx && ctx.logo, box.width, box.height) + "</g>"
       }
       if (region.type === "titleBar") {
-        return R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8") + TX(box.x + box.width / 2, box.y + box.height / 2, page.title || page.purpose || "", 11, true, "middle", palette.white.hex)
+        // Asymmetric Bauhaus title: a solid role.index red block anchors the
+        // left edge (a pure geometric mark, no number needed), then the title
+        // sits LEFT-aligned in tracked caps-lineage type on the blue field -
+        // Bill/Bayer, not a centered <h1>. Left-alignment + the red anchor are
+        // what read as "designed" versus the old centered bar.
+        var title = page.title || page.purpose || ""
+        var sq = Math.min(box.height, 30)
+        var s = R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8")
+        s += R(box.x, box.y, sq, box.height, palette.red.hex, palette.red.hex, "0")
+        var tx = box.x + sq + 14
+        s += "<text x='" + tx + "' y='" + (box.y + box.height / 2) + "' text-anchor='start' dominant-baseline='central' font-family='" + type.svgFonts.ui + "' font-size='12' font-weight='bold' letter-spacing='0.6' fill='" + palette.white.hex + "'>" + sv(title) + "</text>"
+        return s
       }
       if (region.type === "illustration") {
         return renderIllustrationZone(box, { slots: region.slots, refs: region.refs, note: region.note || (design && design.illustrationBrief) || "" })
@@ -150,11 +185,26 @@ function leafForRegion(region, page, ctx) {
   })
 }
 
+// Maps one normalized region to a layout node. A `split` becomes a horizontal
+// `row` whose children are its inner leaf regions, each given a horizontal grow
+// from its own weight - this is what lets a page place a narrow numbered
+// partsList beside a wide illustration (the real tech-pack idiom) instead of
+// forcing every block into a full-width band. Everything else stays a leaf.
+function buildRegionNode(region, page, ctx) {
+  if (region.type === "split") {
+    const inner = Array.isArray(region.regions) ? region.regions : []
+    const grows = weightsToGrow(inner)
+    const children = inner.map((r, i) => leafForRegion({ ...r, grow: grows[i] }, page, ctx))
+    return row({ grow: region.grow, gap: SPLIT_GAP }, children)
+  }
+  return leafForRegion(region, page, ctx)
+}
+
 export function interpretPagePlan(page, ctx) {
   const normalized = normalizePlan({ pages: [page] }).pages[0]
   const grows = weightsToGrow(normalized.regions)
   const regions = normalized.regions.map((region, i) => ({ ...region, grow: grows[i] }))
-  return col({}, regions.map((region) => leafForRegion(region, normalized, ctx || {})))
+  return col({ padding: PAGE_PAD, gap: PAGE_GAP }, regions.map((region) => buildRegionNode(region, normalized, ctx || {})))
 }
 
 function pageName(page, i) {

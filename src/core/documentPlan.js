@@ -89,7 +89,7 @@ export async function planDocumentOutline({ garmentType, parts, designs, lang = 
 export async function planPageLayout(pageOutline, context, { onProgress } = {}) {
   const page = pageOutline && typeof pageOutline === "object" ? pageOutline : {}
   const instructions =
-    "Sos disenador de layout para fichas tecnicas textiles. Para ESTA pagina, repartí el espacio por jerarquia visual usando solamente este vocabulario cerrado de bloques: " +
+    "Sos disenador de layout para fichas tecnicas textiles. Para ESTA pagina, repartí el espacio por jerarquia visual usando solamente este vocabulario cerrado de bloques hoja: " +
     "header, titleBar, illustration, partsList, colorSpecs, embSpecs, note, spacer, disclaimer.\n\n" +
     "Pagina: " + JSON.stringify(page) + "\n" +
     "Contexto: " + JSON.stringify({
@@ -98,8 +98,10 @@ export async function planPageLayout(pageOutline, context, { onProgress } = {}) 
       designs: context && context.designs,
       lang: context && context.lang,
     }) + "\n\n" +
-    "Cada region necesita type y weight. illustration puede incluir slots, refs y note. note debe ser una instruccion breve para el disenador humano.\n" +
-    "Ejemplo: {\"regions\":[{\"type\":\"header\",\"weight\":10},{\"type\":\"illustration\",\"weight\":60,\"slots\":3,\"note\":\"Mostrar frente, espalda y vista interior.\"},{\"type\":\"partsList\",\"weight\":20},{\"type\":\"disclaimer\",\"weight\":10}]}\n\n" +
+    "Cada region hoja necesita type y weight. illustration puede incluir slots, refs y note. note debe ser una instruccion breve para el disenador humano.\n" +
+    "IMPORTANTE - composicion: ademas de apilar bloques, podés poner bloques LADO A LADO con un bloque compositor \"split\", cuyo weight es su alto y cuyo array \"regions\" son columnas (cada una con su weight = ancho relativo). " +
+    "Usá split para composiciones asimetricas tipo ficha real: una lista o specs angosta junto a una ilustracion ancha. Evitá que TODA la pagina sea una sola pila de bandas full-width - variá la silueta segun el proposito de la pagina.\n" +
+    "Ejemplo con composicion 2D: {\"regions\":[{\"type\":\"header\",\"weight\":10},{\"type\":\"titleBar\",\"weight\":6},{\"type\":\"split\",\"weight\":64,\"regions\":[{\"type\":\"partsList\",\"weight\":34},{\"type\":\"illustration\",\"weight\":66,\"slots\":2,\"note\":\"Frente y espalda a escala.\"}]},{\"type\":\"disclaimer\",\"weight\":10}]}\n\n" +
     "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
     '{"regions":[{"type":"header","weight":10}]}'
 

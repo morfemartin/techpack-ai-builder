@@ -139,7 +139,16 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
     var y = box.y + gap + r * (cellH + gap)
     var chip = 18
     var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Referencia " + (i + 1)
-    s += R(x, y, cellW, cellH, "none", "#ddd", "0.8")
+    // A quiet full frame plus inward corner registration ticks: the empty slot
+    // reads as an art board / crop-marked drawing frame ("place artwork here"),
+    // not a blank box. Ticks are a structure gray, not a role color - the red
+    // index chip stays the only attention mark in the cell.
+    s += R(x, y, cellW, cellH, "none", "#E4E6EA", "0.8")
+    var tk = 12
+    ;[[x, y, 1, 1], [x + cellW, y, -1, 1], [x, y + cellH, 1, -1], [x + cellW, y + cellH, -1, -1]].forEach(function (c) {
+      s += "<line x1='" + c[0] + "' y1='" + c[1] + "' x2='" + (c[0] + tk * c[2]) + "' y2='" + c[1] + "' stroke='#B7BCC6' stroke-width='1'/>"
+      s += "<line x1='" + c[0] + "' y1='" + c[1] + "' x2='" + c[0] + "' y2='" + (c[1] + tk * c[3]) + "' stroke='#B7BCC6' stroke-width='1'/>"
+    })
     s += R(x + 8, y + 8, chip, chip, palette.red.hex, palette.red.hex, "0")
     s += TX(x + 8 + chip / 2, y + 8 + chip / 2, i + 1, 8, true, "middle", palette.white.hex, type.svgFonts.data)
     s += TX(x + cellW / 2, y + cellH / 2, refLabel, 9, false, "middle", "#B7BCC6")
