@@ -112,6 +112,7 @@ function newDesign() {
   return {
     id: uid(), name: "Nuevo Diseno", pos: "", posDetail: "", w: "", h: "", tec: "Bordado 3D",
     colors: [], fileName: "", driveLink: "", imageData: null, imageType: null, imgNatW: null, imgNatH: null,
+    illustrationBrief: "",
     emb: Object.assign({}, EMPTY_EMB, { stopSeq: [] }),
   }
 }

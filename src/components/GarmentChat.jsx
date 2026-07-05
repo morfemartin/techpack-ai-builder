@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react"
 import { DeepSeekError } from "../core/deepseekClient.js"
-import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, isComplete, reqsToParts, reqsToDesigns, FIELD_STATUS } from "../core/techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, isComplete, reqsToParts, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, FIELD_STATUS } from "../core/techpackRequirements.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -21,8 +21,10 @@ const OPENING = "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa
 // a second DeepSeek call reasons about which discrete elements - logo,
 // embroidery, personalized hardware, etc. - need their own design page) ->
 // "designing" (walk pending design fields, same numbered-options UI) ->
-// "ready" (build + continue). Design-level fields share the same `reqs.fields`
-// array as general ones (tagged `category: "design"`), so pendingFields/
+// "briefing" (F3.3: a third DeepSeek call authors a concrete illustration
+// brief per design element, skipped entirely if there are none) -> "ready"
+// (build + continue). Design-level fields share the same `reqs.fields` array
+// as general ones (tagged `category: "design"`), so pendingFields/
 // applyAnswer/isComplete need zero changes to work for both passes.
 
 function Bubble({ role: msgRole, children }) {
@@ -50,6 +52,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
   const [phase, setPhase] = useState(initialGarmentType ? "analyzing" : "naming")
   const [history, setHistory] = useState([{ role: "assistant", content: initialGarmentType ? "Analizando la prenda…" : OPENING }])
   const [reqs, setReqs] = useState(null)
+  const [briefs, setBriefs] = useState([]) // F3.3: [{ name, illustrationBrief }] authored once designs are done
   const [garmentLabel, setGarmentLabel] = useState(initialGarmentType || "")
   const [currentField, setCurrentField] = useState(null)
   const [input, setInput] = useState("")
@@ -90,6 +93,10 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
         post("assistant", "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…")
         setPhase("designAnalyzing")
         runDesignAnalysis(nextReqs)
+      } else if (reqsToDesigns(nextReqs).length > 0) {
+        post("assistant", "Ya tengo los diseños. Ahora redacto la instrucción de ilustración para cada página…")
+        setPhase("briefing")
+        runBriefAuthoring(nextReqs)
       } else {
         setPhase("ready")
         post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha. Podés continuar.")
@@ -159,6 +166,38 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
     }
   }
 
+  // Third DeepSeek call (F3.3): once every design element's fields are
+  // answered, ask the model to author a concrete illustration brief per
+  // element - a placeholder instruction (not invented vector art) shown on
+  // the design page until a human illustrator/uploaded image replaces it.
+  // Degrades gracefully on failure, same as runDesignAnalysis - a missing
+  // brief just means that page falls back to the generic "sube tu diseno"
+  // placeholder, not a blocked flow.
+  async function runBriefAuthoring(finalReqs) {
+    setSending(true)
+    setError(null)
+    setProgress({ percent: 0, lastLabel: null })
+    try {
+      const designs = reqsToDesigns(finalReqs)
+      const { briefs: authored } = await authorIllustrationBriefs({
+        garmentType: garmentLabel || finalReqs.garmentType,
+        designs,
+        lang: "ES",
+        onProgress: (p) => setProgress(p),
+      })
+      setBriefs(authored)
+      setPhase("ready")
+      post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha, con instrucciones de ilustración incluidas. Podés continuar.")
+    } catch (e) {
+      setError(e instanceof DeepSeekError ? e.message : "No se pudieron redactar los briefs de ilustración. Podés continuar igual.")
+      setPhase("ready")
+      post("assistant", "No pude redactar las instrucciones de ilustración todavía, pero podés continuar igual.")
+    } finally {
+      setSending(false)
+      setProgress(null)
+    }
+  }
+
   function submitName(value) {
     post("user", value)
     setGarmentLabel(value)
@@ -186,7 +225,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
       label: garmentLabel,
       parts: reqsToParts(reqs),
       positions: ["Toda la prenda"],
-      designs: reqsToDesigns(reqs),
+      designs: attachIllustrationBriefs(reqsToDesigns(reqs), briefs),
       notes: "",
     }
   }

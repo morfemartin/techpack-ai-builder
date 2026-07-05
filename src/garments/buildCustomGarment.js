@@ -45,6 +45,10 @@ export function mapChatDesignsToDesigns(draftDesigns, fallbackPosition) {
     posDetail: dd.posDetail || "",
     tec: dd.tec || "Bordado 3D",
     driveLink: dd.driveLink || "",
+    // F3.3: an AI-authored instruction for a human illustrator, shown as a
+    // placeholder note when no image has been uploaded yet - see
+    // buildPages.js/Preview.jsx's design-page illustration zone.
+    illustrationBrief: dd.illustrationBrief || "",
   }))
 }
 

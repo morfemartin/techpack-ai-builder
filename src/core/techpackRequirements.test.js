@@ -13,7 +13,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns } from "./techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs } from "./techpackRequirements.js"
 
 describe("normalizeRequirements", () => {
   it("drops fields with no valid key and applies defaults", () => {
@@ -312,5 +312,71 @@ describe("analyzeDesignExpression", () => {
     expect(result.fields).toHaveLength(1)
     expect(result.fields[0].key).toBe("logo_pecho_nombre")
     expect(result.fields[0].category).toBe("design")
+  })
+})
+
+describe("authorIllustrationBriefs", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("resolves with { briefs: [] } and makes no API call when designs is empty", async () => {
+    const result = await authorIllustrationBriefs({ garmentType: "Camisa", designs: [] })
+    expect(result).toEqual({ briefs: [] })
+    expect(deepseekChat).not.toHaveBeenCalled()
+    expect(deepseekChatStream).not.toHaveBeenCalled()
+  })
+
+  it("calls deepseekChat when no onProgress, returns parsed briefs", async () => {
+    deepseekChat.mockResolvedValueOnce('{"briefs":[{"name":"Logo","illustrationBrief":"Dibujar logo bordado en pecho izquierdo"}]}')
+    const designs = [{ name: "Logo", pos: "Pecho", tec: "Bordado" }]
+    const result = await authorIllustrationBriefs({ garmentType: "Camisa", designs })
+    expect(deepseekChat).toHaveBeenCalledTimes(1)
+    expect(deepseekChatStream).not.toHaveBeenCalled()
+    expect(result.briefs).toHaveLength(1)
+    expect(result.briefs[0].name).toBe("Logo")
+  })
+
+  it("calls deepseekChatStream when onProgress is provided", async () => {
+    deepseekChatStream.mockResolvedValueOnce('{"briefs":[]}')
+    const onProgress = vi.fn()
+    await authorIllustrationBriefs({ garmentType: "Camisa", designs: [{ name: "Boton" }], onProgress })
+    expect(deepseekChatStream).toHaveBeenCalledTimes(1)
+    expect(deepseekChat).not.toHaveBeenCalled()
+  })
+
+  it("filters out entries with missing/empty name", async () => {
+    deepseekChat.mockResolvedValueOnce('{"briefs":[{"name":"","illustrationBrief":"x"},{"name":"Boton","illustrationBrief":"y"}]}')
+    const result = await authorIllustrationBriefs({ garmentType: "Camisa", designs: [{ name: "Boton" }] })
+    expect(result.briefs).toHaveLength(1)
+    expect(result.briefs[0].name).toBe("Boton")
+  })
+
+  it("throws DeepSeekError on invalid JSON", async () => {
+    deepseekChat.mockResolvedValueOnce("not json")
+    await expect(authorIllustrationBriefs({ garmentType: "Camisa", designs: [{ name: "X" }] }))
+      .rejects.toThrow("El asistente de IA no devolvio")
+  })
+})
+
+describe("attachIllustrationBriefs", () => {
+  it("attaches matching brief by name, returns new array without mutating input", () => {
+    const designs = [{ name: "Logo", pos: "Pecho" }, { name: "Boton", pos: "Manga" }]
+    const briefs = [{ name: "Logo", illustrationBrief: "Dibujar logo" }]
+    const result = attachIllustrationBriefs(designs, briefs)
+    expect(result).not.toBe(designs)
+    expect(result[0].illustrationBrief).toBe("Dibujar logo")
+    expect(result[1].illustrationBrief).toBe("")
+    expect(designs[0].illustrationBrief).toBeUndefined()
+  })
+
+  it("defaults illustrationBrief to '' for unmatched designs", () => {
+    const result = attachIllustrationBriefs([{ name: "X" }], [])
+    expect(result[0].illustrationBrief).toBe("")
+  })
+
+  it("handles null/undefined inputs without throwing", () => {
+    expect(() => attachIllustrationBriefs(null, undefined)).not.toThrow()
+    expect(attachIllustrationBriefs(null, undefined)).toEqual([])
   })
 })
