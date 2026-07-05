@@ -18,7 +18,7 @@ import { repairTruncatedJSON } from "./jsonSalvage.js"
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
 // try to salvage it before giving up, so a truncated 9th field doesn't throw
 // away the 8 that already generated cleanly.
-function parseJSONOrRepair(raw, errorMessage) {
+export function parseJSONOrRepair(raw, errorMessage) {
   const cleaned = raw.replace(/```json|```/g, "").trim()
   try {
     return JSON.parse(cleaned)

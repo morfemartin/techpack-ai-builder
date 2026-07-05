@@ -8,6 +8,8 @@ import { DeepSeekError } from "./core/deepseekClient.js"
 import { downscaleImage, extractGarmentFromImages } from "./core/visionExtract.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
+import { buildPlannedPages } from "./pages/interpretPlan.js"
+import { planDocumentOutline, planPageLayout } from "./core/documentPlan.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
 import { downloadGarmentFile } from "./garments/exportGarment.js"
@@ -154,6 +156,8 @@ export default function App() {
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
   const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
+  const [documentPlanning, setDocumentPlanning] = useState(false)
+  const [documentPlanStatus, setDocumentPlanStatus] = useState("")
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -331,9 +335,63 @@ export default function App() {
     return tx
   }
 
+  function fallbackPageLayout(page) {
+    return {
+      ...page,
+      regions: [
+        { type: "header", weight: 10 },
+        { type: "titleBar", weight: 6 },
+        { type: "illustration", weight: 48, slots: 2, note: "Preparar ilustracion tecnica de esta pagina." },
+        { type: "partsList", weight: 26 },
+        { type: "disclaimer", weight: 10 },
+      ],
+    }
+  }
+
+  async function buildCustomDocumentPages(lang, tx) {
+    var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+    setDocumentPlanning(true)
+    setDocumentPlanStatus("Estructurando el documento...")
+    try {
+      var outline = await planDocumentOutline({ garmentType, parts, designs, lang })
+      var plannedPages = []
+      for (var i = 0; i < outline.pages.length; i++) {
+        var page = outline.pages[i]
+        setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
+        try {
+          var planned = await planPageLayout(
+            page,
+            { garmentType, parts, designs, lang },
+            {
+              onProgress: (progress) => {
+                setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+              },
+            }
+          )
+          plannedPages.push(planned)
+        } catch {
+          plannedPages.push(fallbackPageLayout(page))
+        }
+      }
+      return buildPlannedPages({ pages: plannedPages }, { lang, hdr, parts, designs, logo, txData: tx, garment })
+    } finally {
+      setDocumentPlanning(false)
+      setDocumentPlanStatus("")
+    }
+  }
+
   async function handleGenerate(lang) {
     var tx = await ensureTx(lang)
-    var pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+    var pages
+    if (garmentId === "custom" && customGarment) {
+      try {
+        pages = await buildCustomDocumentPages(lang, tx)
+      } catch {
+        pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+      }
+    } else {
+      pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+    }
     setSvgPages(pages)
   }
 
@@ -684,6 +742,7 @@ export default function App() {
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
               {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
+              {documentPlanning && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{documentPlanStatus || "Disenando documento..."}</span>}
               {garmentId === "custom" && customGarment && (
                 <button
                   onClick={() => downloadGarmentFile(customGarment)}
@@ -694,7 +753,7 @@ export default function App() {
                 </button>
               )}
               {langs.map((l) => (
-                <button key={l} onClick={() => handleGenerate(l)} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on, border: hair, borderColor: role.priority.fill, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                <button key={l} onClick={() => handleGenerate(l)} disabled={documentPlanning} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning ? C.canvas.hex : role.priority.fill, color: documentPlanning ? "#9AA0AB" : role.priority.on, border: hair, borderColor: documentPlanning ? "#C6CAD2" : role.priority.fill, fontSize: type.size.xs, cursor: documentPlanning ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   <Icon name="bolt" size={16} color={C.white.hex} /> Generar SVG [{l}]
                 </button>
               ))}
