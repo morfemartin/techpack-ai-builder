@@ -5,6 +5,7 @@ import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
 import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns } from "./core/csvImport.js"
 import { DeepSeekError } from "./core/deepseekClient.js"
+import { downscaleImage, extractGarmentFromImages } from "./core/visionExtract.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
@@ -146,11 +147,20 @@ export default function App() {
   const [csvError, setCsvError] = useState(null)
   const [csvImages, setCsvImages] = useState([])
   const [csvImageNote, setCsvImageNote] = useState(null)
+  const [visionEntry, setVisionEntry] = useState(false) // true once "Prenda desde foto" is chosen at step 0
+  const [visionExtracting, setVisionExtracting] = useState(false)
+  const [visionError, setVisionError] = useState(null)
+  const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
   const tl = T.ES
 
-  function selectGarment(id) {
-    if (id === garmentId) return
+  function selectGarment(id, { vision = false } = {}) {
+    if (id === garmentId && visionEntry === vision) return
     setGarmentId(id)
+    setVisionEntry(vision)
+    if (!vision) {
+      setVisionSeed(null)
+      setVisionError(null)
+    }
     if (id === "custom") {
       setCustomGarment(null)
       setParts([])
@@ -162,6 +172,29 @@ export default function App() {
     }
     setTxCache({})
     setPrevPage(0)
+  }
+
+  // F1: "ficha desde foto" entry point - downscales each photo client-side
+  // (stays under the proxy's body-size limit), sends them to the vision
+  // model, and stores the resulting {garmentType, seed} to hand to
+  // GarmentChat at the Piezas step. A failed/skipped extraction still lets
+  // the user continue - GarmentChat just starts from a blank naming phase,
+  // same as picking "Prenda nueva (con IA)" directly.
+  async function handleVisionUpload(e) {
+    var files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+    setVisionExtracting(true)
+    setVisionError(null)
+    try {
+      var downscaled = await Promise.all(files.map((f) => downscaleImage(f)))
+      var result = await extractGarmentFromImages(downscaled, { lang: "ES" })
+      setVisionSeed(result)
+    } catch (err) {
+      setVisionError(err instanceof DeepSeekError ? err.message : "No se pudo analizar la foto.")
+    } finally {
+      setVisionExtracting(false)
+      e.target.value = ""
+    }
   }
 
   function handleGarmentChatComplete(draft) {
@@ -274,7 +307,7 @@ export default function App() {
   }
 
   function canNext() {
-    if (step === 0) return !!garmentId
+    if (step === 0) return !!garmentId && !visionExtracting
     if (step === 1) return langs.length > 0
     if (step === 2) return hdr.brand.trim() && hdr.pname.trim()
     if (step === 3 && garmentId === "custom") return !!customGarment // chat must finish first
@@ -323,14 +356,50 @@ export default function App() {
                 {g.label.ES}
               </Chip>
             ))}
-            <Chip selected={garmentId === "custom"} onClick={() => selectGarment("custom")} iconName="auto_awesome">
+            <Chip selected={garmentId === "custom" && !visionEntry} onClick={() => selectGarment("custom")} iconName="auto_awesome">
               Prenda nueva (con IA)
             </Chip>
+            <Chip selected={garmentId === "custom" && visionEntry} onClick={() => selectGarment("custom", { vision: true })} iconName="photo_camera">
+              Prenda desde foto (IA)
+            </Chip>
           </div>
-          {garmentId === "custom" && (
+          {garmentId === "custom" && !visionEntry && (
             <p style={{ marginTop: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 480 }}>
               Vas a charlar con la IA en el paso "Piezas" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual.
             </p>
+          )}
+          {garmentId === "custom" && visionEntry && (
+            <div style={{ marginTop: space(3), maxWidth: 480, display: "flex", flexDirection: "column", gap: space(2) }}>
+              <p style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, margin: 0 }}>
+                Subí una o mas fotos de la prenda real. La IA identifica el tipo de prenda y lo que se ve con claridad (color, cuello, cierre, etc.); en el paso "Piezas" solo te va a preguntar lo que la foto no reveló.
+              </p>
+              <label style={{ display: "inline-flex", alignSelf: "flex-start", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: C.white.hex, border: `1px dashed ${C.ink.hex}`, cursor: visionExtracting ? "wait" : "pointer", fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                <Icon name="add_photo_alternate" size={18} />
+                {visionExtracting ? "Analizando foto(s)…" : visionSeed ? "Cambiar foto(s)" : "Subir foto(s)"}
+                <input type="file" accept="image/png,image/jpeg" multiple disabled={visionExtracting} onChange={handleVisionUpload} style={{ display: "none" }} />
+              </label>
+              {visionError && (
+                <p style={{ fontSize: type.size.xs, color: role.index.fill, margin: 0 }}>
+                  <Icon name="error" size={14} color={role.index.fill} /> {visionError}
+                </p>
+              )}
+              {visionSeed && (
+                <div style={{ border: hair, padding: space(3), fontSize: type.size.xs, color: C.ink.hex }}>
+                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>Detectado: {visionSeed.garmentType || "(no identificado)"}</div>
+                  {Object.keys(visionSeed.seed || {}).length > 0 ? (
+                    <ul style={{ margin: 0, paddingLeft: space(4) }}>
+                      {Object.entries(visionSeed.seed).map(([k, v]) => (
+                        <li key={k}>
+                          {k}: {v}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ opacity: 0.7 }}>No se detectaron atributos con certeza - se preguntará todo en "Piezas".</div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )
@@ -394,7 +463,7 @@ export default function App() {
     }
 
     if (step === 3 && garmentId === "custom") {
-      return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} />
+      return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} seed={visionSeed ? visionSeed.seed : undefined} initialGarmentType={visionSeed ? visionSeed.garmentType : undefined} />
     }
 
     if (step === 3) {
