@@ -5,7 +5,7 @@
 // `model` and an OpenAI-style vision content-block instead of plain text, and
 // the proxy already forwards both verbatim - no architecture change needed.
 
-import { deepseekChat, DeepSeekError } from "./deepseekClient.js"
+import { deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
 
 // Overridable via env for live A/B testing between vision model sizes
 // without a code change (same pattern as VITE_DEEPSEEK_PROXY_URL).
@@ -88,6 +88,12 @@ export function mergeVisionSeeds(results) {
   return { garmentType, seed }
 }
 
+export function summarizeVisionProgress(text) {
+  const clean = String(text || "").replace(/```json|```/g, "").replace(/\s+/g, " ").trim()
+  if (!clean) return ""
+  return clean.length > 140 ? clean.slice(0, 137) + "..." : clean
+}
+
 function buildVisionMessages(base64) {
   return [
     {
@@ -116,18 +122,33 @@ function buildVisionMessages(base64) {
 // message. Vision is still just another door into the same reasoning core
 // the CSV import and "prenda desde 0" chat already share - only the shape of
 // the DeepSeek call changed, not what comes out of it.
-export async function extractGarmentFromImages(images, { lang = "ES", model } = {}) {
+export async function extractGarmentFromImages(images, { lang = "ES", model, onProgress } = {}) {
   if (!Array.isArray(images) || images.length === 0) {
     throw new DeepSeekError("No hay imagenes para analizar.", { images })
   }
 
+  const total = images.length
   const results = await Promise.all(
-    images.map((img) =>
-      deepseekChat({
+    images.map((img, i) =>
+      deepseekChatStream({
         messages: buildVisionMessages(img.base64),
         model: model || DEFAULT_VISION_MODEL,
         maxTokens: 1200,
         temperature: 0.2,
+        onEvent: onProgress
+          ? ({ contentSoFar, deltaText, tokensSoFar }) => {
+              onProgress({
+                imageIndex: i,
+                imageNumber: i + 1,
+                total,
+                label: "Analizando foto " + (i + 1) + " de " + total + "...",
+                partialText: summarizeVisionProgress(contentSoFar),
+                contentSoFar,
+                deltaText,
+                tokensSoFar,
+              })
+            }
+          : undefined,
       }).then(parseVisionSeed)
     )
   )

@@ -153,6 +153,7 @@ export default function App() {
   const [visionEntry, setVisionEntry] = useState(false) // true once "Prenda desde foto" is chosen at step 0
   const [visionExtracting, setVisionExtracting] = useState(false)
   const [visionError, setVisionError] = useState(null)
+  const [visionProgress, setVisionProgress] = useState(null)
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
   const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
@@ -167,6 +168,7 @@ export default function App() {
     if (!vision) {
       setVisionSeed(null)
       setVisionError(null)
+      setVisionProgress(null)
     }
     if (id === "custom") {
       setCustomGarment(null)
@@ -192,14 +194,19 @@ export default function App() {
     if (files.length === 0) return
     setVisionExtracting(true)
     setVisionError(null)
+    setVisionProgress(null)
     try {
       var downscaled = await Promise.all(files.map((f) => downscaleImage(f)))
-      var result = await extractGarmentFromImages(downscaled, { lang: "ES" })
+      var result = await extractGarmentFromImages(downscaled, {
+        lang: "ES",
+        onProgress: (progress) => setVisionProgress(progress),
+      })
       setVisionSeed(result)
     } catch (err) {
       setVisionError(err instanceof DeepSeekError ? err.message : "No se pudo analizar la foto.")
     } finally {
       setVisionExtracting(false)
+      setVisionProgress(null)
       e.target.value = ""
     }
   }
@@ -468,6 +475,12 @@ export default function App() {
                 {visionExtracting ? "Analizando foto(s)…" : visionSeed ? "Cambiar foto(s)" : "Subir foto(s)"}
                 <input type="file" accept="image/png,image/jpeg" multiple disabled={visionExtracting} onChange={handleVisionUpload} style={{ display: "none" }} />
               </label>
+              {visionExtracting && visionProgress && (
+                <div style={{ border: hair, padding: space(2), fontSize: type.size.xs, color: C.ink.hex, background: C.white.hex }}>
+                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>{visionProgress.label}</div>
+                  {visionProgress.partialText && <div style={{ fontFamily: type.fonts.data, opacity: 0.75, wordBreak: "break-word" }}>{visionProgress.partialText}</div>}
+                </div>
+              )}
               {visionError && (
                 <p style={{ fontSize: type.size.xs, color: role.index.fill, margin: 0 }}>
                   <Icon name="error" size={14} color={role.index.fill} /> {visionError}
