@@ -91,6 +91,106 @@ export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0
   throw lastErr
 }
 
+async function openStream({ messages, maxTokens, temperature, model, thinking }) {
+  let res
+  try {
+    res = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, stream: true, chat_template_kwargs: { thinking } }),
+    })
+  } catch (e) {
+    const err = new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
+    err.networkError = true
+    throw err
+  }
+  if (!res.ok) {
+    let detail = ""
+    try {
+      const j = await res.json()
+      detail = j.detail || j.error || ""
+    } catch {}
+    const err = new DeepSeekError("El asistente de IA no respondio correctamente" + (detail ? ": " + detail : "") + ".", { status: res.status, detail })
+    err.status = res.status
+    err.detail = detail
+    throw err
+  }
+  return res
+}
+
+// Streaming call path (F3.1b) - a separate flow from deepseekChat on purpose:
+// retrying mid-stream doesn't mean the same thing as retrying a failed
+// request. It DOES reuse the same retry/backoff for the "open the stream"
+// phase only (a 503 before any bytes flow is just as transient here as it is
+// for the non-streaming path) - once the stream is open, there's no retry: a
+// failure while chunks are already flowing is rare, and restarting a long
+// generation from scratch isn't worth it (accepted simplification).
+//
+// onEvent(partial) fires on every SSE delta that carries content:
+//   { contentSoFar: string, deltaText: string, tokensSoFar: number }
+// tokensSoFar counts SSE EVENTS, not real tokens - NVIDIA batches several
+// tokens per event, so this is only ever an estimate for a progress bar.
+//
+// Resolves with the final assembled content string once "[DONE]" arrives.
+// Throws DeepSeekError if the retries opening the stream are exhausted, on a
+// network failure, or if the stream ends without "[DONE]" (a truncated
+// generation - e.g. a dropped connection mid-response).
+export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent } = {}) {
+  let res
+  for (let attempt = 1; attempt <= RETRYABLE_MAX_ATTEMPTS; attempt++) {
+    try {
+      res = await openStream({ messages, maxTokens, temperature, model, thinking })
+      break
+    } catch (e) {
+      const retryable = e instanceof DeepSeekError && isRetryable(e)
+      if (!retryable || attempt === RETRYABLE_MAX_ATTEMPTS) throw e
+      await sleep(RETRYABLE_BASE_DELAY_MS * attempt)
+    }
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let content = ""
+  let eventCount = 0
+  let finished = false
+
+  while (!finished) {
+    const { done: readerDone, value } = await reader.read()
+    if (readerDone) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split("\n\n")
+    buffer = parts.pop() // last piece may be incomplete - keep for the next read
+
+    for (const part of parts) {
+      const line = part.trim()
+      if (!line.startsWith("data:")) continue
+      const dataStr = line.slice(5).trim()
+      if (dataStr === "[DONE]") {
+        finished = true
+        break
+      }
+      let evt
+      try {
+        evt = JSON.parse(dataStr)
+      } catch {
+        continue // skip a malformed/partial event rather than crashing the stream
+      }
+      const delta = evt && evt.choices && evt.choices[0] && evt.choices[0].delta
+      const deltaText = (delta && delta.content) || ""
+      if (deltaText) {
+        content += deltaText
+        eventCount++
+        if (onEvent) onEvent({ contentSoFar: content, deltaText, tokensSoFar: eventCount })
+      }
+    }
+  }
+
+  if (!finished) throw new DeepSeekError("La respuesta del asistente de IA se corto antes de terminar.", { content })
+  if (!content) throw new DeepSeekError("El asistente de IA devolvio una respuesta vacia.", { streamed: true })
+  return content
+}
+
 // Convenience: ask for a JSON object back and parse it, tolerating ```json
 // fences. Returns the parsed object, or `fallback` if anything goes wrong -
 // use this for low-stakes callers (e.g. translation) that should degrade

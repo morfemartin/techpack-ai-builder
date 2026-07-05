@@ -50,12 +50,13 @@ export default async function handler(req, res) {
   const messages = Array.isArray(body.messages) ? body.messages : null
   if (!messages || messages.length === 0) return res.status(400).json({ error: "messages_required" })
 
+  const wantsStream = !!body.stream
   const payload = {
     model: typeof body.model === "string" ? body.model : NVIDIA_MODEL,
     messages,
     max_tokens: Math.min(Number(body.max_tokens) || 1000, MAX_TOKENS_CAP),
     temperature: typeof body.temperature === "number" ? body.temperature : 0.2,
-    stream: false,
+    stream: wantsStream,
   }
 
   try {
@@ -64,13 +65,43 @@ export default async function handler(req, res) {
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
       body: JSON.stringify(payload),
     })
-    const data = await upstream.json().catch(() => ({}))
+
+    if (!wantsStream) {
+      const data = await upstream.json().catch(() => ({}))
+      if (!upstream.ok) {
+        // Surface a useful-but-sanitized message; never forward auth headers/keys.
+        return res.status(upstream.status).json({ error: "upstream_error", detail: (data && data.error && data.error.message) || "request failed" })
+      }
+      return res.status(200).json(data)
+    }
+
+    // Streaming path: NVIDIA already speaks OpenAI-compatible SSE
+    // ("data: {...}\n\n", ending in "data: [DONE]\n\n") - pipe bytes through
+    // unchanged rather than re-parsing/re-encoding each event. Status is
+    // checked BEFORE touching the body, so a non-2xx here still returns a
+    // normal JSON error the client's retry logic can handle exactly like the
+    // non-streaming path; once bytes start flowing there's no going back to
+    // a JSON error response (accepted simplification - see deepseekClient.js).
     if (!upstream.ok) {
-      // Surface a useful-but-sanitized message; never forward auth headers/keys.
+      const data = await upstream.json().catch(() => ({}))
       return res.status(upstream.status).json({ error: "upstream_error", detail: (data && data.error && data.error.message) || "request failed" })
     }
-    return res.status(200).json(data)
+
+    res.statusCode = 200
+    res.setHeader("Content-Type", "text/event-stream")
+    res.setHeader("Cache-Control", "no-cache, no-transform")
+    res.setHeader("Connection", "keep-alive")
+    if (typeof res.flushHeaders === "function") res.flushHeaders()
+
+    const reader = upstream.body.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      res.write(value)
+    }
+    return res.end()
   } catch (e) {
+    if (wantsStream && res.headersSent) return res.end()
     return res.status(502).json({ error: "proxy_error", detail: String((e && e.message) || e) })
   }
 }

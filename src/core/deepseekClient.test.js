@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { deepseekChat, deepseekJSON, extractStructured, DeepSeekError } from "./deepseekClient.js"
+import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError } from "./deepseekClient.js"
 
 function mockFetchOnce(body, ok = true, status = 200) {
   global.fetch = vi.fn().mockResolvedValue({
@@ -7,6 +7,33 @@ function mockFetchOnce(body, ok = true, status = 200) {
     status,
     json: async () => body,
   })
+}
+
+// Builds a fake `Response`-like object whose `.body.getReader()` yields the
+// given raw SSE text chunks (already-encoded strings, e.g. "data: {...}\n\n")
+// one at a time, mirroring how a real fetch() streaming response behaves.
+function mockStreamResponse(chunks, { ok = true, status = 200, errorBody } = {}) {
+  const encoder = new TextEncoder()
+  let i = 0
+  return {
+    ok,
+    status,
+    json: async () => errorBody || {},
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (i >= chunks.length) return { done: true, value: undefined }
+          const value = encoder.encode(chunks[i])
+          i++
+          return { done: false, value }
+        },
+      }),
+    },
+  }
+}
+
+function sseEvent(content) {
+  return "data: " + JSON.stringify({ choices: [{ delta: { content, role: "assistant" } }] }) + "\n\n"
 }
 
 describe("deepseekClient", () => {
@@ -115,5 +142,46 @@ describe("deepseekClient", () => {
   it("extractStructured throws DeepSeekError (not a silent fallback) on invalid JSON", async () => {
     mockFetchOnce({ choices: [{ message: { content: "esto no es json" } }] })
     await expect(extractStructured({ instructions: "x", content: "y" })).rejects.toBeInstanceOf(DeepSeekError)
+  })
+})
+
+describe("deepseekChatStream", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("assembles content from a single chunk and resolves on [DONE]", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("hola"), sseEvent(" mundo"), "data: [DONE]\n\n"]))
+    const onEvent = vi.fn()
+    const result = await deepseekChatStream({ messages: [], onEvent })
+    expect(result).toBe("hola mundo")
+    expect(onEvent).toHaveBeenCalledTimes(2)
+    expect(onEvent.mock.calls[1][0]).toEqual({ contentSoFar: "hola mundo", deltaText: " mundo", tokensSoFar: 2 })
+  })
+
+  it("assembles content correctly even when a chunk boundary lands mid-event", async () => {
+    const wholeEvent = sseEvent("partido en dos")
+    const cut = Math.floor(wholeEvent.length / 2)
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([wholeEvent.slice(0, cut), wholeEvent.slice(cut), "data: [DONE]\n\n"]))
+    const result = await deepseekChatStream({ messages: [] })
+    expect(result).toBe("partido en dos")
+  })
+
+  it("rejects without calling onEvent when the response is non-2xx before any streaming", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([], { ok: false, status: 400, errorBody: { error: "bad_request" } }))
+    const onEvent = vi.fn()
+    await expect(deepseekChatStream({ messages: [], onEvent })).rejects.toBeInstanceOf(DeepSeekError)
+    expect(onEvent).not.toHaveBeenCalled()
+  })
+
+  it("rejects when the stream ends without [DONE] (a truncated generation)", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("incompleto")]))
+    await expect(deepseekChatStream({ messages: [] })).rejects.toBeInstanceOf(DeepSeekError)
+  })
+
+  it("skips a malformed SSE event without breaking the rest of the stream", async () => {
+    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("antes"), "data: {esto no es json valido\n\n", sseEvent(" despues"), "data: [DONE]\n\n"]))
+    const result = await deepseekChatStream({ messages: [] })
+    expect(result).toBe("antes despues")
   })
 })
