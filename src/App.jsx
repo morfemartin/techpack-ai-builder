@@ -3,9 +3,10 @@ import { uid } from "./core/idGen.js"
 import { T } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
 import { translateContent } from "./core/claudeApi.js"
-import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns } from "./core/csvImport.js"
+import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
 import { DeepSeekError } from "./core/deepseekClient.js"
 import { downscaleImage, extractGarmentFromImages } from "./core/visionExtract.js"
+import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
@@ -151,6 +152,8 @@ export default function App() {
   const [visionExtracting, setVisionExtracting] = useState(false)
   const [visionError, setVisionError] = useState(null)
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
+  const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
+  const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -272,12 +275,40 @@ export default function App() {
         }
       }
       setCsvImages([])
+
+      // F2: does this CSV actually cover what a tech pack for this garment
+      // needs? Reuses the same reasoning core (F3) the custom-garment chat
+      // and vision intake already share - if it finds genuine gaps, the gate
+      // chat below asks exactly those before letting the user move on; if
+      // not, this is a no-op and the flow stays exactly as direct as before.
+      try {
+        var seed = csvSeedToRequirementsSeed(result)
+        var reqs = await analyzeRequirements({ garmentType: garment.label.ES, seed, tecs: tl.tecs, lang: "ES" })
+        if (pendingFields(reqs, "general").length > 0) {
+          setCsvVerifySeed({ garmentType: garment.label.ES, seed })
+          setCsvVerifying(true)
+        }
+      } catch {
+        // A failed verification check shouldn't undo a successful import -
+        // degrade quietly, same as the CSV already worked without this gate.
+      }
     } catch (err) {
       setCsvError(err instanceof DeepSeekError ? err.message : "No se pudo leer o interpretar el CSV.")
     } finally {
       setCsvImporting(false)
       e.target.value = ""
     }
+  }
+
+  // F2 gate completion: fold the answers for whatever the CSV didn't cover
+  // back in as extra, editable part rows - same shape "Agregar Pieza" already
+  // produces, so no fuzzy re-matching against the garment's canonical part
+  // ids is needed, and the data stays visible/removable like any other row.
+  function handleCsvVerificationComplete(draft) {
+    var extra = (draft.parts || []).map((p) => ({ id: uid(), val: p.val, on: true, customName: p.label }))
+    setParts((prev) => [...prev, ...extra])
+    setCsvVerifying(false)
+    setCsvVerifySeed(null)
   }
 
   function downloadCsvTemplate() {
@@ -311,6 +342,7 @@ export default function App() {
     if (step === 1) return langs.length > 0
     if (step === 2) return hdr.brand.trim() && hdr.pname.trim()
     if (step === 3 && garmentId === "custom") return !!customGarment // chat must finish first
+    if (step === 3 && csvVerifying) return false // F2 gate: answer what the CSV didn't cover first
     return true
   }
 
@@ -464,6 +496,17 @@ export default function App() {
 
     if (step === 3 && garmentId === "custom") {
       return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} seed={visionSeed ? visionSeed.seed : undefined} initialGarmentType={visionSeed ? visionSeed.garmentType : undefined} />
+    }
+
+    if (step === 3 && csvVerifying) {
+      return (
+        <div>
+          <p style={{ marginBottom: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 480 }}>
+            El CSV no cubre todo lo que esta ficha necesita — respondé lo que falta y despues seguís editando la tabla de piezas como siempre.
+          </p>
+          <GarmentChat generalOnly onComplete={handleCsvVerificationComplete} tecs={tl.tecs} seed={csvVerifySeed.seed} initialGarmentType={csvVerifySeed.garmentType} />
+        </div>
+      )
     }
 
     if (step === 3) {

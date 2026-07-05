@@ -48,7 +48,7 @@ function Bubble({ role: msgRole, children }) {
   )
 }
 
-export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
+export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, generalOnly }) {
   const [phase, setPhase] = useState(initialGarmentType ? "analyzing" : "naming")
   const [history, setHistory] = useState([{ role: "assistant", content: initialGarmentType ? "Analizando la prenda…" : OPENING }])
   const [reqs, setReqs] = useState(null)
@@ -89,7 +89,10 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType }) {
     const pending = pendingFields(nextReqs, category)
     if (pending.length === 0) {
       setCurrentField(null)
-      if (category === "general") {
+      if (category === "general" && generalOnly) {
+        setPhase("ready")
+        post("assistant", "Listo, ya tengo lo que faltaba. Podés continuar.")
+      } else if (category === "general") {
         post("assistant", "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…")
         setPhase("designAnalyzing")
         runDesignAnalysis(nextReqs)

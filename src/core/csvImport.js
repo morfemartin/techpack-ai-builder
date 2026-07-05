@@ -53,11 +53,35 @@ export async function importGarmentCSV(csvText, { garment, lang = "ES", tecs, im
     "Los campos w/h son milimetros en mm (string vacio si no aplica). hex siempre en formato #RRGGBB - si el CSV solo trae un nombre Pantone sin hex, aproxima un hex razonable para ese color."
 
   const result = await extractStructured({ instructions, content: csvText, maxTokens: 3000 })
+  const rawParts = Array.isArray(result.parts) ? result.parts : []
 
   return {
-    parts: mapParts(Array.isArray(result.parts) ? result.parts : [], garment, lang),
+    parts: mapParts(rawParts, garment, lang),
     designs: Array.isArray(result.designs) ? result.designs : [],
+    // Pre-reconciliation {label, val} pairs, kept alongside the canonical
+    // `parts` above - mapParts() overlays these onto the garment's full
+    // defaultParts list, so a part the CSV never mentioned reads as its
+    // registered default, not as "missing". csvSeedToRequirementsSeed()
+    // needs to know what the CSV actually said, not what got defaulted in.
+    rawParts,
   }
+}
+
+// F2: what did the CSV actually tell us, in the shape analyzeRequirements()
+// expects as a seed? Deliberately reads rawParts (pre-reconciliation), not
+// the merged `parts` - a registered garment's defaultParts already cover
+// every canonical field, so merging them in would make everything look
+// "known" and defeat the point of checking for real gaps.
+export function csvSeedToRequirementsSeed(csvResult) {
+  const rawParts = csvResult && Array.isArray(csvResult.rawParts) ? csvResult.rawParts : []
+  const seed = {}
+  for (const p of rawParts) {
+    if (!p) continue
+    const label = String(p.label || "").trim()
+    const val = String(p.val || "").trim()
+    if (label && val) seed[label] = val
+  }
+  return seed
 }
 
 // Attaches uploaded photos to AI-extracted designs. DeepSeek can only ever
