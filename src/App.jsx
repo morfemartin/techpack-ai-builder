@@ -6,6 +6,7 @@ import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
 import { DeepSeekError } from "./core/deepseekClient.js"
 import { downscaleImage, extractGarmentFromImages } from "./core/visionExtract.js"
+import { toGrayscale } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
@@ -162,6 +163,8 @@ export default function App() {
   const [plannedPreviewPages, setPlannedPreviewPages] = useState(null)
   const [plannedPreviewKey, setPlannedPreviewKey] = useState("")
   const [plannedPreviewError, setPlannedPreviewError] = useState(null)
+  const [monoMode, setMonoMode] = useState(false) // grayscale toggle - render-time only, never re-triggers AI planning
+  const [viewAllPages, setViewAllPages] = useState(false) // "see every page at once" contact sheet
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -447,6 +450,11 @@ export default function App() {
     } else {
       pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
     }
+    // Grayscale is a pure render-time post-process (toGrayscale maps every hex
+    // to its luminance gray) - applied here so the EXPORTED file matches
+    // whatever the user was looking at, without threading a mono flag through
+    // the whole planning pipeline.
+    if (monoMode) pages = pages.map((p) => ({ ...p, svg: toGrayscale(p.svg) }))
     setSvgPages(pages)
   }
 
@@ -690,6 +698,11 @@ export default function App() {
 
     if (step === 3) {
       const pn = garment.partLabels.ES
+      const garmentTypeLabel = (garment.label && (garment.label.ES || Object.values(garment.label)[0])) || ""
+      function searchPieceReference(pieceLabel) {
+        const q = [garmentTypeLabel, pieceLabel].filter(Boolean).join(" ")
+        window.open("https://www.google.com/search?tbm=isch&q=" + encodeURIComponent(q), "_blank", "noopener,noreferrer")
+      }
       let idx = 0
       return (
         <div>
@@ -736,7 +749,16 @@ export default function App() {
                   <span style={{ width: space(6), flexShrink: 0, display: "inline-flex", justifyContent: "center" }}>
                     {n && <IndexChip n={n} />}
                   </span>
-                  <span style={{ width: 132, fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, flexShrink: 0, fontFamily: type.fonts.ui }}>{nm}</span>
+                  <span style={{ width: 132, display: "flex", alignItems: "center", gap: space(1), fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, flexShrink: 0, fontFamily: type.fonts.ui }}>
+                    {nm}
+                    <button
+                      onClick={() => searchPieceReference(nm)}
+                      title={`Buscar referencias de "${nm}" en imagenes`}
+                      style={{ ...iconBtn(C.ink.hex), opacity: 0.4, flexShrink: 0 }}
+                    >
+                      <Icon name="help" size={14} />
+                    </button>
+                  </span>
                   <input value={p.val} onChange={(e) => updPart(p.id, "val", e.target.value)} style={{ flex: 1, padding: `${space(1)}px ${space(2)}px`, border: hair, fontSize: type.size.sm, outline: "none", background: C.white.hex, fontFamily: type.fonts.ui }} />
                   {p.customName && (
                     <button onClick={() => setParts((prev) => prev.filter((x) => x.id !== p.id))} style={iconBtn(role.index.fill)} title="Quitar">
@@ -841,6 +863,9 @@ export default function App() {
       var activePlannedIndex = activePlannedPages.length > 0 ? Math.min(prevPage, activePlannedPages.length - 1) : 0
       var activePlannedPage = activePlannedPages[activePlannedIndex]
       const miniBtn = (active, activeColor) => ({
+        display: "inline-flex",
+        alignItems: "center",
+        gap: space(1),
         padding: `${space(1)}px ${space(2)}px`,
         background: active ? activeColor : C.white.hex,
         color: active ? C.white.hex : C.ink.hex,
@@ -868,6 +893,13 @@ export default function App() {
                   {l}
                 </button>
               ))}
+              <span style={{ width: 1, alignSelf: "stretch", background: C.ink.hex, margin: `0 ${space(1)}px` }} />
+              <button onClick={() => setViewAllPages((v) => !v)} title="Ver todas las paginas en una sola vista" style={miniBtn(viewAllPages, role.priority.fill)}>
+                <Icon name="grid_view" size={14} /> Ver todas
+              </button>
+              <button onClick={() => setMonoMode((v) => !v)} title="Vista previa y exportacion en blanco y negro (escala de grises)" style={miniBtn(monoMode, C.ink.hex)}>
+                <Icon name="contrast" size={14} /> Escala de grises
+              </button>
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
               {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
@@ -888,7 +920,34 @@ export default function App() {
               ))}
             </div>
           </div>
-          {plannedMode ? (
+          {viewAllPages ? (
+            // "Ver todas" contact sheet - every page stacked in one scrollable
+            // view instead of one tab at a time, for a final look-over pass.
+            <div style={{ display: "flex", flexDirection: "column", gap: space(4), overflow: "auto", background: C.canvas.hex, padding: 10 }}>
+              {plannedMode
+                ? activePlannedPages.map((p, i) => (
+                    <div key={i}>
+                      <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, fontFamily: type.fonts.data, marginBottom: space(1) }}>
+                        {i + 1}. {p.name}
+                      </div>
+                      <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
+                        <div
+                          style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                          dangerouslySetInnerHTML={{ __html: monoMode ? toGrayscale(p.svg) : p.svg }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                : allPgs.map((p) => (
+                    <div key={p.i}>
+                      <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, fontFamily: type.fonts.data, marginBottom: space(1) }}>{p.l}</div>
+                      <div style={{ filter: monoMode ? "grayscale(1)" : "none" }}>
+                        <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={p.i} txCache={txCache} garment={garment} />
+                      </div>
+                    </div>
+                  ))}
+            </div>
+          ) : plannedMode ? (
             <div style={{ overflow: "auto", background: C.canvas.hex, padding: 10 }}>
               {plannedPreviewError && (
                 <div style={{ marginBottom: space(2), padding: space(2), border: hair, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, background: C.white.hex, color: C.ink.hex, fontSize: type.size.xs }}>
@@ -899,7 +958,7 @@ export default function App() {
                 <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
                   <div
                     style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
-                    dangerouslySetInnerHTML={{ __html: activePlannedPage.svg }}
+                    dangerouslySetInnerHTML={{ __html: monoMode ? toGrayscale(activePlannedPage.svg) : activePlannedPage.svg }}
                   />
                 </div>
               ) : (
@@ -912,7 +971,9 @@ export default function App() {
               )}
             </div>
           ) : (
-            <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={prevPage} txCache={txCache} garment={garment} />
+            <div style={{ filter: monoMode ? "grayscale(1)" : "none" }}>
+              <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={prevPage} txCache={txCache} garment={garment} />
+            </div>
           )}
         </div>
       )
