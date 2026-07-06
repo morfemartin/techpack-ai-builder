@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { VOCAB, buildPlannedPages, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { VOCAB, buildPlannedPages, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
 
 describe("weightsToGrow", () => {
   it("returns exact proportions when weights already sum to 100", () => {
@@ -242,5 +242,87 @@ describe("split composition (2D layout)", () => {
     expect(gray).not.toContain("#1A3FB0")
     expect(gray).toContain("<svg")
     expect(gray).toContain("Cuerpo")
+  })
+})
+
+describe("effectivePartsForPage (piece-aware pages)", () => {
+  const parts = [
+    { id: "body", val: "French terry", on: true },
+    { id: "hood", val: "Doble capa", on: true },
+    { id: "cuff", val: "Rib 2x2", on: true },
+  ]
+
+  it("returns every part when the page has no pieces field (e.g. a real overview)", () => {
+    expect(effectivePartsForPage(parts, { id: "overview" })).toEqual(parts)
+  })
+
+  it("returns every part when pieces is an empty array", () => {
+    expect(effectivePartsForPage(parts, { pieces: [] })).toEqual(parts)
+  })
+
+  it("narrows to only the ids a page lists", () => {
+    const result = effectivePartsForPage(parts, { pieces: ["hood"] })
+    expect(result).toEqual([{ id: "hood", val: "Doble capa", on: true }])
+  })
+
+  it("falls back to every part when none of the listed ids match anything real", () => {
+    expect(effectivePartsForPage(parts, { pieces: ["nonexistent"] })).toEqual(parts)
+  })
+})
+
+describe("buildPlannedPages parts-list pagination (F4.7)", () => {
+  const manyParts = Array.from({ length: 30 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true }))
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: manyParts,
+    designs: [],
+    logo: null,
+    txData: null,
+    garment: { partLabels: { ES: {} } },
+  }
+  // A parts list given only a small split column - not nearly enough room
+  // for 30 rows at the fixed compact row height.
+  const overflowPlan = {
+    pages: [
+      {
+        id: "overview",
+        title: "Estructura",
+        purpose: "overview",
+        regions: [
+          { type: "header", weight: 8 },
+          { type: "titleBar", weight: 5 },
+          { type: "split", weight: 79, regions: [{ type: "partsList", weight: 100 }] },
+          { type: "disclaimer", weight: 8 },
+        ],
+      },
+    ],
+  }
+
+  it("splits an over-saturated parts list into continuation pages instead of dropping rows", () => {
+    const pages = buildPlannedPages(overflowPlan, ctx)
+    expect(pages.length).toBeGreaterThan(1)
+    expect(pages[0].name).toBe("overview")
+    expect(pages[1].name).toContain("cont")
+  })
+
+  it("numbers continuation rows continuing from where the first page left off (no restart, no gap)", () => {
+    const pages = buildPlannedPages(overflowPlan, ctx)
+    const allText = pages.map((p) => p.svg).join("\n")
+    // every one of the 30 parts' values must appear exactly once across the
+    // whole paginated set - nothing lost, nothing duplicated. Matched as an
+    // exact SVG text-node value (">Valor 1<") so "Valor 1" doesn't false-
+    // positive against "Valor 10".."Valor 19" as a substring.
+    manyParts.forEach((p) => {
+      const needle = ">" + p.val + "<"
+      const occurrences = allText.split(needle).length - 1
+      expect(occurrences).toBe(1)
+    })
+  })
+
+  it("does not paginate when the parts list actually fits its allotted space", () => {
+    const smallCtx = { ...ctx, parts: manyParts.slice(0, 3) }
+    const pages = buildPlannedPages(overflowPlan, smallCtx)
+    expect(pages).toHaveLength(1)
   })
 })

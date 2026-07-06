@@ -51,6 +51,10 @@ function normalizeOutline(raw, context) {
         title,
         purpose,
         covers: Array.isArray(page.covers) ? page.covers.filter((c) => typeof c === "string" && c.trim()) : undefined,
+        // Which known part ids this page is actually about (e.g. the hood
+        // page shows hood pieces, not the whole BOM) - consumed by
+        // interpretPlan.js's effectivePartsForPage. Omitted/empty means "all".
+        pieces: Array.isArray(page.pieces) ? page.pieces.filter((p) => typeof p === "string" && p.trim()) : undefined,
       }
     })
   return pages.length > 0 ? { pages } : fallback
@@ -67,14 +71,15 @@ export function extractLastCompletedRegionType(text) {
 export async function planDocumentOutline({ garmentType, parts, designs, lang = "ES" }) {
   const context = { garmentType, parts, designs, lang }
   const instructions =
-    "Sos director de arte de fichas tecnicas textiles. Dada esta prenda y sus elementos, decidi que paginas necesita el documento para que la fabrica no tenga dudas: " +
-    "estructura general, forros/vistas abiertas si aplican, etiqueta si aplica, y una pagina por cada diseno discreto.\n\n" +
+    "Sos director de arte de fichas tecnicas textiles, pensando como un disenador tecnico real. Dada esta prenda y sus elementos, decidi que paginas necesita el documento para que la fabrica no tenga dudas: " +
+    "estructura general, forros/vistas abiertas si aplican, etiqueta si aplica, y una pagina por cada diseno discreto. No repitas una pagina generica por cada pieza - agrupa piezas relacionadas (ej. capucha+cordon en una misma pagina de estructura) segun lo que un ilustrador necesitaria ver junto.\n\n" +
     "Prenda: " + safeString(garmentType, "custom") + "\n" +
-    "Piezas conocidas: " + JSON.stringify(parts || []) + "\n" +
+    "Piezas conocidas (cada una con su id): " + JSON.stringify(parts || []) + "\n" +
     "Disenos conocidos: " + JSON.stringify(designs || []) + "\n" +
     "Idioma: " + lang + "\n\n" +
+    "Para cada pagina, ademas indicá \"pieces\": la lista de ids (de 'Piezas conocidas') que esa pagina especificamente cubre - una pagina de estructura general puede listar todas, pero una pagina centrada en un detalle (ej. la capucha) deberia listar solo esos ids, para que su tabla de specs no repita el BOM entero.\n" +
     "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
-    '{"pages":[{"id":"overview","title":"Overview","purpose":"overview","covers":["opcional"]}]}\n' +
+    '{"pages":[{"id":"overview","title":"Overview","purpose":"overview","pieces":["id1","id2"],"covers":["opcional"]}]}\n' +
     "Usa purpose como overview, structure, lining, label, o design:<nombre exacto del diseno>."
 
   const raw = await deepseekChat({

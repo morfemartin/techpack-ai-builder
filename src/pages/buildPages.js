@@ -1,16 +1,20 @@
 import { T } from "../core/i18n.js"
-import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
+import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc, wrapLines, fitText } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-export function renderPartsList(box, { parts, partLabels, txParts, labels, compact } = {}) {
+export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, startIndex } = {}) {
   var safeParts = Array.isArray(parts) ? parts.filter(function (p) { return p && p.on !== false }) : []
   var pn = partLabels || {}
   var txP = Array.isArray(txParts) ? txParts : null
   var lx = labels || {}
+  // The chip number continues from `startIndex` - what lets a "cont." page
+  // (see interpretPlan.js's pagination) number its rows 16, 17, 18... instead
+  // of restarting at 1, so a split BOM still reads as one continuous list.
+  var start = Number(startIndex) || 0
   // `compact` (used by the AI-planned pages): fixed, tight row height, top-
   // aligned, so a short parts list reads as a clean table with breathing room
   // instead of a few rows stretched tall with tiny text floating in huge cells.
@@ -45,7 +49,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
         return (
           R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
           R(chipX, chipY, chip, chip, palette.red.hex, palette.red.hex, "0") +
-          TX(b.x + b.width * 0.11, b.y + b.height / 2, i + 1, 7.5, true, "middle", palette.white.hex, type.svgFonts.data) +
+          TX(b.x + b.width * 0.11, b.y + b.height / 2, start + i + 1, 7.5, true, "middle", palette.white.hex, type.svgFonts.data) +
           "<line x1='" + divX1 + "' y1='" + b.y + "' x2='" + divX1 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
           TX(b.x + b.width * 0.21 + 3, b.y + b.height / 2, nm, 7, false, "start") +
           "<line x1='" + divX2 + "' y1='" + b.y + "' x2='" + divX2 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
@@ -58,11 +62,22 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   return renderLayoutToSVG(solveLayout(col({}, [tableHeaderRow, ...partRows]), box))
 }
 
+// How tall each color row gets: as close to the ideal 30px as the available
+// height allows, but NEVER so short a row gets dropped - a saturated color
+// list shrinks its rows (down to a still-legible floor) instead of silently
+// losing entries past some cutoff, matching every other "never truncate,
+// shrink instead" rule in this file.
+function colorRowHeight(count, availH) {
+  if (count <= 0) return 30
+  return Math.max(16, Math.min(30, Math.floor(availH / count)))
+}
+
 export function renderColorSpecs(box, { colors } = {}) {
   var s = ""
   var ty = box.y
   var W = box.width
   var limitY = box.y + box.height
+  var safe = (colors || []).filter(function (c) { return c && c.hex })
 
   s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
   ty += 16
@@ -70,24 +85,28 @@ export function renderColorSpecs(box, { colors } = {}) {
   s += R(box.x + 10, ty - 10, W - 20, 18, palette.blue.hex, "none")
   s += TX(box.x + W / 2, ty - 1, "PANTONE / CMYK", 9, true, "middle", palette.white.hex)
   ty += 18
-  ;(colors || []).forEach(function (col) {
-    if (!col.hex || ty > limitY - 32) return
+  var rowH = colorRowHeight(safe.length, limitY - ty)
+  var swatch = Math.min(20, rowH - 4)
+  var small = rowH < 26
+  safe.forEach(function (col) {
     var cm = h2c(col.hex)
-    s += R(box.x + 12, ty - 10, 20, 20, col.hex, palette.ink.hex, "0.5")
-    s += TX(box.x + 38, ty - 2, col.name || col.hex, 8, true, "start")
-    s += TX(box.x + 38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
-    ty += 30
+    s += R(box.x + 12, ty + (rowH - swatch) / 2 - 6, swatch, swatch, col.hex, palette.ink.hex, "0.5")
+    if (small) {
+      s += TX(box.x + 20 + swatch, ty + rowH / 2 - 8, (col.name || col.hex) + "  " + col.hex, 7.5, true, "start")
+    } else {
+      s += TX(box.x + 38, ty - 2, col.name || col.hex, 8, true, "start")
+      s += TX(box.x + 38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
+    }
+    ty += rowH
   })
   return s
 }
 
 function colorSpecsHeight(colors, startY, limitY) {
+  var safe = (colors || []).filter(function (c) { return c && c.hex })
   var ty = startY + 34
-  ;(colors || []).forEach(function (col) {
-    if (!col.hex || ty > limitY - 32) return
-    ty += 30
-  })
-  return ty - startY
+  var rowH = colorRowHeight(safe.length, limitY - ty)
+  return ty - startY + safe.length * rowH
 }
 
 export function renderEmbSpecs(box, { emb, title } = {}) {
@@ -104,21 +123,27 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   s += TX(box.x + W / 2, ty - 1, title || "Embroidery Tech Sheet", 9, true, "middle", palette.white.hex)
   ty += 18
   var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
+  var seq = ef.stopSeq && ef.stopSeq.length > 0 ? ef.stopSeq : []
+  // Same "never drop a row, shrink instead" rule as colorSpecs: count every
+  // row this block WILL draw (fields + optional sequence header/rows) and fit
+  // them all into the available height rather than cutting off at some fixed
+  // line height once the box is smaller than expected.
+  var totalRows = er.length + (seq.length > 0 ? 1 + seq.length : 0)
+  var rowH = Math.max(11, Math.min(16, Math.floor((limitY - ty) / Math.max(1, totalRows))))
+  var fontSize = Math.max(6.5, Math.min(8, rowH - 6))
   er.forEach(function (row) {
-    if (ty > limitY - 16) return
-    s += TX(box.x + 12, ty, row[0] + ":", 8, true, "start") + TX(box.x + W * 0.55, ty, row[1] || NA, 8, false, "start", undefined, type.svgFonts.data)
-    ty += 16
+    s += TX(box.x + 12, ty, row[0] + ":", fontSize, true, "start") + TX(box.x + W * 0.55, ty, row[1] || NA, fontSize, false, "start", undefined, type.svgFonts.data)
+    ty += rowH
   })
-  if (ef.stopSeq && ef.stopSeq.length > 0 && ty < limitY - 40) {
-    ty += 4
+  if (seq.length > 0) {
+    ty += Math.max(0, rowH - 12)
     s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#eee' stroke-width='0.8'/>"
-    ty += 14
-    s += TX(box.x + 12, ty, "Secuencia:", 8, true, "start")
-    ty += 14
-    ef.stopSeq.forEach(function (st) {
-      if (ty > limitY - 14) return
-      s += TX(box.x + 14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", 8, false, "start", undefined, type.svgFonts.data)
-      ty += 13
+    ty += rowH
+    s += TX(box.x + 12, ty, "Secuencia:", fontSize, true, "start")
+    ty += rowH
+    seq.forEach(function (st) {
+      s += TX(box.x + 14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", fontSize, false, "start", undefined, type.svgFonts.data)
+      ty += rowH
     })
   }
   return s
@@ -160,14 +185,16 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
     s += TX(x + 8 + chip + 8, y + 8 + chip / 2, String(refLabel).toUpperCase(), 9, true, "start", palette.ink.hex)
 
     if (i === 0 && noteText) {
+      // fitText shrinks the brief to whatever size makes it fit the available
+      // cell - a long, detailed brief (the kind a real illustrator actually
+      // needs) never gets silently cut off or run into the cell's edge.
       var innerW = Math.max(40, cellW - 44)
-      var lines = wrapLines(noteText, innerW, 11)
-      var maxLines = Math.max(1, Math.floor((cellH * 0.55) / 15))
-      var shown = lines.slice(0, maxLines)
-      var startY = y + cellH / 2 - (shown.length * 15) / 2 + 10
-      s += TX(x + cellW / 2, startY - 20, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
-      shown.forEach(function (line, li) {
-        s += TX(x + cellW / 2, startY + li * 15, line, 11, false, "middle", "#9AA0AB")
+      var innerH = cellH * 0.6
+      var fit = fitText(noteText, innerW, innerH, { maxSize: 11, minSize: 7.5 })
+      var startY = y + cellH / 2 - (fit.lines.length * fit.lineHeight) / 2 + fit.lineHeight / 2
+      s += TX(x + cellW / 2, startY - fit.lineHeight - 6, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
+      fit.lines.forEach(function (line, li) {
+        s += TX(x + cellW / 2, startY + li * fit.lineHeight, line, fit.size, false, "middle", "#9AA0AB")
       })
     }
   }
