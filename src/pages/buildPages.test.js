@@ -160,10 +160,11 @@ describe("reusable page block helpers", () => {
       { slots: 3, refs: ["Front", "Back"], note: "Show front and back construction notes." }
     )
 
-    expect(svg).toContain("Front")
-    expect(svg).toContain("Back")
-    expect(svg).toContain("Referencia 3")
-    expect(svg).toContain("Show front and back construction notes.")
+    expect(svg).toContain("FRONT")
+    expect(svg).toContain("BACK")
+    expect(svg).toContain("VISTA 3")
+    expect(svg).toContain("BRIEF PARA EL ILUSTRADOR")
+    expect(svg).toContain("Show") // brief text lives inside the art board
     expect(svg).not.toContain("<path")
   })
 })

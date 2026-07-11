@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { VOCAB, buildPlannedPages, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { VOCAB, buildPlannedPages, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
 
 describe("weightsToGrow", () => {
   it("returns exact proportions when weights already sum to 100", () => {
@@ -105,7 +105,7 @@ describe("interpretPagePlan", () => {
     garment: { partLabels: { ES: { body: "Cuerpo" } } },
   }
 
-  it("returns a column tree with normalized grows for each planned region", () => {
+  it("keeps structural chrome (header/disclaimer) at a fixed height and lets content grow", () => {
     const root = interpretPagePlan(
       {
         id: "overview",
@@ -122,9 +122,14 @@ describe("interpretPagePlan", () => {
 
     expect(root.direction).toBe("column")
     expect(root.children).toHaveLength(3)
-    expect(root.children[0].grow).toBe(20)
+    // header: fixed strip, does not grow
+    expect(root.children[0].grow).toBe(0)
+    expect(root.children[0].basis).toBe(82)
+    // partsList: content, grows to fill
     expect(root.children[1].grow).toBe(60)
-    expect(root.children[2].grow).toBe(20)
+    // disclaimer: fixed strip, does not grow
+    expect(root.children[2].grow).toBe(0)
+    expect(root.children[2].basis).toBe(30)
   })
 
   it("renders planned pages into the same [{name,svg}] shape as buildAllPages", () => {
@@ -152,7 +157,7 @@ describe("interpretPagePlan", () => {
     expect(pages[0].name).toBe("custom_overview")
     expect(pages[0].svg).toContain("<svg")
     expect(pages[0].svg).toContain("Custom Overview")
-    expect(pages[0].svg).toContain("Front")
+    expect(pages[0].svg).toContain("FRONT")
     expect(pages[0].svg).toContain("Cuerpo")
     expect(pages[0].svg).toContain("Todos los disenos")
   })
@@ -178,5 +183,146 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("Blue")
     expect(pages[0].svg).toContain("Tajima")
     expect(pages[0].svg).toContain("12000")
+  })
+})
+
+describe("split composition (2D layout)", () => {
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: [{ id: "body", val: "French terry", on: true }],
+    designs: [{ name: "Chest Logo", colors: [{ name: "Blue", hex: "#003DA5" }], illustrationBrief: "Left chest." }],
+    logo: null,
+    txData: null,
+    garment: { partLabels: { ES: { body: "Cuerpo" } } },
+  }
+
+  it("keeps a split region and normalizes its inner leaf regions, dropping unknown ones", () => {
+    const raw = { pages: [{ regions: [{ type: "split", weight: 60, regions: [{ type: "partsList", weight: 30 }, { type: "bogus", weight: 10 }, { type: "illustration", weight: 70, slots: 2 }] }] }] }
+    const regions = normalizePlan(raw).pages[0].regions
+    expect(regions).toHaveLength(1)
+    expect(regions[0].type).toBe("split")
+    expect(regions[0].regions.map((r) => r.type)).toEqual(["partsList", "illustration"])
+  })
+
+  it("drops a split whose inner regions are all invalid (renders as a blank row otherwise)", () => {
+    const raw = { pages: [{ regions: [{ type: "split", weight: 50, regions: [{ type: "bogus" }] }, { type: "header", weight: 10 }] }] }
+    expect(normalizePlan(raw).pages[0].regions.map((r) => r.type)).toEqual(["header"])
+  })
+
+  it("builds a horizontal row for a split, inner grows taken from inner weights", () => {
+    const root = interpretPagePlan(
+      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      ctx
+    )
+    expect(root.children).toHaveLength(3)
+    const splitNode = root.children[1]
+    expect(splitNode.direction).toBe("row")
+    expect(splitNode.children).toHaveLength(2)
+    expect(splitNode.children[0].grow).toBe(25)
+    expect(splitNode.children[1].grow).toBe(75)
+  })
+
+  it("renders both columns of a split into the same page svg", () => {
+    const pages = buildPlannedPages(
+      { pages: [{ id: "split-page", title: "Split", purpose: "overview", regions: [{ type: "split", weight: 100, regions: [{ type: "partsList", weight: 40 }, { type: "illustration", weight: 60, slots: 1, refs: ["Frente"] }] }] }] },
+      ctx
+    )
+    expect(pages[0].svg).toContain("Cuerpo") // partsList column
+    expect(pages[0].svg).toContain("FRENTE") // illustration column
+  })
+
+  it("renders a grayscale document when { mono: true } - no brand hues survive", () => {
+    const plan = { pages: [{ id: "p", title: "P", purpose: "overview", regions: [{ type: "titleBar", weight: 6 }, { type: "partsList", weight: 80 }, { type: "disclaimer", weight: 8 }] }] }
+    const color = buildPlannedPages(plan, ctx)[0].svg
+    const gray = buildPlannedPages(plan, ctx, { mono: true })[0].svg
+    // the color version carries brand red/blue; the mono version carries neither
+    expect(color).toContain("#E11D3A")
+    expect(gray).not.toContain("#E11D3A")
+    expect(gray).not.toContain("#1A3FB0")
+    expect(gray).toContain("<svg")
+    expect(gray).toContain("Cuerpo")
+  })
+})
+
+describe("effectivePartsForPage (piece-aware pages)", () => {
+  const parts = [
+    { id: "body", val: "French terry", on: true },
+    { id: "hood", val: "Doble capa", on: true },
+    { id: "cuff", val: "Rib 2x2", on: true },
+  ]
+
+  it("returns every part when the page has no pieces field (e.g. a real overview)", () => {
+    expect(effectivePartsForPage(parts, { id: "overview" })).toEqual(parts)
+  })
+
+  it("returns every part when pieces is an empty array", () => {
+    expect(effectivePartsForPage(parts, { pieces: [] })).toEqual(parts)
+  })
+
+  it("narrows to only the ids a page lists", () => {
+    const result = effectivePartsForPage(parts, { pieces: ["hood"] })
+    expect(result).toEqual([{ id: "hood", val: "Doble capa", on: true }])
+  })
+
+  it("falls back to every part when none of the listed ids match anything real", () => {
+    expect(effectivePartsForPage(parts, { pieces: ["nonexistent"] })).toEqual(parts)
+  })
+})
+
+describe("buildPlannedPages parts-list pagination (F4.7)", () => {
+  const manyParts = Array.from({ length: 30 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true }))
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: manyParts,
+    designs: [],
+    logo: null,
+    txData: null,
+    garment: { partLabels: { ES: {} } },
+  }
+  // A parts list given only a small split column - not nearly enough room
+  // for 30 rows at the fixed compact row height.
+  const overflowPlan = {
+    pages: [
+      {
+        id: "overview",
+        title: "Estructura",
+        purpose: "overview",
+        regions: [
+          { type: "header", weight: 8 },
+          { type: "titleBar", weight: 5 },
+          { type: "split", weight: 79, regions: [{ type: "partsList", weight: 100 }] },
+          { type: "disclaimer", weight: 8 },
+        ],
+      },
+    ],
+  }
+
+  it("splits an over-saturated parts list into continuation pages instead of dropping rows", () => {
+    const pages = buildPlannedPages(overflowPlan, ctx)
+    expect(pages.length).toBeGreaterThan(1)
+    expect(pages[0].name).toBe("overview")
+    expect(pages[1].name).toContain("cont")
+  })
+
+  it("numbers continuation rows continuing from where the first page left off (no restart, no gap)", () => {
+    const pages = buildPlannedPages(overflowPlan, ctx)
+    const allText = pages.map((p) => p.svg).join("\n")
+    // every one of the 30 parts' values must appear exactly once across the
+    // whole paginated set - nothing lost, nothing duplicated. Matched as an
+    // exact SVG text-node value (">Valor 1<") so "Valor 1" doesn't false-
+    // positive against "Valor 10".."Valor 19" as a substring.
+    manyParts.forEach((p) => {
+      const needle = ">" + p.val + "<"
+      const occurrences = allText.split(needle).length - 1
+      expect(occurrences).toBe(1)
+    })
+  })
+
+  it("does not paginate when the parts list actually fits its allotted space", () => {
+    const smallCtx = { ...ctx, parts: manyParts.slice(0, 3) }
+    const pages = buildPlannedPages(overflowPlan, smallCtx)
+    expect(pages).toHaveLength(1)
   })
 })

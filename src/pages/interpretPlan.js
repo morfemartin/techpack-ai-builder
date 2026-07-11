@@ -10,14 +10,57 @@
 // layout engine or a DeepSeek call.
 
 import { T } from "../core/i18n.js"
-import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
-import { col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
-import { palette } from "../design/tokens.js"
+import { R, TX, sv, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
+import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
+import { palette, type } from "../design/tokens.js"
+import { toGrayscale } from "../core/colorUtils.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 
-// The only region types the interpreter knows how to render. Anything else the
-// model invents is dropped by normalizePlan rather than risking a broken page.
+// The only LEAF region types the interpreter knows how to render. Anything else
+// the model invents is dropped by normalizePlan rather than risking a broken
+// page. `split` (below) is a COMPOSITE, handled separately: it is not a leaf.
 export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "note", "spacer", "disclaimer"]
+
+// Page-level breathing room: a consistent outer margin + gutter between bands is
+// what turns a stack of blocks into a *composed* page instead of bands welded to
+// the frame edge. Percent-free px because the solver already resolves them.
+const PAGE_PAD = 26
+const PAGE_GAP = 14
+// Gutter between the columns of a `split` (side-by-side) region.
+const SPLIT_GAP = 14
+
+// Structural blocks are chrome, not content: a real tech pack keeps the header,
+// the section title, and the disclaimer as THIN, FIXED strips and lets the
+// illustration / data grow to fill everything left over. Fixing their height
+// (instead of letting a model weight bloat them) is what kills the oversized
+// blue title bar and the dead whitespace at the bottom of a page in one move -
+// the model's weights now only distribute the CONTENT area.
+const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 30 }
+
+// Matches renderPartsList's `compact` row basis (30) plus its 20px table
+// header - used to measure, after solving, whether a page's parts list
+// actually fits the parts assigned to it (see `buildPlannedPages` pagination).
+const COMPACT_ROW_H = 30
+const TABLE_HEADER_H = 20
+function partsCapacity(height) {
+  return Math.max(0, Math.floor((height - TABLE_HEADER_H) / COMPACT_ROW_H))
+}
+
+// A real technical designer doesn't repeat the whole BOM on every page - a
+// page about the hood shows the hood's pieces, not the zipper's. `page.pieces`
+// (an array of part ids the outline pass assigns per page) narrows the parts
+// list down to what THIS page is actually about. Falls back to every part
+// when a page doesn't specify pieces (e.g. a genuine overview) or when none
+// of the given ids match anything real, so a bad id never produces an empty
+// table.
+export function effectivePartsForPage(allParts, page) {
+  const all = Array.isArray(allParts) ? allParts : []
+  const wanted = page && Array.isArray(page.pieces) ? page.pieces.filter((x) => typeof x === "string" && x.trim()) : []
+  if (wanted.length === 0) return all
+  const ids = wanted.map(String)
+  const filtered = all.filter((p) => p && ids.indexOf(String(p.id)) !== -1)
+  return filtered.length > 0 ? filtered : all
+}
 
 // A page that lost all its regions still needs to render something sane.
 const FALLBACK_REGIONS = [
@@ -57,6 +100,23 @@ export function weightsToGrow(regions) {
   return weights.map((w) => (w / total) * 100)
 }
 
+// Sanitizes a single region without mutating it. Returns null for anything the
+// interpreter can't render, so the caller can filter it out. A `split` is kept
+// only if at least one of its inner leaf regions survives - an empty split would
+// render as a blank row, so it's dropped like any other unusable region.
+function normalizeRegion(r) {
+  if (!r || typeof r !== "object") return null
+  if (r.type === "split") {
+    const inner = (Array.isArray(r.regions) ? r.regions : [])
+      .filter((c) => c && typeof c === "object" && VOCAB.includes(c.type))
+      .map((c) => ({ ...c, weight: safeWeight(c.weight) }))
+    if (inner.length === 0) return null
+    return { ...r, type: "split", weight: safeWeight(r.weight), regions: inner }
+  }
+  if (VOCAB.includes(r.type)) return { ...r, weight: safeWeight(r.weight) }
+  return null
+}
+
 // Turns whatever the model returned into an always-valid plan, without
 // mutating the input. Unknown region types are dropped; a page emptied by that
 // filtering falls back to a minimal header+disclaimer so it still renders;
@@ -71,12 +131,12 @@ export function normalizePlan(raw) {
     const purpose = typeof p.purpose === "string" ? p.purpose : "overview"
 
     let regions = Array.isArray(p.regions) ? p.regions : []
-    regions = regions
-      .filter((r) => r && typeof r === "object" && VOCAB.includes(r.type))
-      .map((r) => ({ ...r, weight: safeWeight(r.weight) }))
+    regions = regions.map(normalizeRegion).filter(Boolean)
     if (regions.length === 0) regions = FALLBACK_REGIONS.map((r) => ({ ...r }))
 
-    return { id, title, purpose, regions }
+    const pieces = Array.isArray(p.pieces) ? p.pieces.filter((x) => typeof x === "string" && x.trim()) : undefined
+
+    return { id, title, purpose, pieces, regions }
   })
 
   return { pages }
@@ -120,25 +180,48 @@ function leafForRegion(region, page, ctx) {
   const txData = ctx && ctx.txData ? ctx.txData : null
   const hdr = ctx && ctx.hdr ? ctx.hdr : {}
 
+  // Structural chrome takes a fixed height; content blocks grow by their weight.
+  var fixed = FIXED_BASIS[region.type]
+  var sizing = fixed ? { basis: fixed, grow: 0, shrink: 0 } : { grow: region.grow }
   return leaf({
-    grow: region.grow,
+    ...sizing,
     min: region.type === "spacer" ? 0 : 20,
+    // Tags this leaf so buildPlannedPages can find it post-solve and read its
+    // ALLOTTED height - the box height depends only on the plan's weights,
+    // never on how many parts are shown, so it's a stable measuring stick for
+    // "does this page's part count actually fit here" (see partsCapacity).
+    _isPartsList: region.type === "partsList",
     render: (box) => {
       if (region.type === "header") {
         return "<g transform='translate(" + box.x + " " + box.y + ")'>" + svgHeader(hdr, ctx && ctx.logo, box.width, box.height) + "</g>"
       }
       if (region.type === "titleBar") {
-        return R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8") + TX(box.x + box.width / 2, box.y + box.height / 2, page.title || page.purpose || "", 11, true, "middle", palette.white.hex)
+        // Asymmetric Bauhaus title: a solid role.index red block anchors the
+        // left edge (a pure geometric mark, no number needed), then the title
+        // sits LEFT-aligned in tracked caps-lineage type on the blue field -
+        // Bill/Bayer, not a centered <h1>. Left-alignment + the red anchor are
+        // what read as "designed" versus the old centered bar.
+        var title = page.title || page.purpose || ""
+        var sq = Math.min(box.height, 30)
+        var s = R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8")
+        s += R(box.x, box.y, sq, box.height, palette.red.hex, palette.red.hex, "0")
+        var tx = box.x + sq + 14
+        s += "<text x='" + tx + "' y='" + (box.y + box.height / 2) + "' text-anchor='start' dominant-baseline='central' font-family='" + type.svgFonts.ui + "' font-size='12' font-weight='bold' letter-spacing='0.6' fill='" + palette.white.hex + "'>" + sv(title) + "</text>"
+        return s
       }
       if (region.type === "illustration") {
         return renderIllustrationZone(box, { slots: region.slots, refs: region.refs, note: region.note || (design && design.illustrationBrief) || "" })
       }
       if (region.type === "partsList") {
+        // ctx.parts already reflects this page's pieces (see interpretPagePlan)
+        // and, for a paginated continuation page, the exact remaining slice.
         return renderPartsList(box, {
           parts: (ctx && ctx.parts) || [],
           partLabels,
           txParts: txData && txData.parts,
           labels: { spec: t.sp, detail: t.dt, file: "Archivo / Drive" },
+          compact: true,
+          startIndex: (ctx && ctx.partsStartIndex) || 0,
         })
       }
       if (region.type === "colorSpecs") return renderColorSpecs(box, { colors: design && design.colors })
@@ -150,11 +233,31 @@ function leafForRegion(region, page, ctx) {
   })
 }
 
+// Maps one normalized region to a layout node. A `split` becomes a horizontal
+// `row` whose children are its inner leaf regions, each given a horizontal grow
+// from its own weight - this is what lets a page place a narrow numbered
+// partsList beside a wide illustration (the real tech-pack idiom) instead of
+// forcing every block into a full-width band. Everything else stays a leaf.
+function buildRegionNode(region, page, ctx) {
+  if (region.type === "split") {
+    const inner = Array.isArray(region.regions) ? region.regions : []
+    const grows = weightsToGrow(inner)
+    const children = inner.map((r, i) => leafForRegion({ ...r, grow: grows[i] }, page, ctx))
+    return row({ grow: region.grow, gap: SPLIT_GAP }, children)
+  }
+  return leafForRegion(region, page, ctx)
+}
+
 export function interpretPagePlan(page, ctx) {
   const normalized = normalizePlan({ pages: [page] }).pages[0]
   const grows = weightsToGrow(normalized.regions)
   const regions = normalized.regions.map((region, i) => ({ ...region, grow: grows[i] }))
-  return col({}, regions.map((region) => leafForRegion(region, normalized, ctx || {})))
+  const safeCtx = ctx || {}
+  // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan
+  // call (tests) and the full buildPlannedPages path share one source of truth
+  // for "which parts does this page actually show."
+  const pageCtx = { ...safeCtx, parts: effectivePartsForPage(safeCtx.parts, normalized) }
+  return col({ padding: PAGE_PAD, gap: PAGE_GAP }, regions.map((region) => buildRegionNode(region, normalized, pageCtx)))
 }
 
 function pageName(page, i) {
@@ -162,17 +265,90 @@ function pageName(page, i) {
   return String(base).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "page_" + (i + 1)
 }
 
-export function buildPlannedPages(plan, ctx) {
+// Depth-first search for the leaf tagged by leafForRegion as the page's parts
+// list, so its ALLOTTED box height (a pure function of the plan's weights,
+// not of how many parts exist) can be read after solving.
+function findPartsListLeaf(node) {
+  if (!node) return null
+  if (node._isPartsList) return node
+  if (node.children) {
+    for (const c of node.children) {
+      const found = findPartsListLeaf(c)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+export function buildPlannedPages(plan, ctx, opts) {
+  const mono = !!(opts && opts.mono)
   const normalized = normalizePlan(plan)
   const W = 1200
   const H = 900
-  return normalized.pages.map((page, i) => {
-    const root = interpretPagePlan(page, ctx)
-    const resolved = solveLayout(root, { x: 0, y: 0, width: W, height: H })
+  const allParts = (ctx && ctx.parts) || []
+
+  function resolvedTreeFor(page, pageCtx) {
+    return solveLayout(interpretPagePlan(page, pageCtx), { x: 0, y: 0, width: W, height: H })
+  }
+  function svgFor(resolved) {
     let svg = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
     svg += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
     svg += renderLayoutToSVG(resolved)
     svg += "</svg>"
-    return { name: pageName(page, i), svg }
+    // Grayscale is a pure post-process on the finished page (see toGrayscale) -
+    // no renderer needs a parallel "mono" path.
+    return mono ? toGrayscale(svg) : svg
+  }
+
+  const outPages = []
+
+  normalized.pages.forEach((page, i) => {
+    const firstPass = resolvedTreeFor(page, ctx)
+    const partsLeaf = findPartsListLeaf(firstPass)
+    const effective = effectivePartsForPage(allParts, page)
+
+    if (!partsLeaf || effective.length <= partsCapacity(partsLeaf.height)) {
+      outPages.push({ name: pageName(page, i), svg: svgFor(firstPass) })
+      return
+    }
+
+    // Overflow: the plan gave this page's parts list less room than its real
+    // piece count needs. A real designer wouldn't shrink the text to the
+    // point of illegibility or silently lose rows - they'd split the table
+    // across a "(cont.)" page, numbering continuing so it still reads as one
+    // BOM. Every other block already shrinks-to-fit (fitText, dynamic specs
+    // row height); the parts list is the one place row height is fixed for
+    // readability, so it's the one that paginates instead.
+    const cap = Math.max(1, partsCapacity(partsLeaf.height))
+    const cappedCtx = { ...ctx, parts: effective.slice(0, cap), partsStartIndex: 0 }
+    outPages.push({ name: pageName(page, i), svg: svgFor(resolvedTreeFor({ ...page, pieces: undefined }, cappedCtx)) })
+
+    let rest = effective.slice(cap)
+    let startIndex = cap
+    let contN = 1
+    while (rest.length > 0) {
+      const contPage = {
+        id: page.id + "-cont-" + contN,
+        title: (page.title || "") + " (cont.)",
+        purpose: page.purpose,
+        regions: [
+          { type: "header", weight: 8 },
+          { type: "titleBar", weight: 5 },
+          { type: "partsList", weight: 79 },
+          { type: "disclaimer", weight: 8 },
+        ],
+      }
+      const probe = resolvedTreeFor(contPage, { ...ctx, parts: rest, partsStartIndex: startIndex })
+      const contLeaf = findPartsListLeaf(probe)
+      const contCap = Math.max(1, partsCapacity(contLeaf ? contLeaf.height : H))
+      const chunk = rest.slice(0, contCap)
+      const final = chunk.length === rest.length ? probe : resolvedTreeFor(contPage, { ...ctx, parts: chunk, partsStartIndex: startIndex })
+      outPages.push({ name: pageName(contPage, i), svg: svgFor(final) })
+      rest = rest.slice(contCap)
+      startIndex += contCap
+      contN++
+    }
   })
+
+  return outPages
 }

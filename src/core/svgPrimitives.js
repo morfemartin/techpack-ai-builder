@@ -84,6 +84,29 @@ export function svgDisc(t, hdr, W, dy, discH) {
   return R(0, dy, W, discH, palette.white.hex, palette.ink.hex, "0.8") + TX(W / 2, dy + discH / 2, t.disc + " " + (hdr.brand || "[Marca]") + t.discSfx, 9, false, "middle", palette.ink.hex)
 }
 
+// Shrinks font size (within [minSize,maxSize]) until the wrapped text fits
+// inside maxHeight at maxWidth - the fix for text that "se pica" (overlaps)
+// or gets silently cut: a block ALWAYS gets a legible size that actually
+// fits, instead of a fixed size plus a hard line-count cap that drops words.
+// Only at the floor size (min legible) does it fall back to clipping lines,
+// as an explicit last resort rather than the default behavior.
+export function fitText(text, maxWidth, maxHeight, opts) {
+  var o = opts || {}
+  var maxSize = o.maxSize || 11
+  var minSize = o.minSize || 7
+  var lineHeightRatio = o.lineHeightRatio || 1.35
+  var raw = text == null ? "" : String(text)
+  if (!raw) return { size: maxSize, lineHeight: Math.round(maxSize * lineHeightRatio), lines: [] }
+  for (var size = maxSize; size >= minSize; size--) {
+    var lh = Math.round(size * lineHeightRatio)
+    var lines = wrapLines(raw, maxWidth, size)
+    if (lines.length * lh <= maxHeight) return { size: size, lineHeight: lh, lines: lines }
+  }
+  var floorLh = Math.round(minSize * lineHeightRatio)
+  var maxLines = Math.max(1, Math.floor(maxHeight / floorLh))
+  return { size: minSize, lineHeight: floorLh, lines: wrapLines(raw, maxWidth, minSize).slice(0, maxLines) }
+}
+
 // Word-wraps plain text into lines that roughly fit `maxWidth` px at
 // `fontSize`. No real text measurement is available here (this builds raw
 // SVG <text> strings, in both browser and Node/vitest) - avgCharWidth is a
