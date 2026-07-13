@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "functions": {
-    "api/deepseek.js": { "maxDuration": 30 }
+    "api/deepseek.js": { "maxDuration": 60 }
   }
 }
