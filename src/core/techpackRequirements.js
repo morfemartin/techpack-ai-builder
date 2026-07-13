@@ -180,6 +180,31 @@ export function skipField(reqs, key) {
   }
 }
 
+// Undoes an answer: puts `key` back to "ask" with an empty value, so it's
+// pending again. Safe by construction - pendingFields() always filters
+// reqs.fields in its ORIGINAL array order, and fields only ever move forward
+// (ask -> known/assumed) except through this function, so reverting the most
+// recently answered field is guaranteed to make it the next one askNext()
+// lands on (never a different field, never a stale re-render).
+export function revertField(reqs, key) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  return {
+    ...reqs,
+    fields: fields.map((f) => {
+      if (!f || f.key !== key) return f
+      return { ...f, status: FIELD_STATUS.ASK, value: "" }
+    }),
+  }
+}
+
+// Pure: a cheap, deliberately-simple signal that the user typed a CLARIFYING
+// QUESTION about the current field rather than an answer to it (e.g. "que es
+// eso?") - a literal "?" in either Spanish or English phrasing is reliable
+// enough that a fancier classifier isn't worth the extra DeepSeek round trip.
+export function looksLikeQuestion(text) {
+  return /\?/.test(String(text || ""))
+}
+
 // True when nothing in `category` (or overall) still needs asking.
 export function isComplete(reqs, category) {
   return pendingFields(reqs, category).length === 0
@@ -386,4 +411,58 @@ export function attachIllustrationBriefs(designs, briefs) {
     }
   })
   return safeDesigns.map((d) => ({ ...d, illustrationBrief: briefMap.has(d && d.name) ? briefMap.get(d.name) : "" }))
+}
+
+// Small, cheap, non-streaming call: answers a clarifying question ABOUT the
+// current field/options without advancing the walk (see looksLikeQuestion) -
+// plain text, no JSON, no options/status semantics, same spirit as
+// authorIllustrationBriefs' "this is prose for a human, not a question shape."
+export async function answerFieldQuestion({ field, garmentType, question, lang = "ES" }) {
+  const f = field || {}
+  const optionsText = Array.isArray(f.options) && f.options.length > 0 ? "Opciones sugeridas: " + f.options.join(", ") + ". " : ""
+  const instructions =
+    "Sos un tecnico textil experto ayudando a alguien a completar la ficha tecnica de una prenda tipo '" + (garmentType || "prenda") + "'. " +
+    "Te estan preguntando sobre este campo puntual del formulario: \"" + (f.label || "") + "\"" + (f.why ? " (" + f.why + ")" : "") + ". " +
+    optionsText +
+    "Pregunta del usuario: \"" + (question || "") + "\"\n\n" +
+    "Respondé de forma clara y breve (maximo 3 oraciones), en espanol, explicando el termino o resolviendo la duda. " +
+    "No le devuelvas una pregunta, no uses JSON, solo el texto de la respuesta."
+
+  const raw = await deepseekChat({
+    messages: [{ role: "user", content: instructions }],
+    maxTokens: 300,
+    temperature: 0.3,
+  })
+  return raw.replace(/```/g, "").trim()
+}
+
+// Final open-ended pass (runs once the whole walk is done, before "ready"):
+// turns free text the user typed into real fields using the SAME shape
+// normalizeRequirements() already produces, so it merges into reqs with zero
+// new plumbing - reqsToParts/reqsToDesigns pick these up exactly like any
+// other answered field. Forced to "known" status since this is the user
+// directly stating a fact, not something left to ask about.
+export async function analyzeAdditionalNotes({ garmentType, existingFields, notes, lang = "ES" }) {
+  const existingText = Array.isArray(existingFields) && existingFields.length > 0
+    ? JSON.stringify(existingFields.map((f) => ({ label: f.label, value: f.value })))
+    : "(ninguno)"
+  const instructions =
+    "Sos un tecnico textil experto completando la ficha tecnica de una prenda tipo '" + (garmentType || "prenda") + "'. " +
+    "Ya se respondieron estos campos: " + existingText + ".\n\n" +
+    "El usuario acaba de agregar, en sus propias palabras, algo que cree que no se pregunto todavia:\n\"" + (notes || "") + "\"\n\n" +
+    "Extrae de ese texto los campos NUEVOS y concretos que describe (que no esten ya cubiertos arriba). " +
+    "Si describe un elemento de diseno (logo, bordado, parche, etc.) con su propio campo 'category':'design', usa 'designSlot' " +
+    "(id corto, url-safe, en ingles) y 'designField' (uno de: name, position, technique, driveLink, detail) igual que siempre. " +
+    "Si no hay nada nuevo o estructurable, devolve un array 'fields' vacio - no inventes nada.\n\n" +
+    "Cada field debe tener status:\"known\" (son afirmaciones directas, no preguntas) y su 'value' con lo que dijo el usuario.\n\n" +
+    "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
+    '{"fields": [{"key": "identificadorEnIngles", "label": "Etiqueta en espanol", "category": "general", "status": "known", "value": "lo que dijo"}]}'
+
+  const raw = await deepseekChat({
+    messages: [{ role: "user", content: instructions }],
+    maxTokens: 1200,
+    temperature: 0.2,
+  })
+  const parsed = parseJSONOrRepair(raw, "El asistente de IA no pudo interpretar esas notas.")
+  return normalizeRequirements(parsed, garmentType).fields
 }

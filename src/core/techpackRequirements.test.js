@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, pendingFields, applyAnswer, skipField, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -13,7 +13,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs } from "./techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, answerFieldQuestion, analyzeAdditionalNotes } from "./techpackRequirements.js"
 
 describe("normalizeRequirements", () => {
   it("drops fields with no valid key and applies defaults", () => {
@@ -122,6 +122,50 @@ describe("skipField", () => {
   it("does not mutate the input", () => {
     skipField(reqs, "archivo_cierre")
     expect(reqs.fields[0].status).toBe("ask")
+  })
+})
+
+describe("revertField", () => {
+  const reqs = {
+    garmentType: "pantalon",
+    fields: [{ key: "cintura", status: "known", value: "Elastico ajustable", options: ["Elastico"], why: "", label: "Cintura", category: "general" }],
+  }
+
+  it("puts an answered field back to ask with an empty value", () => {
+    const reverted = revertField(reqs, "cintura")
+    expect(reverted.fields[0].status).toBe("ask")
+    expect(reverted.fields[0].value).toBe("")
+    expect(pendingFields(reverted, "general").map((f) => f.key)).toEqual(["cintura"])
+  })
+
+  it("does not mutate the input", () => {
+    revertField(reqs, "cintura")
+    expect(reqs.fields[0].status).toBe("known")
+    expect(reqs.fields[0].value).toBe("Elastico ajustable")
+  })
+
+  it("leaves other fields untouched", () => {
+    const two = { fields: [{ key: "a", status: "known", value: "x" }, { key: "b", status: "assumed", value: "y" }] }
+    const reverted = revertField(two, "a")
+    expect(reverted.fields[1]).toEqual(two.fields[1])
+  })
+})
+
+describe("looksLikeQuestion", () => {
+  it("is true for text containing a question mark (Spanish or plain)", () => {
+    expect(looksLikeQuestion("¿que es eso?")).toBe(true)
+    expect(looksLikeQuestion("que es eso?")).toBe(true)
+    expect(looksLikeQuestion("what is that?")).toBe(true)
+  })
+
+  it("is false for a plain answer with no question mark", () => {
+    expect(looksLikeQuestion("Bordado 3D")).toBe(false)
+    expect(looksLikeQuestion("")).toBe(false)
+  })
+
+  it("handles null/undefined without throwing", () => {
+    expect(looksLikeQuestion(null)).toBe(false)
+    expect(looksLikeQuestion(undefined)).toBe(false)
   })
 })
 
@@ -419,5 +463,53 @@ describe("attachIllustrationBriefs", () => {
   it("handles null/undefined inputs without throwing", () => {
     expect(() => attachIllustrationBriefs(null, undefined)).not.toThrow()
     expect(attachIllustrationBriefs(null, undefined)).toEqual([])
+  })
+})
+
+describe("answerFieldQuestion", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("always uses the non-streaming call and returns plain trimmed text", async () => {
+    deepseekChat.mockResolvedValueOnce("```\nEs una tecnica de bordado con relieve.\n```")
+    const field = { label: "Tecnica", why: "define el acabado", options: ["Bordado 3D", "Bordado Plano"] }
+    const answer = await answerFieldQuestion({ field, garmentType: "Hoodie", question: "que es bordado 3d?" })
+    expect(deepseekChat).toHaveBeenCalledTimes(1)
+    expect(deepseekChatStream).not.toHaveBeenCalled()
+    expect(answer).toBe("Es una tecnica de bordado con relieve.")
+  })
+
+  it("includes the field's options in the prompt when present", async () => {
+    deepseekChat.mockResolvedValueOnce("respuesta")
+    await answerFieldQuestion({ field: { label: "Tecnica", options: ["A", "B"] }, garmentType: "Hoodie", question: "cual es mejor?" })
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).toContain("A, B")
+  })
+})
+
+describe("analyzeAdditionalNotes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("calls the non-streaming call and returns normalized fields", async () => {
+    deepseekChat.mockResolvedValueOnce('{"fields":[{"key":"reflectivo","label":"Cinta reflectiva","category":"general","status":"known","value":"1cm en el bolsillo"}]}')
+    const fields = await analyzeAdditionalNotes({ garmentType: "Hoodie", existingFields: [], notes: "me olvide, quiero una cinta reflectiva de 1cm en el bolsillo" })
+    expect(deepseekChat).toHaveBeenCalledTimes(1)
+    expect(fields).toHaveLength(1)
+    expect(fields[0].key).toBe("reflectivo")
+    expect(fields[0].status).toBe("known")
+  })
+
+  it("returns an empty array when the model finds nothing new", async () => {
+    deepseekChat.mockResolvedValueOnce('{"fields":[]}')
+    const fields = await analyzeAdditionalNotes({ garmentType: "Hoodie", existingFields: [], notes: "nada mas" })
+    expect(fields).toEqual([])
+  })
+
+  it("throws DeepSeekError on invalid JSON", async () => {
+    deepseekChat.mockResolvedValueOnce("esto no es json")
+    await expect(analyzeAdditionalNotes({ garmentType: "Hoodie", existingFields: [], notes: "x" })).rejects.toThrow("El asistente de IA no pudo interpretar esas notas.")
   })
 })

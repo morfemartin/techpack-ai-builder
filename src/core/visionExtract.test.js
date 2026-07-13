@@ -6,7 +6,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChatStream } from "./deepseekClient.js"
-import { computeDownscaleDims, parseVisionSeed, mergeVisionSeeds, summarizeVisionProgress, extractGarmentFromImages } from "./visionExtract.js"
+import { computeDownscaleDims, parseVisionSeed, mergeVisionSeeds, summarizeVisionProgress, extractGarmentFromImages, quadrantRects, answerFieldFromImage } from "./visionExtract.js"
 
 describe("computeDownscaleDims", () => {
   it("passes through an image already within the max dimension", () => {
@@ -138,5 +138,93 @@ describe("extractGarmentFromImages", () => {
     for (const call of deepseekChatStream.mock.calls) {
       expect(call[0].messages[0].content).toHaveLength(2) // never more than 1 image per call
     }
+  })
+
+  describe("photo-grouped (quadrant-tagged) images", () => {
+    it("processes photo groups in order, full-before-quadrants within a photo, and merges everything", async () => {
+      deepseekChatStream
+        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}') // photo 0 full
+        .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble pespunte"}}') // photo 0 quadrant
+        .mockResolvedValueOnce('{"garmentType":"","seed":{"Cierre":"Metal"}}') // photo 1 full (no type - shouldn't matter, photo 0 already won)
+
+      const images = [
+        { fileName: "a.jpg", base64: "AAA", photoIndex: 0, photoTotal: 2, kind: "full" },
+        { fileName: "a.jpg", base64: "AAA-q1", photoIndex: 0, photoTotal: 2, kind: "quadrant", quadrantLabel: "superior izquierdo" },
+        { fileName: "b.jpg", base64: "BBB", photoIndex: 1, photoTotal: 2, kind: "full" },
+      ]
+      const result = await extractGarmentFromImages(images)
+
+      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble pespunte", Cierre: "Metal" } })
+      expect(deepseekChatStream).toHaveBeenCalledTimes(3)
+    })
+
+    it("labels progress relative to the PHOTO, not the flat array index, and includes the quadrant name", async () => {
+      const events = []
+      deepseekChatStream
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"Hoodie","seed":{}}'
+        })
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"","seed":{}}'
+        })
+
+      const images = [
+        { fileName: "a.jpg", base64: "AAA", photoIndex: 0, photoTotal: 1, kind: "full" },
+        { fileName: "a.jpg", base64: "AAA-q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
+      ]
+      await extractGarmentFromImages(images, { onProgress: (e) => events.push(e) })
+
+      expect(events[0].label).toBe("Analizando foto 1 de 1...")
+      expect(events[1].label).toBe("Analizando foto 1 de 1 - detalle superior izquierdo...")
+    })
+
+    it("still behaves exactly as the flat/legacy path when no image carries a photoIndex", async () => {
+      deepseekChatStream
+        .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Color":"Azul"}}')
+        .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Cierre":"Botones"}}')
+      const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }, { fileName: "b.jpg", base64: "BBB" }])
+      expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" } })
+    })
+  })
+})
+
+describe("quadrantRects", () => {
+  it("splits into 4 equal quarters covering the whole image with no gaps", () => {
+    const rects = quadrantRects(200, 100)
+    expect(rects).toHaveLength(4)
+    expect(rects.map((r) => [r.sx, r.sy, r.sWidth, r.sHeight])).toEqual([
+      [0, 0, 100, 50],
+      [100, 0, 100, 50],
+      [0, 50, 100, 50],
+      [100, 50, 100, 50],
+    ])
+  })
+
+  it("gives each quadrant a distinct, human-readable Spanish label", () => {
+    const labels = quadrantRects(100, 100).map((r) => r.quadrantLabel)
+    expect(new Set(labels).size).toBe(4)
+    labels.forEach((l) => expect(typeof l).toBe("string"))
+  })
+})
+
+describe("answerFieldFromImage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("sends exactly one vision call and returns a trimmed plain-text answer", async () => {
+    deepseekChatStream.mockResolvedValueOnce("```\nCierre de cremallera metalica\n```")
+    const answer = await answerFieldFromImage({
+      field: { label: "Tipo de cierre", why: "define hardware" },
+      garmentType: "Hoodie",
+      imageBase64: "AAA",
+    })
+    expect(deepseekChatStream).toHaveBeenCalledTimes(1)
+    const call = deepseekChatStream.mock.calls[0][0]
+    expect(call.messages[0].content).toHaveLength(2)
+    expect(call.messages[0].content[1]).toEqual({ type: "image_url", image_url: { url: "data:image/jpeg;base64,AAA" } })
+    expect(answer).toBe("Cierre de cremallera metalica")
   })
 })
