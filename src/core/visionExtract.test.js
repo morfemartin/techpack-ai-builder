@@ -287,4 +287,23 @@ describe("answerFieldFromImage", () => {
     expect(call.messages[0].content[1]).toEqual({ type: "image_url", image_url: { url: "data:image/jpeg;base64,AAA" } })
     expect(answer).toBe("Cierre de cremallera metalica")
   })
+
+  it("tells the vision model not to invent fabric specs from a mid-chat photo", async () => {
+    deepseekChatStream.mockResolvedValueOnce("Tela tipo felpa aparente")
+    await answerFieldFromImage({
+      field: {
+        label: "Tela principal",
+        why: "Define tacto, peso, caida y costo base",
+        options: ["Algodon felpado", "French terry"],
+      },
+      garmentType: "Hoodie",
+      imageBase64: "AAA",
+    })
+
+    const prompt = deepseekChatStream.mock.calls[0][0].messages[0].content[0].text
+    expect(prompt).toContain("Usa unicamente evidencia visible")
+    expect(prompt).toContain("Nunca inventes peso/GSM, costo")
+    expect(prompt).toContain("No se puede determinar con certeza desde la foto.")
+    expect(prompt).toContain("Algodon felpado, French terry")
+  })
 })
