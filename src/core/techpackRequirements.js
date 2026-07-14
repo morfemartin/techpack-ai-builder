@@ -110,7 +110,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         temperature: 0.2,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de requisitos valido.")
-  return normalizeRequirements(parsed, garmentType)
+  return ensureMinimumGeneralQuestions(normalizeRequirements(parsed, garmentType), seed)
 }
 
 // Defensive shaping so the walker helpers can trust the structure regardless
@@ -141,6 +141,85 @@ export function normalizeRequirements(parsed, garmentType) {
       return base
     })
   return { garmentType: (parsed && parsed.garmentType) || garmentType, fields }
+}
+
+function hasSeedFacts(seed) {
+  return !!(seed && typeof seed === "object" && Object.keys(seed).some((key) => String(seed[key] || "").trim()))
+}
+
+function hasGeneralAsk(fields) {
+  return fields.some((f) => f && f.category === "general" && f.status === FIELD_STATUS.ASK)
+}
+
+function fallbackGeneralQuestions() {
+  return [
+    {
+      key: "fabric",
+      label: "Tela principal",
+      category: "general",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Algodon pique", "Jersey algodon", "Performance stretch", "Mezcla CVC"],
+      why: "define tacto, caida y costo",
+    },
+    {
+      key: "fit",
+      label: "Fit / silueta",
+      category: "general",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Regular", "Slim", "Oversized", "Relaxed"],
+      why: "define patronaje y medidas",
+    },
+    {
+      key: "collar",
+      label: "Cuello",
+      category: "general",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Rib tejido", "Cuello plano", "Sin cuello", "Especial"],
+      why: "cambia construccion superior",
+    },
+    {
+      key: "sleeve",
+      label: "Manga",
+      category: "general",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Corta", "Larga", "Raglan", "Sin manga"],
+      why: "define piezas y consumo",
+    },
+    {
+      key: "closure",
+      label: "Cierre / botonadura",
+      category: "general",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Tapeta 2 botones", "Tapeta 3 botones", "Cierre zipper", "Sin cierre"],
+      why: "define avios y proceso",
+    },
+    {
+      key: "hem_finish",
+      label: "Terminacion bajo",
+      category: "general",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Dobladillo simple", "Rib inferior", "Bajo recto", "Bajo curvo"],
+      why: "define acabado final",
+    },
+  ]
+}
+
+// The model can occasionally be overconfident for broad garment names ("polo")
+// and mark every construction field assumed. For a brand-new typed garment
+// with no seed facts, that breaks the core UX: the chat should present
+// numbered technical questions, not jump straight to the final catch-all.
+export function ensureMinimumGeneralQuestions(reqs, seed) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  if (hasSeedFacts(seed) || hasGeneralAsk(fields)) return reqs
+  const existingKeys = new Set(fields.map((f) => f && f.key).filter(Boolean))
+  const fallbacks = fallbackGeneralQuestions().filter((f) => !existingKeys.has(f.key))
+  return { ...reqs, fields: [...fields, ...fallbacks] }
 }
 
 // ── Pure walker helpers (no DeepSeek). Delegated spec, see techpackRequirements.test.js ──
