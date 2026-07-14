@@ -176,39 +176,16 @@ async function openStream({ messages, maxTokens, temperature, model, thinking })
   return res
 }
 
-// Streaming call path (F3.1b) - a separate flow from deepseekChat on purpose:
-// retrying mid-stream doesn't mean the same thing as retrying a failed
-// request. It DOES reuse the same retry/backoff for the "open the stream"
-// phase only (a 503 before any bytes flow is just as transient here as it is
-// for the non-streaming path) - once the stream is open, there's no retry: a
-// failure while chunks are already flowing is rare, and restarting a long
-// generation from scratch isn't worth it (accepted simplification).
-//
-// onEvent(partial) fires on every SSE delta that carries content:
-//   { contentSoFar: string, deltaText: string, tokensSoFar: number }
-// tokensSoFar counts SSE EVENTS, not real tokens - NVIDIA batches several
-// tokens per event, so this is only ever an estimate for a progress bar.
-//
-// Resolves with the final assembled content string once the stream ends
-// cleanly - either "[DONE]" arrives, or an event carries
-// `finish_reason: "length"` (the model hit maxTokens; content up to that
-// point is still real and worth handing back for a JSON-repair attempt).
-// Throws DeepSeekError if the retries opening the stream are exhausted, on a
-// network failure, or if the stream ends with no recognized finish signal
-// and no content at all (a dropped connection before anything came through).
-export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent } = {}) {
-  let res
-  for (let attempt = 1; attempt <= RETRYABLE_MAX_ATTEMPTS; attempt++) {
-    try {
-      res = await openStream({ messages, maxTokens, temperature, model, thinking })
-      break
-    } catch (e) {
-      const retryable = e instanceof DeepSeekError && isRetryable(e)
-      if (!retryable || attempt === RETRYABLE_MAX_ATTEMPTS) throw e
-      await sleep(RETRYABLE_BASE_DELAY_MS * attempt)
-    }
-  }
-
+// A SINGLE streaming attempt: open the connection once, read it to
+// completion (or until it drops/stalls/ends empty), with one inline
+// non-streaming fallback call if it comes back empty. Factored out of
+// deepseekChatStream() below so the OUTER retry loop can retry this entire
+// attempt from scratch - opening fine but then delivering nothing, or
+// getting cut off mid-generation, are observed-live just as transient as a
+// 503 or a dropped connection (see isRetryable) and deserve the same
+// backed-off retry treatment, not a one-shot give-up.
+async function attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent }) {
+  const res = await openStream({ messages, maxTokens, temperature, model, thinking })
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -281,17 +258,55 @@ export async function deepseekChatStream({ messages, maxTokens = 1000, temperatu
   // message distinguishes a clean-but-empty completion from a real cutoff.
   if (!content) {
     const cleanEnd = finished || finishReason === "stop"
+    // One inline non-streaming attempt before giving up on THIS attempt -
+    // callOnce (not deepseekChat) deliberately, so this doesn't spawn its own
+    // nested 3x retry loop on top of the outer one in deepseekChatStream().
     try {
-      return await deepseekChat({ messages, maxTokens, temperature, model, thinking })
+      return await callOnce({ messages, maxTokens, temperature, model, thinking })
     } catch {}
-    throw new DeepSeekError(
+    const err = new DeepSeekError(
       cleanEnd
         ? "El asistente de IA devolvio una respuesta vacia."
         : "La respuesta del asistente de IA se corto antes de terminar.",
       { streamed: true, finishReason }
     )
+    // Marked retryable so the outer loop in deepseekChatStream() retries the
+    // whole attempt (fresh stream, fresh fallback) instead of surfacing this
+    // to the UI on the first empty/cut-off result - this is the gap that let
+    // three different live failures through with only one narrow fallback.
+    err.networkError = true
+    throw err
   }
   return content
+}
+
+// onEvent(partial) fires on every SSE delta that carries content:
+//   { contentSoFar: string, deltaText: string, tokensSoFar: number }
+// tokensSoFar counts SSE EVENTS, not real tokens - NVIDIA batches several
+// tokens per event, so this is only ever an estimate for a progress bar.
+//
+// Resolves with the final assembled content string once a full attempt
+// succeeds. Wraps attemptChatStream() in the same RETRYABLE_MAX_ATTEMPTS
+// backoff loop deepseekChat() uses, covering the ENTIRE attempt - opening the
+// connection, reading the stream, and the inline non-streaming fallback -
+// not just the connection-open phase. A stream that opens fine but then
+// delivers nothing, or gets cut off mid-generation, is retried exactly like
+// a dropped connection or a 503 (observed live: three distinct failure
+// messages from the same simple prompt, none of which the old code retried
+// past the open phase).
+export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent } = {}) {
+  let lastErr
+  for (let attempt = 1; attempt <= RETRYABLE_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent })
+    } catch (e) {
+      lastErr = e
+      const retryable = e instanceof DeepSeekError && isRetryable(e)
+      if (!retryable || attempt === RETRYABLE_MAX_ATTEMPTS) throw e
+      await sleep(RETRYABLE_BASE_DELAY_MS * attempt)
+    }
+  }
+  throw lastErr
 }
 
 // Convenience: ask for a JSON object back and parse it, tolerating ```json

@@ -308,13 +308,41 @@ describe("deepseekChatStream", () => {
     expect(JSON.parse(global.fetch.mock.calls[1][1].body).stream).toBeUndefined()
   })
 
-  it("rejects when both the stream and the fallback return no content", async () => {
+  // The core regression test for the observed-live bug: a stream that opens
+  // fine but comes back empty (or the one-shot fallback also comes back
+  // empty) used to only get ONE inline fallback attempt before throwing to
+  // the UI. It must now get the SAME full-attempt retry treatment as
+  // deepseekChat - a fresh stream open, fresh read, fresh fallback - not just
+  // a retry of the connection-open phase.
+  it("retries the whole attempt (stream + fallback) when both come back empty, succeeding on a later attempt", async () => {
+    vi.useFakeTimers()
     global.fetch = vi
       .fn()
-      .mockResolvedValueOnce(mockStreamResponse([]))
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: {} }] }) })
+      .mockResolvedValueOnce(mockStreamResponse([])) // attempt 1: stream empty
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: {} }] }) }) // attempt 1: fallback empty
+      .mockResolvedValueOnce(mockStreamResponse([sseEvent("recuperado"), "data: [DONE]\n\n"])) // attempt 2: stream succeeds
 
-    await expect(deepseekChatStream({ messages: [] })).rejects.toBeInstanceOf(DeepSeekError)
+    const promise = deepseekChatStream({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("recuperado")
+    expect(global.fetch).toHaveBeenCalledTimes(3)
+    vi.useRealTimers()
+  })
+
+  it("gives up after exhausting retries when the stream and fallback are persistently empty", async () => {
+    vi.useFakeTimers()
+    global.fetch = vi.fn().mockImplementation((url, options) => {
+      const body = JSON.parse(options.body)
+      if (body.stream) return Promise.resolve(mockStreamResponse([]))
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: {} }] }) })
+    })
+    const promise = deepseekChatStream({ messages: [] })
+    const assertion = expect(promise).rejects.toBeInstanceOf(DeepSeekError)
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(global.fetch).toHaveBeenCalledTimes(6) // 3 attempts x (stream open + non-streaming fallback)
+    vi.useRealTimers()
   })
 
   it("returns the accumulated content when the stream ends without [DONE] (dropped mid-response)", async () => {
