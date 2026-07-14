@@ -11,6 +11,7 @@
 // directly. Either way this file just calls the relative URL below.
 
 const PROXY_URL = import.meta.env.VITE_DEEPSEEK_PROXY_URL || "/api/deepseek"
+const DEFAULT_TEXT_MODEL = import.meta.env.VITE_NVIDIA_TEXT_MODEL || "deepseek-ai/deepseek-v4-flash"
 
 export class DeepSeekError extends Error {
   constructor(message, cause) {
@@ -48,7 +49,7 @@ async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
     res = await fetch(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, chat_template_kwargs: { thinking } }),
+      body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model: model || DEFAULT_TEXT_MODEL, chat_template_kwargs: { thinking } }),
     })
   } catch (e) {
     const err = new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
@@ -108,7 +109,7 @@ async function openStream({ messages, maxTokens, temperature, model, thinking })
     res = await fetch(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, stream: true, chat_template_kwargs: { thinking } }),
+      body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model: model || DEFAULT_TEXT_MODEL, stream: true, chat_template_kwargs: { thinking } }),
     })
   } catch (e) {
     const err = new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
