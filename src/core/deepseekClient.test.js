@@ -80,11 +80,11 @@ describe("deepseekClient", () => {
     expect(sentBody.chat_template_kwargs).toEqual({ thinking: false })
   })
 
-  it("deepseekChat sends the fast text model by default", async () => {
+  it("deepseekChat omits model entirely when not given, so the server's own per-environment default wins", async () => {
     mockFetchOnce({ choices: [{ message: { content: "ok" } }] })
     await deepseekChat({ messages: [] })
     const sentBody = JSON.parse(global.fetch.mock.calls[0][1].body)
-    expect(sentBody.model).toBe("deepseek-ai/deepseek-v4-flash")
+    expect(sentBody).not.toHaveProperty("model")
   })
 
   it("deepseekChat preserves an explicit model override", async () => {
@@ -216,7 +216,7 @@ describe("deepseekChatStream", () => {
     const onEvent = vi.fn()
     const result = await deepseekChatStream({ messages: [], onEvent })
     expect(result).toBe("hola mundo")
-    expect(JSON.parse(global.fetch.mock.calls[0][1].body).model).toBe("deepseek-ai/deepseek-v4-flash")
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).not.toHaveProperty("model")
     expect(onEvent).toHaveBeenCalledTimes(2)
     expect(onEvent.mock.calls[1][0]).toEqual({ contentSoFar: "hola mundo", deltaText: " mundo", tokensSoFar: 2 })
   })
