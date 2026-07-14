@@ -71,6 +71,8 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   // (design analysis, brief authoring) already ran off the old answer.
   const [answerStack, setAnswerStack] = useState([])
   const [extraNotes, setExtraNotes] = useState("") // raw text from the "finalCheck" catch-all step
+  const [imageAnalyzing, setImageAnalyzing] = useState(false) // true only while a mid-chat photo is being read
+  const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
 
@@ -321,20 +323,41 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   // single quick vision call (no quadrant split - that's for the exhaustive
   // upfront intake, not a one-question lookup) and deliberately PRE-FILLS the
   // input rather than auto-submitting, so a wrong read never locks in silently.
+  //
+  // Posts TWO things to history so the photo actually reads as part of the
+  // conversation instead of a silent background action: the photo itself (a
+  // thumbnail, so it's clear WHAT was analyzed) and the model's answer as its
+  // own bubble (so the suggestion has a visible origin, not just text that
+  // mysteriously appeared in the input box). Uses its own imageAnalyzing/
+  // imageProgress state rather than the generic sending/progress pair, which
+  // is built around the whole-garment analysis bar and would otherwise show
+  // a misleading "Analizando la prenda…" stuck at 0%.
   async function handleAttachImage(e) {
     const file = (e.target.files || [])[0]
     e.target.value = ""
     if (!file || !currentField || sending) return
+    const fieldAsked = currentField
     setSending(true)
+    setImageAnalyzing(true)
+    setImageProgress(null)
     setError(null)
     try {
       const downscaled = await downscaleImage(file)
-      const suggestion = await answerFieldFromImage({ field: currentField, garmentType: garmentLabel || (reqs && reqs.garmentType), imageBase64: downscaled.base64 })
+      post("user", <img src={"data:image/jpeg;base64," + downscaled.base64} alt="Foto adjunta" style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
+      const suggestion = await answerFieldFromImage({
+        field: fieldAsked,
+        garmentType: garmentLabel || (reqs && reqs.garmentType),
+        imageBase64: downscaled.base64,
+        onProgress: (p) => setImageProgress(p),
+      })
+      post("assistant", "Según la foto: " + suggestion)
       setInput(suggestion)
     } catch (err) {
       setError(err instanceof DeepSeekError ? err.message : "No se pudo analizar la foto.")
     } finally {
       setSending(false)
+      setImageAnalyzing(false)
+      setImageProgress(null)
     }
   }
 
@@ -437,7 +460,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               ))}
             </div>
           )}
-          {sending && (
+          {sending && imageAnalyzing && (
+            <div style={{ display: "flex", flexDirection: "column", gap: space(1), alignSelf: "flex-start", maxWidth: "90%", width: 260 }}>
+              <div style={{ height: 6, background: C.canvas.hex, border: hair }}>
+                <div style={{ height: "100%", width: Math.min(95, (imageProgress ? imageProgress.tokensSoFar : 0) * 8) + "%", background: role.priority.fill, transition: "width 160ms linear" }} />
+              </div>
+              <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6, fontFamily: type.fonts.data }}>
+                {imageProgress && imageProgress.partialText ? "Analizando la foto: " + imageProgress.partialText + "…" : "Analizando la foto…"}
+              </span>
+            </div>
+          )}
+          {sending && !imageAnalyzing && (
             <div style={{ display: "flex", flexDirection: "column", gap: space(1), alignSelf: "flex-start", maxWidth: "90%", width: 260 }}>
               <div style={{ height: 6, background: C.canvas.hex, border: hair }}>
                 <div style={{ height: "100%", width: (progress ? progress.percent : 0) + "%", background: role.priority.fill, transition: "width 160ms linear" }} />

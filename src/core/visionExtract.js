@@ -264,7 +264,7 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
 // ONE question quickly, it isn't the exhaustive intake pass) used when the
 // user attaches a photo mid-chat to answer whatever field is currently on
 // screen instead of typing. Returns a short plain-text answer, not a seed.
-export async function answerFieldFromImage({ field, garmentType, imageBase64, lang = "ES" }) {
+export async function answerFieldFromImage({ field, garmentType, imageBase64, lang = "ES", onProgress }) {
   const f = field || {}
   const optionsText = Array.isArray(f.options) && f.options.length > 0 ? " Opciones validas si alguna coincide claramente: " + f.options.join(", ") + "." : ""
   const instructions =
@@ -289,6 +289,9 @@ export async function answerFieldFromImage({ field, garmentType, imageBase64, la
     model: DEFAULT_VISION_MODEL,
     maxTokens: 200,
     temperature: 0.2,
+    onEvent: onProgress
+      ? ({ contentSoFar, tokensSoFar }) => onProgress({ partialText: summarizeVisionProgress(contentSoFar), tokensSoFar })
+      : undefined,
   })
   return raw.replace(/```/g, "").trim()
 }

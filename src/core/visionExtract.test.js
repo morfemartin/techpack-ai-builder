@@ -288,6 +288,24 @@ describe("answerFieldFromImage", () => {
     expect(answer).toBe("Cierre de cremallera metalica")
   })
 
+  it("streams partial text via onProgress when given, so the chat can show live feedback", async () => {
+    const events = []
+    deepseekChatStream.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({ contentSoFar: "Cierre de", tokensSoFar: 3 })
+      onEvent({ contentSoFar: "Cierre de cremallera", tokensSoFar: 5 })
+      return "Cierre de cremallera"
+    })
+    await answerFieldFromImage({
+      field: { label: "Tipo de cierre" },
+      garmentType: "Hoodie",
+      imageBase64: "AAA",
+      onProgress: (p) => events.push(p),
+    })
+    expect(events).toHaveLength(2)
+    expect(events[0]).toEqual({ partialText: "Cierre de", tokensSoFar: 3 })
+    expect(events[1].partialText).toContain("cremallera")
+  })
+
   it("tells the vision model not to invent fabric specs from a mid-chat photo", async () => {
     deepseekChatStream.mockResolvedValueOnce("Tela tipo felpa aparente")
     await answerFieldFromImage({
