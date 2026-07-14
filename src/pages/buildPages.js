@@ -213,7 +213,9 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
 export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var t = T[lang] || T.ES
   var pn = garment.partLabels[lang] || garment.partLabels.ES
-  var W = 1200, H = 900, hH = 80, discH = 28
+  // discH: just enough for svgDisc's single centered 9px line + breathing
+  // room - was 28, oversized for one line of text regardless of page content.
+  var W = 1200, H = 900, hH = 80, discH = 20
   var lW = 320
   var ap = parts.filter(function (p) { return p.on })
   var txP = txData && txData.parts ? txData.parts : null
@@ -295,7 +297,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 /* ---- DESIGN PAGE: garment-independent, only needs the base translations ---- */
 export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   var t = T[lang] || T.ES
-  var W = 1200, H = 900, hH = 80, discH = 28, bodyH = H - hH - discH
+  var W = 1200, H = 900, hH = 80, discH = 20, bodyH = H - hH - discH
   var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
   var LW = isEmb ? 430 : 370
   var RX = LW, RW = W - LW, RH = bodyH

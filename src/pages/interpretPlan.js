@@ -21,6 +21,14 @@ import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsLi
 // page. `split` (below) is a COMPOSITE, handled separately: it is not a leaf.
 export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "note", "spacer", "disclaimer"]
 
+// Fixed print canvas size - matches buildPages.js's hardcoded 1200x900 for the
+// non-AI-planned pages, so a page reads the same regardless of which builder
+// made it. Hoisted here (not just local to buildPlannedPages) because the
+// content-aware split compositor below needs it to estimate a region's
+// allotted height WITHOUT running a full solve pass first.
+const PAGE_W = 1200
+const PAGE_H = 900
+
 // Page-level breathing room: a consistent outer margin + gutter between bands is
 // what turns a stack of blocks into a *composed* page instead of bands welded to
 // the frame edge. Percent-free px because the solver already resolves them.
@@ -35,7 +43,7 @@ const SPLIT_GAP = 14
 // (instead of letting a model weight bloat them) is what kills the oversized
 // blue title bar and the dead whitespace at the bottom of a page in one move -
 // the model's weights now only distribute the CONTENT area.
-const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 30 }
+const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 20 }
 
 // Matches renderPartsList's `compact` row basis (30) plus its 20px table
 // header - used to measure, after solving, whether a page's parts list
@@ -89,6 +97,60 @@ function fallbackPlan() {
 function safeWeight(w) {
   return typeof w === "number" && isFinite(w) && w > 0 ? w : 1
 }
+
+// Estimates each top-level region's allotted pixel height WITHOUT running a
+// full solve pass - a plain replay of solveLayout's own column math (fixed
+// bases subtracted first, remainder split by grow proportion among the
+// non-fixed regions), since the page's geometry (PAGE_H, PAGE_PAD, PAGE_GAP,
+// FIXED_BASIS) is entirely known ahead of time. This is what lets the split
+// compositor below decide row-vs-stack BEFORE building the tree, instead of
+// solving twice.
+function estimateRegionHeights(regions, grows) {
+  const n = regions.length
+  const totalGapPx = PAGE_GAP * Math.max(0, n - 1)
+  const fixedTotal = regions.reduce((sum, r) => sum + (FIXED_BASIS[r.type] || 0), 0)
+  const available = Math.max(0, PAGE_H - PAGE_PAD * 2 - totalGapPx - fixedTotal)
+  const growSum = regions.reduce((sum, r, i) => sum + (FIXED_BASIS[r.type] ? 0 : grows[i]), 0)
+  return regions.map((r, i) => (FIXED_BASIS[r.type] ? FIXED_BASIS[r.type] : growSum > 0 ? available * (grows[i] / growSum) : 0))
+}
+
+// The ideal (uncompressed) content height a bounded region NEEDS, as a pure
+// function of its data volume - independent of whatever width/height a split
+// column would otherwise stretch it into. Mirrors the row-height constants
+// each renderer already uses at its own "plenty of room" ceiling (compact
+// partsList rows, colorSpecs's ideal 30px row, embSpecs's ideal 16px row) so
+// the estimate and the actual render agree. Returns null for a region type
+// this can't be measured for (illustration, note, spacer, ...) - those always
+// stretch to fill whatever they're given, so they're never the "short" side
+// of a split.
+function naturalContentHeight(region, page, ctx) {
+  if (region.type === "partsList") {
+    const parts = (ctx && ctx.parts) || []
+    const n = parts.filter((p) => p && p.on !== false).length
+    return TABLE_HEADER_H + n * COMPACT_ROW_H
+  }
+  if (region.type === "colorSpecs") {
+    const design = selectedDesign(page, ctx)
+    const n = ((design && design.colors) || []).filter((c) => c && c.hex).length
+    return n > 0 ? 34 + n * 30 : 0
+  }
+  if (region.type === "embSpecs") {
+    const design = selectedDesign(page, ctx)
+    const emb = design && design.emb
+    if (!emb) return 0
+    const fieldCount = 14 // matches the fixed `er` field list in renderEmbSpecs
+    const seqLen = emb.stopSeq && emb.stopSeq.length > 0 ? emb.stopSeq.length : 0
+    return 34 + (fieldCount + (seqLen > 0 ? 1 + seqLen : 0)) * 16
+  }
+  return null
+}
+
+// A bounded content block gets stacked below the illustration (instead of
+// stretched into a side column) only when it needs meaningfully less than
+// half of what the split was allotted - short of that, a side-by-side split
+// still reads as a deliberate two-column composition, not empty space.
+const STACK_MAX_RATIO = 0.5
+const STACK_CONTENT_PAD = 16
 
 // Normalizes region weights into flex `grow` values that sum to 100, keeping
 // their proportions. A missing/invalid/non-positive weight counts as 1 (the
@@ -233,14 +295,38 @@ function leafForRegion(region, page, ctx) {
   })
 }
 
-// Maps one normalized region to a layout node. A `split` becomes a horizontal
-// `row` whose children are its inner leaf regions, each given a horizontal grow
-// from its own weight - this is what lets a page place a narrow numbered
-// partsList beside a wide illustration (the real tech-pack idiom) instead of
-// forcing every block into a full-width band. Everything else stays a leaf.
-function buildRegionNode(region, page, ctx) {
+// Maps one normalized region to a layout node. A `split` normally becomes a
+// horizontal `row` whose children are its inner leaf regions, each given a
+// horizontal grow from its own weight - this is what lets a page place a
+// narrow numbered partsList beside a wide illustration (the real tech-pack
+// idiom). But when the split pairs an illustration with a SHORT bounded
+// content block (a one-row specs table, a handful of colors), stretching
+// that block into a full-height side column just to match the illustration
+// is the "lateral layout with dead white space" the model can't reason about
+// on its own - so when `allottedHeight` shows the content block needs far
+// less than its column would give it, this stacks instead: illustration on
+// top (full width, most of the height), content block below at its own
+// natural height. Everything else stays a leaf.
+function buildRegionNode(region, page, ctx, allottedHeight) {
   if (region.type === "split") {
     const inner = Array.isArray(region.regions) ? region.regions : []
+
+    if (inner.length === 2 && allottedHeight) {
+      const illuIdx = inner.findIndex((r) => r.type === "illustration")
+      const otherIdx = illuIdx === 0 ? 1 : illuIdx === 1 ? 0 : -1
+      if (illuIdx !== -1 && otherIdx !== -1) {
+        const natural = naturalContentHeight(inner[otherIdx], page, ctx)
+        if (natural !== null && natural > 0 && natural < allottedHeight * STACK_MAX_RATIO) {
+          const contentLeaf = { ...leafForRegion({ ...inner[otherIdx], grow: 0 }, page, ctx), basis: natural + STACK_CONTENT_PAD, grow: 0, shrink: 0 }
+          const illuLeaf = { ...leafForRegion({ ...inner[illuIdx], grow: 1 }, page, ctx), basis: "auto", grow: 1 }
+          // Illustration always on top regardless of the AI's original inner
+          // order - it's the hero and the one region that benefits from
+          // reclaiming the freed height, the content block is a caption below it.
+          return col({ grow: region.grow, gap: SPLIT_GAP }, [illuLeaf, contentLeaf])
+        }
+      }
+    }
+
     const grows = weightsToGrow(inner)
     const children = inner.map((r, i) => leafForRegion({ ...r, grow: grows[i] }, page, ctx))
     return row({ grow: region.grow, gap: SPLIT_GAP }, children)
@@ -251,13 +337,14 @@ function buildRegionNode(region, page, ctx) {
 export function interpretPagePlan(page, ctx) {
   const normalized = normalizePlan({ pages: [page] }).pages[0]
   const grows = weightsToGrow(normalized.regions)
+  const heights = estimateRegionHeights(normalized.regions, grows)
   const regions = normalized.regions.map((region, i) => ({ ...region, grow: grows[i] }))
   const safeCtx = ctx || {}
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan
   // call (tests) and the full buildPlannedPages path share one source of truth
   // for "which parts does this page actually show."
   const pageCtx = { ...safeCtx, parts: effectivePartsForPage(safeCtx.parts, normalized) }
-  return col({ padding: PAGE_PAD, gap: PAGE_GAP }, regions.map((region) => buildRegionNode(region, normalized, pageCtx)))
+  return col({ padding: PAGE_PAD, gap: PAGE_GAP }, regions.map((region, i) => buildRegionNode(region, normalized, pageCtx, heights[i])))
 }
 
 function pageName(page, i) {
@@ -283,8 +370,8 @@ function findPartsListLeaf(node) {
 export function buildPlannedPages(plan, ctx, opts) {
   const mono = !!(opts && opts.mono)
   const normalized = normalizePlan(plan)
-  const W = 1200
-  const H = 900
+  const W = PAGE_W
+  const H = PAGE_H
   const allParts = (ctx && ctx.parts) || []
 
   function resolvedTreeFor(page, pageCtx) {

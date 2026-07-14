@@ -129,7 +129,7 @@ describe("interpretPagePlan", () => {
     expect(root.children[1].grow).toBe(60)
     // disclaimer: fixed strip, does not grow
     expect(root.children[2].grow).toBe(0)
-    expect(root.children[2].basis).toBe(30)
+    expect(root.children[2].basis).toBe(20)
   })
 
   it("renders planned pages into the same [{name,svg}] shape as buildAllPages", () => {
@@ -210,10 +210,14 @@ describe("split composition (2D layout)", () => {
     expect(normalizePlan(raw).pages[0].regions.map((r) => r.type)).toEqual(["header"])
   })
 
-  it("builds a horizontal row for a split, inner grows taken from inner weights", () => {
+  it("builds a horizontal row for a split when the content column has enough real content to fill it", () => {
+    // 12 parts rows (20 + 12*30 = 380px natural) is comfortably more than
+    // half of this split's ~718px allotted share of the page, so a real
+    // side-by-side split still reads as intentional here, not whitespace.
+    const fullCtx = { ...ctx, parts: Array.from({ length: 12 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true })) }
     const root = interpretPagePlan(
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
-      ctx
+      fullCtx
     )
     expect(root.children).toHaveLength(3)
     const splitNode = root.children[1]
@@ -221,6 +225,29 @@ describe("split composition (2D layout)", () => {
     expect(splitNode.children).toHaveLength(2)
     expect(splitNode.children[0].grow).toBe(25)
     expect(splitNode.children[1].grow).toBe(75)
+  })
+
+  // The core fix for the reported design critique: a split that pairs an
+  // illustration with a SHORT specs/parts block used to always stretch that
+  // block into a full-height side column next to the illustration, leaving
+  // visible dead white space below a one- or two-row table. With only 1 part
+  // row (needs ~50px) against a split allotted ~718px, the compositor should
+  // stack instead: illustration on top (grows to fill), the short block below
+  // sized to its own natural content height.
+  it("stacks illustration-on-top + content-below when the content column would mostly be dead white space", () => {
+    const root = interpretPagePlan(
+      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      ctx
+    )
+    const splitNode = root.children[1]
+    expect(splitNode.direction).toBe("column")
+    expect(splitNode.children).toHaveLength(2)
+    // illustration first (on top), grows to fill whatever height is freed up
+    expect(splitNode.children[0].grow).toBe(1)
+    // the parts list sits below, sized to its own natural height - not
+    // stretched: 20px table header + 1 row * 30px + 16px breathing pad = 66px
+    expect(splitNode.children[1].grow).toBe(0)
+    expect(splitNode.children[1].basis).toBe(66)
   })
 
   it("renders both columns of a split into the same page svg", () => {

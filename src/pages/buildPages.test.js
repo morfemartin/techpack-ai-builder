@@ -4,8 +4,8 @@ import { capGarment } from "../garments/cap.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 // These assert the exact geometry the old hand-computed pixel math produced
-// (hH=80, detailsBar=22, tableHeader=20, discH=28 on an 1200x900 page -> a
-// body row of 792px, spec-table rows sharing 792-22-20=750px), so the switch
+// (hH=80, detailsBar=22, tableHeader=20, discH=20 on an 1200x900 page -> a
+// body row of 778px, spec-table rows sharing 778-20=758px), so the switch
 // to the flexbox-style engine in buildPage1 is provably a like-for-like
 // layout, not just "it still builds."
 describe("buildPage1 layout parity", () => {
@@ -29,16 +29,16 @@ describe("buildPage1 layout parity", () => {
     expect(rects(svg)).toContainEqual([0, 80, 1200, 22])
   })
 
-  it("keeps the disclaimer bar at the bottom, full width, 28px tall", () => {
+  it("keeps the disclaimer bar at the bottom, full width, 20px tall", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 872, 1200, 28])
+    expect(rects(svg)).toContainEqual([0, 880, 1200, 20])
   })
 
   it("draws the spec-table frame spanning from the DETAILS bar top to the disclaimer, 320px wide", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 80, 320, 792])
+    expect(rects(svg)).toContainEqual([0, 80, 320, 800])
   })
 
   it("sizes the 4-view grid cells to fill the 880x770 area below the DETAILS bar in a 2x2 grid", () => {
@@ -53,14 +53,14 @@ describe("buildPage1 layout parity", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
     const rs = rects(svg)
-    // vW = (1200-320)/2 = 440, vH = 770/2 = 385
-    expect(rs).toContainEqual([320, 102, 440, 385])
-    expect(rs).toContainEqual([760, 102, 440, 385])
-    expect(rs).toContainEqual([320, 487, 440, 385])
-    expect(rs).toContainEqual([760, 487, 440, 385])
+    // vW = (1200-320)/2 = 440, vH = 778/2 = 389
+    expect(rs).toContainEqual([320, 102, 440, 389])
+    expect(rs).toContainEqual([760, 102, 440, 389])
+    expect(rs).toContainEqual([320, 491, 440, 389])
+    expect(rs).toContainEqual([760, 491, 440, 389])
   })
 
-  it("flexes part-row heights to fill exactly 750px regardless of how many parts are active", () => {
+  it("flexes part-row heights to fill exactly 758px regardless of how many parts are active", () => {
     const two = buildPage1("ES", hdr, capGarment.defaultParts.filter((p) => p.on).slice(0, 2), null, null, capGarment)
     const five = buildPage1("ES", hdr, capGarment.defaultParts.filter((p) => p.on).slice(0, 5), null, null, capGarment)
 
@@ -75,12 +75,12 @@ describe("buildPage1 layout parity", () => {
       .map(([, , , h]) => h)
 
     expect(twoRowHeights).toHaveLength(2)
-    expect(twoRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(750, 5)
-    expect(twoRowHeights[0]).toBeCloseTo(375, 5)
+    expect(twoRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(758, 5)
+    expect(twoRowHeights[0]).toBeCloseTo(379, 5)
 
     expect(fiveRowHeights).toHaveLength(5)
-    expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(750, 5)
-    expect(fiveRowHeights[0]).toBeCloseTo(150, 5)
+    expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(758, 5)
+    expect(fiveRowHeights[0]).toBeCloseTo(151.6, 5)
   })
 })
 
