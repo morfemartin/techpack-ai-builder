@@ -227,6 +227,9 @@ export async function deepseekChatStream({ messages, maxTokens = 1000, temperatu
   // message distinguishes a clean-but-empty completion from a real cutoff.
   if (!content) {
     const cleanEnd = finished || finishReason === "stop"
+    try {
+      return await deepseekChat({ messages, maxTokens, temperature, model, thinking })
+    } catch {}
     throw new DeepSeekError(
       cleanEnd
         ? "El asistente de IA devolvio una respuesta vacia."

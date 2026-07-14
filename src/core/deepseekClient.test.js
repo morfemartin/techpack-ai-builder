@@ -236,8 +236,25 @@ describe("deepseekChatStream", () => {
     expect(onEvent).not.toHaveBeenCalled()
   })
 
-  it("rejects when the stream ends with no content at all (dropped before anything arrived)", async () => {
-    global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([]))
+  it("falls back to a non-streaming call when the stream ends with no content", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(mockStreamResponse([]))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "rescatado" } }] }) })
+
+    const result = await deepseekChatStream({ messages: [] })
+
+    expect(result).toBe("rescatado")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).stream).toBeUndefined()
+  })
+
+  it("rejects when both the stream and the fallback return no content", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(mockStreamResponse([]))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: {} }] }) })
+
     await expect(deepseekChatStream({ messages: [] })).rejects.toBeInstanceOf(DeepSeekError)
   })
 
