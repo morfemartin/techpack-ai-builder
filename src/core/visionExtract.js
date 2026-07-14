@@ -266,10 +266,15 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
 // screen instead of typing. Returns a short plain-text answer, not a seed.
 export async function answerFieldFromImage({ field, garmentType, imageBase64, lang = "ES" }) {
   const f = field || {}
+  const optionsText = Array.isArray(f.options) && f.options.length > 0 ? " Opciones validas si alguna coincide claramente: " + f.options.join(", ") + "." : ""
   const instructions =
     "Sos un tecnico textil experto mirando una foto de una prenda tipo '" + (garmentType || "prenda") + "'. " +
-    "Con base en lo que se ve, responde de forma breve y concreta esta pregunta tecnica: \"" + (f.label || "") + "\"" + (f.why ? " (" + f.why + ")" : "") + ". " +
-    "Devolve SOLO la respuesta como texto plano corto, en espanol, sin explicacion extra ni JSON. Si no se puede determinar con certeza desde la foto, decilo brevemente."
+    "Tu tarea es responder SOLO el campo actual: \"" + (f.label || "") + "\"." + optionsText + " " +
+    "Usa unicamente evidencia visible en la foto. No completes sub-datos relacionados al campo si no se ven de forma directa. " +
+    "Nunca inventes peso/GSM, costo, composicion exacta, porcentaje, medidas, caida numerica, calibre, proveedor ni tecnica de fabricacion salvo que aparezcan escritos o sean visualmente inequívocos. " +
+    "Para tela, describe solo lo que se puede ver (por ejemplo: aparente felpa, pique, jersey, tejido liso, textura acanalada) y agrega 'aparente' cuando no haya certeza. " +
+    "Si la foto no permite determinar el campo actual con certeza, responde exactamente: \"No se puede determinar con certeza desde la foto.\" " +
+    "Devolve SOLO una respuesta corta en espanol, sin explicacion extra ni JSON."
 
   const raw = await deepseekChatStream({
     messages: [
