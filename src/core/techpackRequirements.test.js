@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, ensureMinimumGeneralQuestions, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -57,6 +57,37 @@ describe("normalizeRequirements", () => {
     const result = normalizeRequirements({ fields: [{ key: "margen", optional: true }, { key: "archivo", optional: "true" }] }, "x")
     expect(result.fields[0].optional).toBe(true)
     expect(result.fields[1].optional).toBeUndefined()
+  })
+})
+
+describe("ensureMinimumGeneralQuestions", () => {
+  it("adds numbered-question fallback fields when a new typed garment has no general ask fields", () => {
+    const reqs = {
+      garmentType: "polo",
+      fields: [
+        { key: "collar_assumed", label: "Cuello", category: "general", status: "assumed", value: "Cuello polo", options: [], why: "" },
+      ],
+    }
+
+    const result = ensureMinimumGeneralQuestions(reqs, {})
+    const asks = pendingFields(result, "general")
+
+    expect(asks.length).toBeGreaterThanOrEqual(6)
+    expect(asks[0].label).toBe("Tela principal")
+    expect(asks[0].options.length).toBeGreaterThan(1)
+  })
+
+  it("does not add fallback fields when the model returned at least one general question", () => {
+    const reqs = {
+      garmentType: "polo",
+      fields: [{ key: "fabric", label: "Tela", category: "general", status: "ask", value: "", options: ["A", "B"], why: "" }],
+    }
+    expect(ensureMinimumGeneralQuestions(reqs, {})).toBe(reqs)
+  })
+
+  it("does not add fallback fields when seed facts exist", () => {
+    const reqs = { garmentType: "polo", fields: [] }
+    expect(ensureMinimumGeneralQuestions(reqs, { Color: "Azul" })).toBe(reqs)
   })
 })
 
@@ -237,6 +268,12 @@ describe("analyzeRequirements onProgress wiring", () => {
     await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [] })
     expect(deepseekChat).toHaveBeenCalledTimes(1)
     expect(deepseekChatStream).not.toHaveBeenCalled()
+  })
+
+  it("guards against a zero-question analysis for a new typed garment", async () => {
+    deepseekChat.mockResolvedValue('{"garmentType":"polo","fields":[{"key":"tipo","label":"Tipo","category":"general","status":"assumed","value":"Polo clasico","why":"x"}]}')
+    const result = await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
+    expect(pendingFields(result, "general").map((f) => f.label)).toContain("Tela principal")
   })
 
   it("streams and reports increasing progress when onProgress is given, still returning a valid result", async () => {
