@@ -140,6 +140,24 @@ describe("extractGarmentFromImages", () => {
     }
   })
 
+  it("caps concurrent vision calls at 3 even for legacy flat images", async () => {
+    let active = 0
+    let maxActive = 0
+    deepseekChatStream.mockImplementation(async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      active -= 1
+      return '{"garmentType":"","seed":{}}'
+    })
+
+    const images = Array.from({ length: 7 }, (_, i) => ({ fileName: "photo-" + i + ".jpg", base64: "IMG" + i }))
+    await extractGarmentFromImages(images)
+
+    expect(deepseekChatStream).toHaveBeenCalledTimes(7)
+    expect(maxActive).toBeLessThanOrEqual(3)
+  })
+
   describe("photo-grouped (quadrant-tagged) images", () => {
     it("processes photo groups in order, full-before-quadrants within a photo, and merges everything", async () => {
       deepseekChatStream
@@ -186,6 +204,48 @@ describe("extractGarmentFromImages", () => {
         .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Cierre":"Botones"}}')
       const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }, { fileName: "b.jpg", base64: "BBB" }])
       expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" } })
+    })
+
+    it("caps each photo's full+quadrants at 3 concurrent calls", async () => {
+      let active = 0
+      let maxActive = 0
+      deepseekChatStream.mockImplementation(async () => {
+        active += 1
+        maxActive = Math.max(maxActive, active)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        active -= 1
+        return '{"garmentType":"","seed":{}}'
+      })
+
+      const images = [
+        { fileName: "a.jpg", base64: "AAA", photoIndex: 0, photoTotal: 1, kind: "full" },
+        { fileName: "a.jpg", base64: "AAA-q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
+        { fileName: "a.jpg", base64: "AAA-q2", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior derecho" },
+        { fileName: "a.jpg", base64: "AAA-q3", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "inferior izquierdo" },
+        { fileName: "a.jpg", base64: "AAA-q4", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "inferior derecho" },
+      ]
+      await extractGarmentFromImages(images)
+
+      expect(deepseekChatStream).toHaveBeenCalledTimes(5)
+      expect(maxActive).toBeLessThanOrEqual(3)
+    })
+
+    it("keeps full-image priority even when a quadrant finishes first", async () => {
+      deepseekChatStream.mockImplementation(async ({ messages }) => {
+        const url = messages[0].content[1].image_url.url
+        if (url.includes("AAA-full")) {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          return '{"garmentType":"Hoodie","seed":{"Color":"Negro"}}'
+        }
+        return '{"garmentType":"","seed":{"Color":"Gris","Costura":"Pespunte visible"}}'
+      })
+
+      const result = await extractGarmentFromImages([
+        { fileName: "a.jpg", base64: "AAA-full", photoIndex: 0, photoTotal: 1, kind: "full" },
+        { fileName: "a.jpg", base64: "AAA-q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
+      ])
+
+      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Pespunte visible" } })
     })
   })
 })

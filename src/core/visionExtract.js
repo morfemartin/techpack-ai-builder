@@ -13,6 +13,7 @@ const DEFAULT_VISION_MODEL = import.meta.env.VITE_NVIDIA_VISION_MODEL || "meta/l
 
 // Keeps a multi-photo request well under Vercel's ~4.5MB body cap.
 const MAX_DOWNSCALE_DIM = 1024
+const MAX_VISION_CONCURRENCY = 3
 
 // Pure: the largest {width, height} that fits within maxDim on its longest
 // side while keeping the original aspect ratio. Never upscales.
@@ -145,6 +146,22 @@ export function summarizeVisionProgress(text) {
   return clean.length > 140 ? clean.slice(0, 137) + "..." : clean
 }
 
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length)
+  let nextIndex = 0
+  const workerCount = Math.min(Math.max(1, limit || 1), items.length)
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const current = nextIndex
+        nextIndex += 1
+        results[current] = await worker(items[current], current)
+      }
+    })
+  )
+  return results
+}
+
 function buildVisionMessages(base64, { kind, quadrantLabel } = {}) {
   const isQuadrant = kind === "quadrant"
   const text = isQuadrant
@@ -182,16 +199,10 @@ function buildVisionMessages(base64, { kind, quadrantLabel } = {}) {
 // `images` entries may optionally carry `{ photoIndex, photoTotal, kind:
 // "full"|"quadrant", quadrantLabel }` (see splitImageIntoQuadrants + App.jsx's
 // upload handler, which flattens each photo's full+4-quadrant set with these
-// tags). When NO entry carries a photoIndex, behavior is byte-for-byte what
-// it always was: one flat Promise.all over every image. When photoIndex IS
-// present, images are grouped by photo and processed ONE PHOTO AT A TIME
-// (its full + 4 quadrants run concurrently, but the next photo doesn't start
-// until this one finishes) - capping peak concurrency at 5 regardless of how
-// many photos are uploaded, instead of 5x per photo all at once. Slower wall
-// clock than one giant Promise.all, but far less likely to trigger a
-// synchronized retry stampede against NVIDIA's already-fragile free-tier
-// capacity (see deepseekClient.js's own note on frequent transient 503s at
-// today's 1x load).
+// tags). Every path goes through an ordered, max-3 concurrency queue. That
+// keeps the full+4 pass detailed without creating a synchronized retry
+// stampede against NVIDIA's fragile free-tier capacity, and still preserves
+// merge order: photo 1/full first, then its quadrants, then later photos.
 export async function extractGarmentFromImages(images, { lang = "ES", model, onProgress } = {}) {
   if (!Array.isArray(images) || images.length === 0) {
     throw new DeepSeekError("No hay imagenes para analizar.", { images })
@@ -231,7 +242,7 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
 
   const hasPhotoGroups = images.some((img) => img && img.photoIndex !== undefined)
   if (!hasPhotoGroups) {
-    const results = await Promise.all(images.map((img, i) => callFor(img, i)))
+    const results = await mapWithConcurrency(images, MAX_VISION_CONCURRENCY, (img, i) => callFor(img, i))
     return mergeVisionSeeds(results)
   }
 
@@ -243,7 +254,7 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
   })
   const results = []
   for (const key of [...groups.keys()].sort((a, b) => a - b)) {
-    const batchResults = await Promise.all(groups.get(key).map(([img, i]) => callFor(img, i)))
+    const batchResults = await mapWithConcurrency(groups.get(key), MAX_VISION_CONCURRENCY, ([img, i]) => callFor(img, i))
     results.push(...batchResults)
   }
   return mergeVisionSeeds(results)
