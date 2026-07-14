@@ -172,6 +172,50 @@ describe("deepseekClient", () => {
     await expect(deepseekChat({ messages: [] })).rejects.toBeInstanceOf(DeepSeekError)
   })
 
+  // Observed live: NVIDIA can hang indefinitely on a real chat completion -
+  // no response, no error - while fetch() itself has no built-in timeout, so
+  // without one the whole app just waits forever. These mock a fetch() that
+  // NEVER settles unless its AbortSignal fires, proving FETCH_TIMEOUT_MS is
+  // what breaks the hang, not luck.
+  function mockHangingFetch() {
+    return vi.fn().mockImplementation((url, options) => {
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.")
+          err.name = "AbortError"
+          reject(err)
+        })
+      })
+    })
+  }
+
+  it("deepseekChat times out a fetch() that never resolves, then retries and succeeds", async () => {
+    vi.useFakeTimers()
+    let callCount = 0
+    global.fetch = vi.fn().mockImplementation((url, options) => {
+      callCount++
+      if (callCount === 1) return mockHangingFetch()(url, options)
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "ok" } }] }) })
+    })
+    const promise = deepseekChat({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("ok")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it("surfaces a distinct 'tardo demasiado' message when every retry also hangs", async () => {
+    vi.useFakeTimers()
+    global.fetch = mockHangingFetch()
+    const promise = deepseekChat({ messages: [] })
+    const assertion = expect(promise).rejects.toThrow(/tardo demasiado en responder/)
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(global.fetch).toHaveBeenCalledTimes(3)
+    vi.useRealTimers()
+  })
+
   it("deepseekJSON parses a fenced JSON reply", async () => {
     mockFetchOnce({ choices: [{ message: { content: "```json\n{\"a\":1}\n```" } }] })
     const result = await deepseekJSON({ messages: [] })
@@ -289,6 +333,37 @@ describe("deepseekChatStream", () => {
     global.fetch = vi.fn().mockResolvedValue(mockStreamResponseThatDrops([sseEvent("parcial")]))
     const result = await deepseekChatStream({ messages: [] })
     expect(result).toBe("parcial")
+  })
+
+  // The connection can open fine and even deliver some content, then just
+  // stop sending bytes with the stream never closing - a stall, distinct
+  // from reader.read() throwing outright (tested above). Without its own
+  // timeout, that read() would hang forever even though FETCH_TIMEOUT_MS
+  // already got past opening the connection.
+  it("salvages accumulated content when the stream stalls (no more bytes, never closes)", async () => {
+    vi.useFakeTimers()
+    let delivered = false
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      body: {
+        getReader: () => ({
+          read: () => {
+            if (!delivered) {
+              delivered = true
+              return Promise.resolve({ done: false, value: new TextEncoder().encode(sseEvent("parcial")) })
+            }
+            return new Promise(() => {}) // never resolves - a genuine stall
+          },
+        }),
+      },
+    })
+    const promise = deepseekChatStream({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("parcial")
+    vi.useRealTimers()
   })
 
   it("skips a malformed SSE event without breaking the rest of the stream", async () => {

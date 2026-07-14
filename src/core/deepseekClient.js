@@ -29,8 +29,47 @@ export class DeepSeekError extends Error {
 const RETRYABLE_MAX_ATTEMPTS = 3
 const RETRYABLE_BASE_DELAY_MS = 1500
 
+// Observed live: NVIDIA's endpoint can hang indefinitely on a real chat
+// completion (confirmed with a direct curl bypassing this app entirely - no
+// response, no error, for 20-30s+) while still answering malformed/unrelated
+// requests instantly, meaning the service is technically "up" but a specific
+// call just never resolves. `fetch()` has no built-in timeout, so without
+// this the UI waited forever with no way to even retry. 30s is generous
+// enough for a legitimately slow real generation (observed up to ~20s) while
+// still turning a genuine hang into a clear, RETRYABLE error within a bounded
+// time instead of an infinite spinner.
+const FETCH_TIMEOUT_MS = 30000
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function fetchWithTimeout(url, options) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Shared by callOnce/openStream's catch blocks: a fetch() that throws either
+// because the connection genuinely failed OR because our own timeout fired -
+// both are transient-in-practice (see isRetryable below) so both get folded
+// into the same networkError flag and retried the same way, just with a
+// message that tells the truth about which one happened.
+function wrapFetchFailure(e) {
+  const timedOut = e && e.name === "AbortError"
+  const err = new DeepSeekError(
+    timedOut
+      ? "El asistente de IA tardo demasiado en responder (mas de " + FETCH_TIMEOUT_MS / 1000 + "s)."
+      : "No se pudo contactar el asistente de IA (revisa tu conexion).",
+    e
+  )
+  err.networkError = true
+  err.timedOut = timedOut
+  return err
 }
 
 // The NVIDIA free-tier endpoint returns a transient "ResourceExhausted:
@@ -57,15 +96,13 @@ function isRetryable(err) {
 async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
   let res
   try {
-    res = await fetch(PROXY_URL, {
+    res = await fetchWithTimeout(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, chat_template_kwargs: { thinking } }),
     })
   } catch (e) {
-    const err = new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
-    err.networkError = true
-    throw err
+    throw wrapFetchFailure(e)
   }
   if (!res.ok) {
     let detail = ""
@@ -117,15 +154,13 @@ export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0
 async function openStream({ messages, maxTokens, temperature, model, thinking }) {
   let res
   try {
-    res = await fetch(PROXY_URL, {
+    res = await fetchWithTimeout(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, stream: true, chat_template_kwargs: { thinking } }),
     })
   } catch (e) {
-    const err = new DeepSeekError("No se pudo contactar el asistente de IA (revisa tu conexion).", e)
-    err.networkError = true
-    throw err
+    throw wrapFetchFailure(e)
   }
   if (!res.ok) {
     let detail = ""
@@ -185,12 +220,20 @@ export async function deepseekChatStream({ messages, maxTokens = 1000, temperatu
   while (!finished) {
     let readerDone, value
     try {
-      ;({ done: readerDone, value } = await reader.read())
+      // Race against FETCH_TIMEOUT_MS too: the connection opening fine
+      // doesn't guarantee bytes keep arriving - a stall mid-stream (observed
+      // in the same live incident as the connection-open hang) would
+      // otherwise wait on this read() forever with no timeout of its own.
+      ;({ done: readerDone, value } = await Promise.race([
+        reader.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("stream_stall_timeout")), FETCH_TIMEOUT_MS)),
+      ]))
     } catch {
-      // Connection dropped mid-stream (e.g. a serverless function's execution
-      // timeout killing a long completion) - treat exactly like a stream that
-      // closed without [DONE]: fall through to the salvage logic below with
-      // whatever content already arrived, instead of crashing the whole call.
+      // Connection dropped OR stalled mid-stream (e.g. a serverless
+      // function's execution timeout killing a long completion) - treat
+      // exactly like a stream that closed without [DONE]: fall through to
+      // the salvage logic below with whatever content already arrived,
+      // instead of hanging or crashing the whole call.
       break
     }
     if (readerDone) break
