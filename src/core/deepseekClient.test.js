@@ -115,6 +115,21 @@ describe("deepseekClient", () => {
     vi.useRealTimers()
   })
 
+  it("deepseekChat retries on a clean 500 'Failed to generate completions' (observed live), then succeeds", async () => {
+    vi.useFakeTimers()
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: "upstream_error", detail: "Failed to generate completions" }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "ok" } }] }) })
+
+    const promise = deepseekChat({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("ok")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
   it("deepseekChat gives up after exhausting retries on a persistent 503", async () => {
     vi.useFakeTimers()
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: "upstream_error", detail: "ResourceExhausted" }) })

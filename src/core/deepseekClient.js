@@ -44,8 +44,14 @@ function sleep(ms) {
 // `status`/`detail` at all, so it's flagged via `networkError` instead and
 // retried the same way (observed live: a real "No se pudo contactar" that
 // turned out to be a one-off blip, not a real outage).
+//
+// Also observed live: a clean 500 with detail "Failed to generate
+// completions" - no ResourceExhausted text, just a flat internal-error
+// message from NVIDIA's model-serving layer during a rough patch. Same
+// transient-capacity flavor as the 503 case above, just a different shape,
+// so it gets the same retry treatment instead of surfacing immediately.
 function isRetryable(err) {
-  return !!err.networkError || err.status === 503 || /ResourceExhausted/i.test(err.detail || "")
+  return !!err.networkError || err.status === 503 || /ResourceExhausted/i.test(err.detail || "") || /Failed to generate completions/i.test(err.detail || "")
 }
 
 async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
