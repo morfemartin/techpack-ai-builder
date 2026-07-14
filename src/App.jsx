@@ -5,7 +5,7 @@ import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
 import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
 import { DeepSeekError } from "./core/deepseekClient.js"
-import { downscaleImage, extractGarmentFromImages } from "./core/visionExtract.js"
+import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
 import { toGrayscale } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
@@ -192,12 +192,16 @@ export default function App() {
     setPlannedPreviewError(null)
   }
 
-  // F1: "ficha desde foto" entry point - downscales each photo client-side
-  // (stays under the proxy's body-size limit), sends them to the vision
-  // model, and stores the resulting {garmentType, seed} to hand to
-  // GarmentChat at the Piezas step. A failed/skipped extraction still lets
-  // the user continue - GarmentChat just starts from a blank naming phase,
-  // same as picking "Prenda nueva (con IA)" directly.
+  // F1: "ficha desde foto" entry point - splits each photo client-side into a
+  // whole-image read PLUS 4 quadrant close-ups (F1.5: fixes the "vague on fine
+  // detail" gap - the whole photo alone is great at identifying the garment
+  // in general but misses costuras/hardware/texture; quadrants add detail
+  // without ever overriding the whole photo's garmentType/general read - see
+  // splitImageIntoQuadrants + extractGarmentFromImages in visionExtract.js).
+  // Sends them to the vision model and stores the resulting {garmentType,
+  // seed} to hand to GarmentChat at the Piezas step. A failed/skipped
+  // extraction still lets the user continue - GarmentChat just starts from a
+  // blank naming phase, same as picking "Prenda nueva (con IA)" directly.
   async function handleVisionUpload(e) {
     var files = Array.from(e.target.files || [])
     if (files.length === 0) return
@@ -205,8 +209,16 @@ export default function App() {
     setVisionError(null)
     setVisionProgress(null)
     try {
-      var downscaled = await Promise.all(files.map((f) => downscaleImage(f)))
-      var result = await extractGarmentFromImages(downscaled, {
+      var split = await Promise.all(files.map((f) => splitImageIntoQuadrants(f)))
+      var photoTotal = split.length
+      var images = []
+      split.forEach(function (s, photoIndex) {
+        images.push(Object.assign({}, s.full, { photoIndex, photoTotal }))
+        s.quadrants.forEach(function (q) {
+          images.push(Object.assign({}, q, { photoIndex, photoTotal }))
+        })
+      })
+      var result = await extractGarmentFromImages(images, {
         lang: "ES",
         onProgress: (progress) => setVisionProgress(progress),
       })

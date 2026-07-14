@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect } from "react"
 import { DeepSeekError } from "../core/deepseekClient.js"
-import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, reqsToParts, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, FIELD_STATUS } from "../core/techpackRequirements.js"
+import {
+  analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
+  looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs,
+  attachIllustrationBriefs, FIELD_STATUS,
+} from "../core/techpackRequirements.js"
+import { downscaleImage, answerFieldFromImage } from "../core/visionExtract.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -59,6 +64,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [sending, setSending] = useState(false)
   const [progress, setProgress] = useState(null) // { percent, lastLabel } | null - only set while streaming the analysis
   const [error, setError] = useState(null)
+  // Stack of {key, phase} pushed right before each askNext() advance - lets
+  // "Volver" undo the most recent answer/skip. Scoped to the CURRENT walk on
+  // purpose: only the top entry matching today's `phase` is poppable, so
+  // rewinding can never cross a boundary where a different DeepSeek call
+  // (design analysis, brief authoring) already ran off the old answer.
+  const [answerStack, setAnswerStack] = useState([])
+  const [extraNotes, setExtraNotes] = useState("") // raw text from the "finalCheck" catch-all step
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
 
@@ -85,13 +97,29 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     return field.why ? field.label + " — " + field.why : field.label
   }
 
+  // Every path that finishes the walk (4 non-generalOnly sites: no-designs
+  // here, runDesignAnalysis's catch, runBriefAuthoring's success AND catch)
+  // routes through here instead of setting "ready" directly - centralizes the
+  // generalOnly-skips-it branch and the new open-ended "finalCheck" step in
+  // one place instead of duplicating the branch at every call site.
+  function finishIntake(finalReqs) {
+    setReqs(finalReqs)
+    setCurrentField(null)
+    if (generalOnly) {
+      setPhase("ready")
+      return
+    }
+    setPhase("finalCheck")
+    post("assistant", "¿Hay algo que no te haya preguntado y creas importante para la fábrica? Podés escribirlo, o tocar \"Nada más\" para continuar.")
+  }
+
   function askNext(nextReqs, category) {
     const pending = pendingFields(nextReqs, category)
     if (pending.length === 0) {
       setCurrentField(null)
       if (category === "general" && generalOnly) {
-        setPhase("ready")
         post("assistant", "Listo, ya tengo lo que faltaba. Podés continuar.")
+        finishIntake(nextReqs)
       } else if (category === "general") {
         post("assistant", "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…")
         setPhase("designAnalyzing")
@@ -101,8 +129,8 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         setPhase("briefing")
         runBriefAuthoring(nextReqs)
       } else {
-        setPhase("ready")
         post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha. Podés continuar.")
+        finishIntake(nextReqs)
       }
       return
     }
@@ -161,8 +189,8 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       askNext(merged, "design")
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : "No se pudieron analizar los diseños. Podés continuar igual.")
-      setPhase("ready")
       post("assistant", "No pude analizar los diseños todavía, pero podés continuar igual y agregarlos después.")
+      finishIntake(generalReqs)
     } finally {
       setSending(false)
       setProgress(null)
@@ -189,12 +217,12 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         onProgress: (p) => setProgress(p),
       })
       setBriefs(authored)
-      setPhase("ready")
       post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha, con instrucciones de ilustración incluidas. Podés continuar.")
+      finishIntake(finalReqs)
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : "No se pudieron redactar los briefs de ilustración. Podés continuar igual.")
-      setPhase("ready")
       post("assistant", "No pude redactar las instrucciones de ilustración todavía, pero podés continuar igual.")
+      finishIntake(finalReqs)
     } finally {
       setSending(false)
       setProgress(null)
@@ -209,6 +237,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
 
   function submitAnswer(value) {
     post("user", value)
+    setAnswerStack((s) => [...s, { key: currentField.key, phase }])
     const nextReqs = applyAnswer(reqs, currentField.key, value)
     setReqs(nextReqs)
     askNext(nextReqs, currentField.category)
@@ -217,9 +246,96 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   function skipCurrentField() {
     if (!currentField || !currentField.optional || sending) return
     post("user", "Saltar")
+    setAnswerStack((s) => [...s, { key: currentField.key, phase }])
     const nextReqs = skipField(reqs, currentField.key)
     setReqs(nextReqs)
     askNext(nextReqs, currentField.category)
+  }
+
+  // Undo the most recently answered/skipped field - only while its stack
+  // entry still belongs to the CURRENT walk (see answerStack's comment above
+  // for why that boundary matters). Purely additive: re-posts the question
+  // rather than rewriting history, like a real chat.
+  function goBack() {
+    if (answerStack.length === 0 || sending) return
+    const top = answerStack[answerStack.length - 1]
+    if (top.phase !== phase) return
+    const reverted = revertField(reqs, top.key)
+    setReqs(reverted)
+    setAnswerStack((s) => s.slice(0, -1))
+    const field = reverted.fields.find((f) => f.key === top.key)
+    setCurrentField(field)
+    post("assistant", "↩ " + questionText(field))
+  }
+
+  // A clarifying question about the CURRENT field ("que es bordado 3d?") -
+  // answers it without advancing currentField/phase, so the same numbered
+  // options stay right where they were (they render off currentField, not
+  // off history) instead of breaking the walk's rigid continuity.
+  async function submitTangentQuestion(value) {
+    post("user", value)
+    setSending(true)
+    setError(null)
+    try {
+      const answer = await answerFieldQuestion({ field: currentField, garmentType: garmentLabel || (reqs && reqs.garmentType), question: value })
+      post("assistant", answer)
+    } catch (e) {
+      setError(e instanceof DeepSeekError ? e.message : "No pude responder eso. Podés seguir con la pregunta igual.")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // "finalCheck" free text: tries to turn it into real fields (so it lands in
+  // the actual tech pack via reqsToParts/reqsToDesigns), staying in this same
+  // phase afterward so the user can add more than one thing before finishing.
+  async function submitExtraNotes(value) {
+    post("user", value)
+    setExtraNotes((n) => (n ? n + "\n" + value : value))
+    setSending(true)
+    setError(null)
+    try {
+      const newFields = await analyzeAdditionalNotes({ garmentType: garmentLabel || (reqs && reqs.garmentType), existingFields: reqs.fields, notes: value })
+      if (newFields.length > 0) {
+        setReqs((r) => mergeDesignFields(r, newFields))
+        post("assistant", "Sumado: " + newFields.map((f) => f.label + " (" + f.value + ")").join(", ") + ". ¿Algo más? Si no, tocá \"Nada más\".")
+      } else {
+        post("assistant", "No pude identificar datos nuevos concretos ahí, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?")
+      }
+    } catch (e) {
+      setError(e instanceof DeepSeekError ? e.message : null)
+      post("assistant", "No pude procesarlo con la IA, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function finishFinalCheck() {
+    post("user", "Nada más")
+    setPhase("ready")
+    post("assistant", "Listo, ya tengo todo. Podés continuar.")
+  }
+
+  // Mid-chat photo upload (F1.5's sibling): answers whatever field is
+  // currently on screen from a photo instead of typed text. Deliberately a
+  // single quick vision call (no quadrant split - that's for the exhaustive
+  // upfront intake, not a one-question lookup) and deliberately PRE-FILLS the
+  // input rather than auto-submitting, so a wrong read never locks in silently.
+  async function handleAttachImage(e) {
+    const file = (e.target.files || [])[0]
+    e.target.value = ""
+    if (!file || !currentField || sending) return
+    setSending(true)
+    setError(null)
+    try {
+      const downscaled = await downscaleImage(file)
+      const suggestion = await answerFieldFromImage({ field: currentField, garmentType: garmentLabel || (reqs && reqs.garmentType), imageBase64: downscaled.base64 })
+      setInput(suggestion)
+    } catch (err) {
+      setError(err instanceof DeepSeekError ? err.message : "No se pudo analizar la foto.")
+    } finally {
+      setSending(false)
+    }
   }
 
   function send(valueOverride) {
@@ -227,7 +343,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     if (!value || sending) return
     setInput("")
     if (phase === "naming") return submitName(value)
+    if ((phase === "asking" || phase === "designing") && currentField && looksLikeQuestion(value)) return submitTangentQuestion(value)
     if (phase === "asking" || phase === "designing") return submitAnswer(value)
+    if (phase === "finalCheck") return submitExtraNotes(value)
   }
 
   function buildDraft() {
@@ -236,12 +354,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       label: garmentLabel,
       parts: reqsToParts(reqs),
       positions: ["Toda la prenda"],
+      // A design element added during "finalCheck" (after runBriefAuthoring
+      // already ran) never gets its own illustration brief - attachIllustrationBriefs
+      // already defaults those to "" (same as any other unmatched design), so
+      // this degrades exactly like a normal brief-authoring failure, not a crash.
       designs: attachIllustrationBriefs(reqsToDesigns(reqs), briefs),
-      notes: "",
+      notes: extraNotes,
     }
   }
 
-  const inputActive = phase === "naming" || phase === "asking" || phase === "designing"
+  const inputActive = phase === "naming" || phase === "asking" || phase === "designing" || phase === "finalCheck"
+  const backAvailable = answerStack.length > 0 && answerStack[answerStack.length - 1].phase === phase && (phase === "asking" || phase === "designing")
   const knownParts = reqs ? reqsToParts(reqs) : []
   const designsSoFar = reqs ? reqsToDesigns(reqs) : []
   const pendingCategory = phase === "designAnalyzing" || phase === "designing" ? "design" : "general"
@@ -330,6 +453,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             <Icon name="error" size={16} color={role.index.fill} /> {error}
           </div>
         )}
+        {backAvailable && (
+          <div style={{ padding: `${space(1)}px ${space(3)}px`, borderTop: hair, display: "flex" }}>
+            <button
+              onClick={goBack}
+              disabled={sending}
+              style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: "none", border: "none", cursor: sending ? "not-allowed" : "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}
+            >
+              <Icon name="undo" size={14} /> Volver
+            </button>
+          </div>
+        )}
         {inputActive ? (
           <div style={{ display: "flex", borderTop: hair }}>
             <input
@@ -338,10 +472,19 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               onKeyDown={(e) => {
                 if (e.key === "Enter") send()
               }}
-              placeholder={phase === "asking" ? "Elegí una opción o escribí la tuya..." : "Escribí tu respuesta..."}
+              placeholder={phase === "asking" ? "Elegí una opción, escribí la tuya, o preguntá algo..." : phase === "finalCheck" ? "Algo que no te pregunté (opcional)..." : "Escribí tu respuesta..."}
               disabled={sending}
               style={{ flex: 1, padding: space(3), border: "none", outline: "none", fontFamily: type.fonts.ui, fontSize: type.size.base, background: sending ? "#F7F7F8" : C.white.hex }}
             />
+            {(phase === "asking" || phase === "designing") && currentField && (
+              <label
+                title="Responder esta pregunta con una foto"
+                style={{ display: "inline-flex", alignItems: "center", padding: `0 ${space(3)}px`, borderLeft: hair, cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.5 : 1 }}
+              >
+                <Icon name="add_photo_alternate" size={20} color={C.ink.hex} />
+                <input type="file" accept="image/png,image/jpeg" disabled={sending} onChange={handleAttachImage} style={{ display: "none" }} />
+              </label>
+            )}
             <button
               onClick={() => send()}
               disabled={sending || !input.trim()}
@@ -360,6 +503,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             </button>
           </div>
         ) : null}
+        {phase === "finalCheck" && (
+          <div style={{ padding: `${space(2)}px ${space(3)}px`, borderTop: hair, display: "flex", justifyContent: "flex-end" }}>
+            <button
+              onClick={finishFinalCheck}
+              disabled={sending}
+              style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(3)}px`, background: C.white.hex, color: C.ink.hex, border: hair, fontFamily: type.fonts.ui, fontWeight: 700, fontSize: type.size.xs, textTransform: "uppercase", letterSpacing: "0.04em", cursor: sending ? "not-allowed" : "pointer" }}
+            >
+              Nada más, continuar <Icon name="arrow_forward" size={16} color={C.ink.hex} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Live draft panel - so the intake is never a black box. */}
