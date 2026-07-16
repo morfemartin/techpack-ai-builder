@@ -32,21 +32,24 @@ describe("document plan AI wrappers", () => {
       lang: "ES",
     })
 
+    // The document contract (repairOutline) inserts the missing cover page
+    // in front of whatever the model proposed.
     expect(outline.pages).toEqual([
+      { id: "cover", title: "Sueter", purpose: "cover" },
       { id: "overview-page", title: "Sueter Overview", purpose: "overview", covers: undefined },
       { id: "logo", title: "Logo", purpose: "design:Chest Logo", covers: ["Chest Logo"] },
     ])
     expect(deepseekChat).toHaveBeenCalledOnce()
   })
 
-  it("falls back to overview plus design pages when the outline is empty", async () => {
+  it("falls back to cover + overview plus design pages when the outline is empty", async () => {
     deepseekChat.mockResolvedValueOnce('{"pages":[]}')
     const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
 
-    expect(outline.pages.map((p) => p.purpose)).toEqual(["overview", "design:Back Print"])
+    expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
   })
 
-  it("streams page layout progress and normalizes unknown region types away", async () => {
+  it("streams progress, drops unknown region types, and repairs the page to its purpose contract", async () => {
     const events = []
     deepseekChatStream.mockImplementationOnce(async ({ onEvent }) => {
       onEvent({ contentSoFar: '{"regions":[{"type":"header"', tokensSoFar: 1 })
@@ -60,7 +63,10 @@ describe("document plan AI wrappers", () => {
       { onProgress: (event) => events.push(event) }
     )
 
-    expect(page.regions.map((r) => r.type)).toEqual(["header", "disclaimer"])
+    // "bogus" dropped by normalizePlan; the overview contract then inserts
+    // the missing mandatory regions (titleBar, illustration, partsList) and
+    // enforces canonical chrome order.
+    expect(page.regions.map((r) => r.type)).toEqual(["header", "titleBar", "illustration", "partsList", "disclaimer"])
     expect(events.at(-1)).toEqual({ percent: 5, lastLabel: "bogus" })
     expect(deepseekChatStream).toHaveBeenCalledOnce()
   })

@@ -1,0 +1,199 @@
+import { describe, it, expect } from "vitest"
+import { CONTRACTS, purposeFamily, validatePage, repairPage, validateOutline, repairOutline } from "./pageContracts.js"
+
+// Contract for the page-contract system (Phase 2 of Layout Engine v2):
+// deterministic encoding of how a tech-pack designer thinks - what MUST be
+// visually present per page purpose, what never repeats, what deserves a
+// page - applied as validate + repair over whatever the AI proposed. The AI
+// plan is a suggestion; the contract is the guarantee.
+
+const ctx = {
+  garmentType: "Hoodie",
+  lang: "ES",
+  parts: [
+    { id: "body", val: "French terry", on: true },
+    { id: "hood", val: "Doble capa", on: true },
+  ],
+  designs: [
+    { name: "Chest Logo", pos: "Pecho izquierdo", tec: "Bordado 3D", colors: [{ name: "Blue", hex: "#003DA5" }], emb: { machine: "Tajima", stitches: "9000", stopSeq: [] } },
+    { name: "Woven Label", pos: "Cuello interior", tec: "Jacquard", colors: [] },
+  ],
+}
+
+const chrome = [
+  { type: "header", weight: 10 },
+  { type: "titleBar", weight: 5 },
+]
+const disclaimer = { type: "disclaimer", weight: 8 }
+
+describe("purposeFamily", () => {
+  it("maps design:<name> to the design family and unknown purposes to structure", () => {
+    expect(purposeFamily("design:Chest Logo")).toBe("design")
+    expect(purposeFamily("overview")).toBe("overview")
+    expect(purposeFamily("cover")).toBe("cover")
+    expect(purposeFamily("whatever")).toBe("structure")
+  })
+})
+
+describe("validatePage", () => {
+  it("flags missing mandatory regions for the purpose", () => {
+    const page = { id: "p", purpose: "overview", regions: [...chrome, disclaimer] } // no illustration, no partsList
+    const codes = validatePage(page, ctx).map((v) => v.code)
+    expect(codes).toContain("missing-mandatory")
+    const missing = validatePage(page, ctx).filter((v) => v.code === "missing-mandatory").map((v) => v.type)
+    expect(missing).toContain("illustration")
+    expect(missing).toContain("partsList")
+  })
+
+  it("flags forbidden regions (BOM never repeats on a design page)", () => {
+    const page = { id: "p", purpose: "design:Chest Logo", regions: [...chrome, { type: "partsList", weight: 30 }, { type: "illustration", weight: 60, slots: 1 }, { type: "colorSpecs", weight: 20 }, { type: "embSpecs", weight: 20 }, disclaimer] }
+    const v = validatePage(page, ctx)
+    expect(v.some((x) => x.code === "forbidden-region" && x.type === "partsList")).toBe(true)
+  })
+
+  it("conditional mandatory: a design page needs colorSpecs/embSpecs only when the design HAS that data", () => {
+    // Chest Logo has colors + emb -> both mandatory
+    const bare = { id: "p", purpose: "design:Chest Logo", regions: [...chrome, { type: "illustration", weight: 60, slots: 1 }, disclaimer] }
+    const missing = validatePage(bare, ctx).filter((v) => v.code === "missing-mandatory").map((v) => v.type)
+    expect(missing).toContain("colorSpecs")
+    expect(missing).toContain("embSpecs")
+    // Woven Label has neither colors nor emb -> neither mandatory
+    const label = { id: "p2", purpose: "design:Woven Label", regions: [...chrome, { type: "illustration", weight: 60, slots: 1 }, disclaimer] }
+    const missing2 = validatePage(label, ctx).filter((v) => v.code === "missing-mandatory").map((v) => v.type)
+    expect(missing2).not.toContain("colorSpecs")
+    expect(missing2).not.toContain("embSpecs")
+  })
+
+  it("counts regions inside a split toward presence", () => {
+    const page = {
+      id: "p",
+      purpose: "overview",
+      regions: [...chrome, { type: "split", weight: 70, regions: [{ type: "partsList", weight: 30 }, { type: "illustration", weight: 70, slots: 2 }] }, disclaimer],
+    }
+    const codes = validatePage(page, ctx).map((v) => v.code)
+    expect(codes).not.toContain("missing-mandatory")
+  })
+
+  it("flags empty-data regions (colorSpecs on a design with no colors)", () => {
+    const page = { id: "p", purpose: "design:Woven Label", regions: [...chrome, { type: "illustration", weight: 60, slots: 1 }, { type: "colorSpecs", weight: 20 }, disclaimer] }
+    const v = validatePage(page, ctx)
+    expect(v.some((x) => x.code === "empty-data-region" && x.type === "colorSpecs")).toBe(true)
+  })
+
+  it("flags duplicated singleton regions", () => {
+    const page = { id: "p", purpose: "overview", regions: [...chrome, { type: "partsList", weight: 20 }, { type: "illustration", weight: 40, slots: 1 }, { type: "partsList", weight: 20 }, disclaimer] }
+    const v = validatePage(page, ctx)
+    expect(v.some((x) => x.code === "duplicate-region" && x.type === "partsList")).toBe(true)
+  })
+
+  it("accepts a fully conforming page with no violations", () => {
+    const page = {
+      id: "p",
+      purpose: "design:Chest Logo",
+      regions: [...chrome, { type: "split", weight: 70, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "embSpecs", weight: 20 }, disclaimer],
+    }
+    expect(validatePage(page, ctx)).toEqual([])
+  })
+})
+
+describe("repairPage", () => {
+  it("inserts missing mandatory regions with sensible defaults and reports each repair", () => {
+    const page = { id: "p", purpose: "overview", regions: [...chrome, disclaimer] }
+    const { page: fixed, repairs } = repairPage(page, ctx)
+    const types = fixed.regions.map((r) => r.type)
+    expect(types).toContain("illustration")
+    expect(types).toContain("partsList")
+    expect(repairs.length).toBeGreaterThan(0)
+    // repaired page passes its own validation
+    expect(validatePage(fixed, ctx)).toEqual([])
+  })
+
+  it("drops forbidden and empty-data regions", () => {
+    const page = {
+      id: "p",
+      purpose: "design:Woven Label",
+      regions: [...chrome, { type: "partsList", weight: 20 }, { type: "illustration", weight: 50, slots: 1 }, { type: "colorSpecs", weight: 20 }, disclaimer],
+    }
+    const { page: fixed } = repairPage(page, ctx)
+    const types = fixed.regions.map((r) => r.type)
+    expect(types).not.toContain("partsList")
+    expect(types).not.toContain("colorSpecs")
+    expect(validatePage(fixed, ctx)).toEqual([])
+  })
+
+  it("dedupes singleton regions keeping the first occurrence", () => {
+    const page = { id: "p", purpose: "overview", regions: [...chrome, { type: "partsList", weight: 20, marker: "first" }, { type: "illustration", weight: 40, slots: 1 }, { type: "partsList", weight: 20, marker: "second" }, disclaimer] }
+    const { page: fixed } = repairPage(page, ctx)
+    const lists = fixed.regions.filter((r) => r.type === "partsList")
+    expect(lists).toHaveLength(1)
+    expect(lists[0].marker).toBe("first")
+  })
+
+  it("enforces canonical chrome order: header first, titleBar second, disclaimer last", () => {
+    const page = { id: "p", purpose: "overview", regions: [disclaimer, { type: "partsList", weight: 20 }, { type: "illustration", weight: 40, slots: 1 }, ...chrome] }
+    const { page: fixed } = repairPage(page, ctx)
+    const types = fixed.regions.map((r) => r.type)
+    expect(types[0]).toBe("header")
+    expect(types[1]).toBe("titleBar")
+    expect(types[types.length - 1]).toBe("disclaimer")
+  })
+
+  it("repairs an empty/garbage page into a fully conforming one", () => {
+    const { page: fixed, repairs } = repairPage({ id: "p", purpose: "design:Chest Logo", regions: [] }, ctx)
+    expect(validatePage(fixed, ctx)).toEqual([])
+    expect(repairs.length).toBeGreaterThan(0)
+    // design page defaults: illustration ref anchored on the design's position
+    const ill = fixed.regions.find((r) => r.type === "illustration")
+    expect(ill.refs && ill.refs.length).toBeGreaterThan(0)
+  })
+})
+
+describe("outline contract", () => {
+  it("validateOutline flags a missing cover, missing full-BOM page, and uncovered designs", () => {
+    const outline = { pages: [{ id: "d1", title: "Chest Logo", purpose: "design:Chest Logo" }] }
+    const codes = validateOutline(outline, ctx).map((v) => v.code)
+    expect(codes).toContain("missing-cover")
+    expect(codes).toContain("missing-bom-page")
+    expect(codes).toContain("design-uncovered") // Woven Label has no page
+  })
+
+  it("repairOutline inserts cover first, a BOM page, and one page per uncovered design; drops duplicate design pages", () => {
+    const outline = {
+      pages: [
+        { id: "d1", title: "Chest Logo", purpose: "design:Chest Logo" },
+        { id: "d1b", title: "Chest Logo again", purpose: "design:Chest Logo" },
+      ],
+    }
+    const { outline: fixed, repairs } = repairOutline(outline, ctx)
+    expect(fixed.pages[0].purpose).toBe("cover")
+    expect(fixed.pages.some((p) => p.purpose === "overview" || p.purpose === "structure")).toBe(true)
+    const chestPages = fixed.pages.filter((p) => p.purpose === "design:Chest Logo")
+    expect(chestPages).toHaveLength(1)
+    expect(fixed.pages.some((p) => p.purpose === "design:Woven Label")).toBe(true)
+    expect(repairs.length).toBeGreaterThan(0)
+    expect(validateOutline(fixed, ctx)).toEqual([])
+  })
+
+  it("leaves a conforming outline untouched", () => {
+    const outline = {
+      pages: [
+        { id: "cover", title: "Hoodie", purpose: "cover" },
+        { id: "overview", title: "Estructura", purpose: "overview" },
+        { id: "d1", title: "Chest Logo", purpose: "design:Chest Logo" },
+        { id: "d2", title: "Woven Label", purpose: "design:Woven Label" },
+      ],
+    }
+    const { outline: fixed, repairs } = repairOutline(outline, ctx)
+    expect(repairs).toEqual([])
+    expect(fixed.pages.map((p) => p.id)).toEqual(["cover", "overview", "d1", "d2"])
+  })
+})
+
+describe("CONTRACTS shape", () => {
+  it("exposes a contract for every purpose family", () => {
+    for (const fam of ["cover", "overview", "structure", "lining", "label", "design"]) {
+      expect(CONTRACTS[fam]).toBeTruthy()
+      expect(Array.isArray(CONTRACTS[fam].mandatory)).toBe(true)
+    }
+  })
+})
