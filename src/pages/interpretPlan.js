@@ -10,9 +10,10 @@
 // layout engine or a DeepSeek call.
 
 import { T } from "../core/i18n.js"
-import { R, TX, sv, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
+import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
-import { palette, type } from "../design/tokens.js"
+import { palette } from "../design/tokens.js"
+import { INSET, ROW } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 
@@ -45,11 +46,12 @@ const SPLIT_GAP = 14
 // the model's weights now only distribute the CONTENT area.
 const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 20 }
 
-// Matches renderPartsList's `compact` row basis (30) plus its 20px table
-// header - used to measure, after solving, whether a page's parts list
-// actually fits the parts assigned to it (see `buildPlannedPages` pagination).
-const COMPACT_ROW_H = 30
-const TABLE_HEADER_H = 20
+// Matches renderPartsList's `compact` row basis plus its table header (both
+// from the shared metrics scale) - used to measure, after solving, whether a
+// page's parts list actually fits the parts assigned to it (see
+// `buildPlannedPages` pagination).
+const COMPACT_ROW_H = ROW.table
+const TABLE_HEADER_H = ROW.tableHeader
 function partsCapacity(height) {
   return Math.max(0, Math.floor((height - TABLE_HEADER_H) / COMPACT_ROW_H))
 }
@@ -238,11 +240,13 @@ function selectedDesign(page, ctx) {
 
 function renderNote(box, text) {
   const note = text || ""
+  const accent = 4
   let s = R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
-  s += R(box.x, box.y, 4, box.height, palette.yellow.hex, palette.yellow.hex, "0")
-  const lines = wrapLines(note, Math.max(1, box.width - 24), 10)
+  s += R(box.x, box.y, accent, box.height, palette.yellow.hex, palette.yellow.hex, "0")
+  const textX = box.x + accent + INSET
+  const lines = wrapLines(note, Math.max(1, box.width - (accent + INSET * 2)), 10)
   lines.slice(0, Math.max(1, Math.floor((box.height - 16) / 14))).forEach((line, i) => {
-    s += TX(box.x + 14, box.y + 12 + i * 14, line, 10, false, "start")
+    s += TX(textX, box.y + 12 + i * 14, line, 10, false, "start")
   })
   return s
 }
@@ -280,8 +284,7 @@ function leafForRegion(region, page, ctx) {
         var sq = Math.min(box.height, 30)
         var s = R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8")
         s += R(box.x, box.y, sq, box.height, palette.red.hex, palette.red.hex, "0")
-        var tx = box.x + sq + 14
-        s += "<text x='" + tx + "' y='" + (box.y + box.height / 2) + "' text-anchor='start' dominant-baseline='central' font-family='" + type.svgFonts.ui + "' font-size='12' font-weight='bold' letter-spacing='0.6' fill='" + palette.white.hex + "'>" + sv(title) + "</text>"
+        s += TX(box.x + sq + INSET, box.y + box.height / 2, title, 12, true, "start", palette.white.hex, undefined, 0.6)
         return s
       }
       if (region.type === "illustration") {
@@ -294,7 +297,7 @@ function leafForRegion(region, page, ctx) {
           parts: (ctx && ctx.parts) || [],
           partLabels,
           txParts: txData && txData.parts,
-          labels: { spec: t.sp, detail: t.dt, file: "Archivo / Drive" },
+          labels: { spec: t.sp, detail: t.dt },
           compact: true,
           startIndex: (ctx && ctx.partsStartIndex) || 0,
         })

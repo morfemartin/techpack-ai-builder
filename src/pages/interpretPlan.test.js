@@ -245,9 +245,9 @@ describe("split composition (2D layout)", () => {
     // illustration first (on top), grows to fill whatever height is freed up
     expect(splitNode.children[0].grow).toBe(1)
     // the parts list sits below, sized to its own natural height - not
-    // stretched: 20px table header + 1 row * 30px + 16px breathing pad = 66px
+    // stretched: 20px table header + 1 row * 32px (ROW.table) + 16px pad = 68px
     expect(splitNode.children[1].grow).toBe(0)
-    expect(splitNode.children[1].basis).toBe(66)
+    expect(splitNode.children[1].basis).toBe(68)
   })
 
   // Counterpart to the stack rule: only a partsList reflows to a full-width

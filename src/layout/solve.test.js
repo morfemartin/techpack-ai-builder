@@ -180,8 +180,20 @@ describe("solveLayout", () => {
     expect(five.children).toHaveLength(5)
     expect(five.children[0].height).toBe(60)
 
+    // 300/8 = 37.5 - boxes snap to whole pixels EDGE-wise (rounding start and
+    // end coordinates, size derived from them), so rows alternate 38/37 while
+    // adjacent rows still share exactly one edge and the total is preserved.
     const eight = solveLayout(buildRows(8), { width: 300, height: 300 })
     expect(eight.children).toHaveLength(8)
-    expect(eight.children[0].height).toBe(37.5)
+    eight.children.forEach((c) => {
+      expect(Number.isInteger(c.y)).toBe(true)
+      expect(Number.isInteger(c.height)).toBe(true)
+      expect([37, 38]).toContain(c.height)
+    })
+    expect(eight.children.reduce((a, c) => a + c.height, 0)).toBe(300)
+    // no gaps/overlaps: each row starts exactly where the previous ended
+    for (let i = 1; i < eight.children.length; i++) {
+      expect(eight.children[i].y).toBe(eight.children[i - 1].y + eight.children[i - 1].height)
+    }
   })
 })

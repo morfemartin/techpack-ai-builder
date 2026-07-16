@@ -158,11 +158,18 @@ export function solveLayout(node, outer) {
     if (align === "center") cOffset = innerCrossStart + (innerCross - cSize) / 2
     else if (align === "end") cOffset = innerCrossStart + (innerCross - cSize)
 
+    // Snap each child box to whole pixels, EDGE-wise: round the start and end
+    // coordinates independently and derive the size from them, so adjacent
+    // children still share exactly one edge (rounding position and size
+    // separately would open 1px gaps / overlaps). The fractional cursor keeps
+    // accumulating unrounded so rounding error never drifts down a long run
+    // of siblings. Whole-pixel boxes are what keep hairline rules crisp and
+    // make edges from DIFFERENT blocks actually coincide on the page.
     const childOuter = {
-      [mPos]: cursor,
-      [cPos]: cOffset,
-      [mAxis]: mSize,
-      [cAxis]: cSize,
+      [mPos]: Math.round(cursor),
+      [cPos]: Math.round(cOffset),
+      [mAxis]: Math.round(cursor + mSize) - Math.round(cursor),
+      [cAxis]: Math.round(cOffset + cSize) - Math.round(cOffset),
     }
     cursor += mSize + gapExtra
     return solveLayout(child, childOuter)

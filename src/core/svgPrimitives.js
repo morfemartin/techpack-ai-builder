@@ -1,4 +1,5 @@
 import { palette, type } from "../design/tokens.js"
+import { BAR, CHIP, HEADER, INSET, headerCells } from "../design/metrics.js"
 
 export const NA = "N/A"
 
@@ -13,10 +14,30 @@ export const R = (x, y, w, h, fill, stroke, sw) =>
   "<rect x='" + x + "' y='" + y + "' width='" + w + "' height='" + h + "' fill='" + fill + "' stroke='" + (stroke || palette.ink.hex) + "' stroke-width='" + (sw || "0.6") + "'/>"
 
 // `family` defaults to the UI grotesque; pass type.svgFonts.data for anything
-// that IS a value (codes, mm, hex, counts) rather than descriptive text - see
+// that IS a value (codes, hex, mm, counts) rather than descriptive text - see
 // docs/UX-DESIGN.md §4 for why (0/O, 1/l/I disambiguation + column alignment).
-export const TX = (x, y, txt, sz, bold, anchor, color, family) =>
-  "<text x='" + x + "' y='" + y + "' text-anchor='" + (anchor || "start") + "' dominant-baseline='central' font-family='" + (family || type.svgFonts.ui) + "' font-size='" + sz + "' font-weight='" + (bold ? "bold" : "normal") + "' fill='" + (color || palette.ink.hex) + "'>" + sv(txt) + "</text>"
+// `tracking` (optional, px) adds letter-spacing - display/title lockups only.
+export const TX = (x, y, txt, sz, bold, anchor, color, family, tracking) =>
+  "<text x='" + x + "' y='" + y + "' text-anchor='" + (anchor || "start") + "' dominant-baseline='central' font-family='" + (family || type.svgFonts.ui) + "' font-size='" + sz + "' font-weight='" + (bold ? "bold" : "normal") + (tracking ? "' letter-spacing='" + tracking : "") + "' fill='" + (color || palette.ink.hex) + "'>" + sv(txt) + "</text>"
+
+// One numbered index chip for the whole system (role.index): solid red square,
+// centered white mono numeral. Same mark in a parts row, an illustration slot,
+// or a wizard step - cross-referenced by number, found first on the sheet.
+export function svgChip(cx, cy, label, size) {
+  var c = size || CHIP
+  return (
+    R(cx - c / 2, cy - c / 2, c, c, palette.red.hex, palette.red.hex, "0") +
+    TX(cx, cy, label, 8, true, "middle", palette.white.hex, type.svgFonts.data)
+  )
+}
+
+// Inner section title bar (PANTONE / CMYK, embroidery sheet...): role.priority
+// blue, FULL block width, left-aligned label at the shared INSET - the same
+// grammar as the page titleBar, so every blue bar on a page shares edges and
+// alignment instead of each block inventing its own inset.
+export function svgSectionBar(x, y, w, title) {
+  return R(x, y, w, BAR.h, palette.blue.hex, "none") + TX(x + INSET, y + BAR.h / 2, title, BAR.fontSize, true, "start", palette.white.hex, undefined, 0.6)
+}
 
 // A quiet structural label cell (SEASON, STYLE NO, ...): white fill + ink
 // border + bold ink text - part of the retícula itself, not a colored chip.
@@ -58,25 +79,31 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
 }
 
 /* ---- HEADER / DISCLAIMER BLOCKS (garment-agnostic) ---- */
+// Both rows are laid on ONE column grid (metrics.js HEADER): after the fixed
+// logo cell, the width divides into 5 equal modules; the top row spans
+// [1,1,1,1,1] and the bottom row [1,2,1,1], so every bottom-row cell edge
+// lands exactly on a top-row edge and both rows fill the page flush to the
+// right margin. The old version gave each row ad-hoc cell widths - the rows
+// ended at different x (901 vs 1071 on a 1200 page) and no edges aligned.
 export function svgHeader(hdr, logo, W, hH) {
   var s = ""
   // Logo slot: pure white (print-first), ink border. Muted placeholder text
   // when no logo was uploaded - not a brand/role color, just a chrome hint.
-  s += R(0, 0, 88, hH, palette.white.hex, palette.ink.hex, "0.8")
-  if (logo) s += "<image href='" + logo + "' x='4' y='4' width='80' height='" + (hH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
-  else s += TX(44, hH / 2, "LOGO", 9, false, "middle", "#9AA0AB")
-  var x = 88
-  ;[["SEASON", hdr.season, 58, 100], ["STYLE NO", hdr.sno, 62, 95], ["CATEGORY", hdr.cat, 68, 90], ["FABRIC", hdr.fab, 54, 130], ["FACTORY", hdr.fac, 56, 100]].forEach(function (row) {
-    var lw = row[2], vw = row[3], w = vw || (W - x - lw)
-    s += LBL(x, 0, lw, hH / 2, row[0]) + VAL(x + lw, 0, w, hH / 2, row[1])
-    x += lw + w
-  })
-  x = 88
-  ;[["BRAND", hdr.brand, 50, 88], ["NAME", hdr.pname, 48, 510], ["INPUT", hdr.ind, 48, 85], ["OUTPUT", hdr.outd, 54, 100]].forEach(function (row) {
-    var lw = row[2], vw = row[3], w = vw || (W - x - lw)
-    s += LBL(x, hH / 2, lw, hH / 2, row[0]) + VAL(x + lw, hH / 2, w, hH / 2, row[1])
-    x += lw + w
-  })
+  s += R(0, 0, HEADER.logo, hH, palette.white.hex, palette.ink.hex, "0.8")
+  if (logo) s += "<image href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (hH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
+  else s += TX(HEADER.logo / 2, hH / 2, "LOGO", 9, false, "middle", "#9AA0AB")
+
+  function headerRow(cells, fields, y) {
+    var out = ""
+    cells.forEach(function (cell, i) {
+      var lw = Math.min(HEADER.label, cell.w)
+      out += LBL(cell.x, y, lw, hH / 2, fields[i][0]) + VAL(cell.x + lw, y, cell.w - lw, hH / 2, fields[i][1])
+    })
+    return out
+  }
+
+  s += headerRow(headerCells(W, HEADER.topSpans), [["SEASON", hdr.season], ["STYLE NO", hdr.sno], ["CATEGORY", hdr.cat], ["FABRIC", hdr.fab], ["FACTORY", hdr.fac]], 0)
+  s += headerRow(headerCells(W, HEADER.bottomSpans), [["BRAND", hdr.brand], ["NAME", hdr.pname], ["INPUT", hdr.ind], ["OUTPUT", hdr.outd]], hH / 2)
   return s
 }
 

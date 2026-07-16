@@ -75,12 +75,14 @@ describe("buildPage1 layout parity", () => {
       .map(([, , , h]) => h)
 
     expect(twoRowHeights).toHaveLength(2)
-    expect(twoRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(758, 5)
-    expect(twoRowHeights[0]).toBeCloseTo(379, 5)
+    expect(twoRowHeights.reduce((a, b) => a + b, 0)).toBe(758)
+    expect(twoRowHeights[0]).toBe(379)
 
+    // 758/5 = 151.6 - with whole-pixel edge snapping rows alternate 151/152,
+    // preserving the exact total with zero gaps between rows.
     expect(fiveRowHeights).toHaveLength(5)
-    expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(758, 5)
-    expect(fiveRowHeights[0]).toBeCloseTo(151.6, 5)
+    expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBe(758)
+    fiveRowHeights.forEach((h) => expect([151, 152]).toContain(h))
   })
 })
 
@@ -104,6 +106,46 @@ describe("buildPage1 with a garment that has no hand-drawn guides/callouts", () 
   it("draws no callout circles (no invented pointer coordinates)", () => {
     const svg = buildPage1("ES", hdr, bareGarment.defaultParts, null, null, bareGarment)
     expect(svg).not.toContain("<circle")
+  })
+})
+
+describe("shared metrics adoption (P1 alignment)", () => {
+  function textXs(svg) {
+    return [...svg.matchAll(/<text x='([\d.-]+)'[^>]*>([^<]*)<\/text>/g)].map((m) => ({ x: Number(m[1]), t: m[2] }))
+  }
+
+  it("parts-list header captions sit exactly on the row columns (same stops, same alignment)", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 400, height: 200 },
+      {
+        parts: [{ id: "body", val: "Cotton", on: true }],
+        partLabels: { body: "Body Panel" },
+        labels: { spec: "SPECS", detail: "DETAILS" },
+      }
+    )
+    const texts = textXs(svg)
+    const header = (t) => texts.find((e) => e.t === t)
+    // header caption x === data text x, per column
+    expect(header("SPECS").x).toBe(texts.find((e) => e.t === "Body Panel").x)
+    expect(header("DETAILS").x).toBe(texts.find((e) => e.t === "Cotton").x)
+    // the phantom "Archivo / Drive" header column (no data column ever existed) is gone
+    expect(svg).not.toContain("Archivo / Drive")
+  })
+
+  it("svgHeader lays both rows on one grid: every bottom-row edge lands on a top-row edge, both rows fill the page", () => {
+    const hdr2 = { brand: "B", season: "S", sno: "1", cat: "C", fab: "F", fac: "X", ind: "I", outd: "O", pname: "P" }
+    const svg = buildPage1("ES", hdr2, capGarment.defaultParts.slice(0, 2), null, null, capGarment)
+    // label cells are the bold LBL rects; collect header-band rects (y=0 or y=40, h=40)
+    const rects = [...svg.matchAll(/<rect x='([\d.]+)' y='([\d.]+)' width='([\d.]+)' height='([\d.]+)'/g)]
+      .map((m) => m.slice(1).map(Number))
+      .filter(([, y, , h]) => (y === 0 || y === 40) && h === 40)
+    const topEdges = new Set(rects.filter(([, y]) => y === 0).flatMap(([x, , w]) => [x, x + w]))
+    const bottomEdges = rects.filter(([, y]) => y === 40).flatMap(([x, , w]) => [x, x + w])
+    expect(bottomEdges.length).toBeGreaterThan(0)
+    bottomEdges.forEach((e) => expect(topEdges.has(e)).toBe(true))
+    // both rows end flush at the page's right edge
+    expect(Math.max(...topEdges)).toBe(1200)
+    expect(Math.max(...bottomEdges)).toBe(1200)
   })
 })
 
