@@ -105,7 +105,7 @@ describe("interpretPagePlan", () => {
     garment: { partLabels: { ES: { body: "Cuerpo" } } },
   }
 
-  it("keeps structural chrome (header/disclaimer) at a fixed height and lets content grow", () => {
+  it("keeps chrome fixed, sizes data to content, and parks the slack in a spacer before the bottom chrome", () => {
     const root = interpretPagePlan(
       {
         id: "overview",
@@ -121,15 +121,50 @@ describe("interpretPagePlan", () => {
     )
 
     expect(root.direction).toBe("column")
-    expect(root.children).toHaveLength(3)
+    // header + partsList + injected slack-spacer + disclaimer: this page has
+    // no absorber (no illustration), so measure-then-solve parks the leftover
+    // in ONE invisible spacer pinned just above the disclaimer.
+    expect(root.children).toHaveLength(4)
     // header: fixed strip, does not grow
     expect(root.children[0].grow).toBe(0)
     expect(root.children[0].basis).toBe(82)
-    // partsList: content, grows to fill
-    expect(root.children[1].grow).toBe(60)
-    // disclaimer: fixed strip, does not grow
-    expect(root.children[2].grow).toBe(0)
-    expect(root.children[2].basis).toBe(20)
+    // partsList: bounded content at its natural height (1 part = 20 header
+    // strip + 32 table row), never stretched by the plan weight anymore
+    expect(root.children[1].grow).toBe(0)
+    expect(root.children[1].basis).toBe(52)
+    // slack spacer: the only growing node
+    expect(root.children[2].grow).toBe(1)
+    // disclaimer: fixed strip, pinned to the bottom
+    expect(root.children[3].grow).toBe(0)
+    expect(root.children[3].basis).toBe(20)
+  })
+
+  it("gives a bounded band its measured height and routes ALL slack to the absorber, whatever the AI's weights say", () => {
+    const root = interpretPagePlan(
+      {
+        id: "p",
+        title: "P",
+        purpose: "overview",
+        regions: [
+          { type: "header", weight: 10 },
+          // the model absurdly over-weights the note (30) vs the illustration (40) -
+          // measure-then-solve must ignore that for the bounded note
+          { type: "note", note: "Nota corta.", weight: 30 },
+          { type: "illustration", weight: 40, slots: 1 },
+          { type: "disclaimer", weight: 10 },
+        ],
+      },
+      ctx
+    )
+    expect(root.children).toHaveLength(4) // no spacer injected - the illustration absorbs
+    const note = root.children[1]
+    const illustration = root.children[2]
+    // note: bounded at its wrapped-text natural height (a short line ≈ 30px), grow 0
+    expect(note.grow).toBe(0)
+    expect(note.basis).toBeLessThan(60)
+    expect(note.basis).toBeGreaterThan(0)
+    // illustration: the absorber - the only grower on the page
+    expect(illustration.grow).toBeGreaterThan(0)
   })
 
   it("renders planned pages into the same [{name,svg}] shape as buildAllPages", () => {

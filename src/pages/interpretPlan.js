@@ -15,6 +15,7 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { palette } from "../design/tokens.js"
 import { INSET, ROW } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
+import { measureRegion, selectedDesign } from "./measure.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
@@ -100,51 +101,59 @@ function safeWeight(w) {
   return typeof w === "number" && isFinite(w) && w > 0 ? w : 1
 }
 
-// Estimates each top-level region's allotted pixel height WITHOUT running a
-// full solve pass - a plain replay of solveLayout's own column math (fixed
-// bases subtracted first, remainder split by grow proportion among the
-// non-fixed regions), since the page's geometry (PAGE_H, PAGE_PAD, PAGE_GAP,
-// FIXED_BASIS) is entirely known ahead of time. This is what lets the split
-// compositor below decide row-vs-stack BEFORE building the tree, instead of
-// solving twice.
-function estimateRegionHeights(regions, grows) {
-  const n = regions.length
-  const totalGapPx = PAGE_GAP * Math.max(0, n - 1)
-  const fixedTotal = regions.reduce((sum, r) => sum + (FIXED_BASIS[r.type] || 0), 0)
-  const available = Math.max(0, PAGE_H - PAGE_PAD * 2 - totalGapPx - fixedTotal)
-  const growSum = regions.reduce((sum, r, i) => sum + (FIXED_BASIS[r.type] ? 0 : grows[i]), 0)
-  return regions.map((r, i) => (FIXED_BASIS[r.type] ? FIXED_BASIS[r.type] : growSum > 0 ? available * (grows[i] / growSum) : 0))
+// Content width available to a page's top-level regions.
+const CONTENT_W = PAGE_W - PAGE_PAD * 2
+
+// Measures a top-level node, treating a `split` as the composition it is:
+// side-by-side columns are as tall as their TALLEST column wants to be, and
+// a split absorbs page slack whenever ANY of its columns absorbs (the usual
+// case - a data column beside an illustration column). Leaf regions defer to
+// the shared measure registry (measure.js), the same numbers the renderers
+// draw with.
+function measureNode(region, page, ctx, width) {
+  if (region.type === "split") {
+    const inner = Array.isArray(region.regions) ? region.regions : []
+    const innerW = width / Math.max(1, inner.length)
+    const ms = inner.map((r) => measureRegion(r, page, ctx, innerW))
+    if (ms.some((m) => m.canAbsorb)) {
+      return { natural: null, min: Math.max(120, ...ms.map((m) => m.min)), canAbsorb: true }
+    }
+    return { natural: Math.max(0, ...ms.map((m) => m.natural || 0)), min: Math.max(0, ...ms.map((m) => m.min)), canAbsorb: false }
+  }
+  return measureRegion(region, page, ctx, width)
 }
 
-// The ideal (uncompressed) content height a bounded region NEEDS, as a pure
-// function of its data volume - independent of whatever width/height a split
-// column would otherwise stretch it into. Mirrors the row-height constants
-// each renderer already uses at its own "plenty of room" ceiling (compact
-// partsList rows, colorSpecs's ideal 30px row, embSpecs's ideal 16px row) so
-// the estimate and the actual render agree. Returns null for a region type
-// this can't be measured for (illustration, note, spacer, ...) - those always
-// stretch to fill whatever they're given, so they're never the "short" side
-// of a split.
+// The natural (uncompressed) content height a bounded region needs - null
+// for absorbers. Thin wrapper over the measure registry kept for the split
+// compositor's stack gate.
 function naturalContentHeight(region, page, ctx) {
-  if (region.type === "partsList") {
-    const parts = (ctx && ctx.parts) || []
-    const n = parts.filter((p) => p && p.on !== false).length
-    return TABLE_HEADER_H + n * COMPACT_ROW_H
-  }
-  if (region.type === "colorSpecs") {
-    const design = selectedDesign(page, ctx)
-    const n = ((design && design.colors) || []).filter((c) => c && c.hex).length
-    return n > 0 ? 34 + n * 30 : 0
-  }
-  if (region.type === "embSpecs") {
-    const design = selectedDesign(page, ctx)
-    const emb = design && design.emb
-    if (!emb) return 0
-    const fieldCount = 14 // matches the fixed `er` field list in renderEmbSpecs
-    const seqLen = emb.stopSeq && emb.stopSeq.length > 0 ? emb.stopSeq.length : 0
-    return 34 + (fieldCount + (seqLen > 0 ? 1 + seqLen : 0)) * 16
-  }
-  return null
+  const m = measureRegion(region, page, ctx, CONTENT_W)
+  return m.canAbsorb ? null : m.natural || 0
+}
+
+// Estimates each top-level region's allotted pixel height WITHOUT running a
+// full solve pass, mirroring the measure-then-solve sizing below: fixed
+// chrome takes its strip, bounded regions take their measured natural
+// height, and the remainder goes to the absorbers in proportion to their
+// plan weights. This is what lets the split compositor decide row-vs-stack
+// BEFORE building the tree, instead of solving twice.
+function estimateRegionHeights(regions, grows, page, ctx) {
+  const n = regions.length
+  const totalGapPx = PAGE_GAP * Math.max(0, n - 1)
+  const measures = regions.map((r) => measureNode(r, page, ctx, CONTENT_W))
+  let consumed = 0
+  let absorberGrow = 0
+  regions.forEach((r, i) => {
+    if (FIXED_BASIS[r.type]) consumed += FIXED_BASIS[r.type]
+    else if (measures[i].canAbsorb) absorberGrow += grows[i]
+    else consumed += measures[i].natural || 0
+  })
+  const slack = Math.max(0, PAGE_H - PAGE_PAD * 2 - totalGapPx - consumed)
+  return regions.map((r, i) => {
+    if (FIXED_BASIS[r.type]) return FIXED_BASIS[r.type]
+    if (measures[i].canAbsorb) return absorberGrow > 0 ? slack * (grows[i] / absorberGrow) : slack
+    return measures[i].natural || 0
+  })
 }
 
 // A bounded content block gets stacked below the illustration (instead of
@@ -219,24 +228,8 @@ export function normalizePlan(raw) {
   return { pages }
 }
 
-function selectedDesign(page, ctx) {
-  const designs = ctx && Array.isArray(ctx.designs) ? ctx.designs : []
-  if (designs.length === 0) return null
-  const purpose = page && typeof page.purpose === "string" ? page.purpose : ""
-  const token = purpose.startsWith("design:") ? purpose.slice("design:".length).trim() : ""
-  const cover = page && Array.isArray(page.covers) && page.covers.length > 0 ? String(page.covers[0]).trim() : ""
-  const key = token || cover
-  if (!key) return designs[0]
-
-  const numeric = Number(key)
-  if (Number.isInteger(numeric)) {
-    if (designs[numeric]) return designs[numeric]
-    if (designs[numeric - 1]) return designs[numeric - 1]
-  }
-
-  const needle = key.toLowerCase()
-  return designs.find((d) => d && typeof d.name === "string" && d.name.toLowerCase() === needle) || designs[0]
-}
+// selectedDesign now lives in measure.js (imported above) so the measure
+// pass and the renderers pick THE SAME design for a page.
 
 function renderNote(box, text) {
   const note = text || ""
@@ -259,12 +252,15 @@ function leafForRegion(region, page, ctx) {
   const txData = ctx && ctx.txData ? ctx.txData : null
   const hdr = ctx && ctx.hdr ? ctx.hdr : {}
 
-  // Structural chrome takes a fixed height; content blocks grow by their weight.
+  // Structural chrome takes a fixed height. Content blocks: interpretPagePlan
+  // pre-computes measure-then-solve sizing in region._sizing (bounded blocks
+  // at natural height, absorbers growing by weight); a region without it
+  // (split inner columns, direct calls) falls back to weight-driven grow.
   var fixed = FIXED_BASIS[region.type]
-  var sizing = fixed ? { basis: fixed, grow: 0, shrink: 0 } : { grow: region.grow }
+  var sizing = region._sizing || (fixed ? { basis: fixed, grow: 0, shrink: 0 } : { grow: region.grow })
   return leaf({
     ...sizing,
-    min: region.type === "spacer" ? 0 : 20,
+    min: sizing.min !== undefined ? sizing.min : region.type === "spacer" ? 0 : 20,
     // Tags this leaf so buildPlannedPages can find it post-solve and read its
     // ALLOTTED height - the box height depends only on the plan's weights,
     // never on how many parts are shown, so it's a stable measuring stick for
@@ -327,6 +323,10 @@ function leafForRegion(region, page, ctx) {
 function buildRegionNode(region, page, ctx, allottedHeight) {
   if (region.type === "split") {
     const inner = Array.isArray(region.regions) ? region.regions : []
+    // The split container itself carries the page-level measure-then-solve
+    // sizing (absorber grow / bounded natural basis) computed by
+    // interpretPagePlan; inner columns keep weight-driven WIDTH shares.
+    const containerSizing = region._sizing || { grow: region.grow }
 
     if (inner.length === 2 && allottedHeight) {
       const illuIdx = inner.findIndex((r) => r.type === "illustration")
@@ -339,14 +339,14 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
           // Illustration always on top regardless of the AI's original inner
           // order - it's the hero and the one region that benefits from
           // reclaiming the freed height, the content block is a caption below it.
-          return col({ grow: region.grow, gap: SPLIT_GAP }, [illuLeaf, contentLeaf])
+          return col({ ...containerSizing, gap: SPLIT_GAP }, [illuLeaf, contentLeaf])
         }
       }
     }
 
     const grows = weightsToGrow(inner)
     const children = inner.map((r, i) => leafForRegion({ ...r, grow: grows[i] }, page, ctx))
-    return row({ grow: region.grow, gap: SPLIT_GAP }, children)
+    return row({ ...containerSizing, gap: SPLIT_GAP }, children)
   }
   return leafForRegion(region, page, ctx)
 }
@@ -354,14 +354,41 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
 export function interpretPagePlan(page, ctx) {
   const normalized = normalizePlan({ pages: [page] }).pages[0]
   const grows = weightsToGrow(normalized.regions)
-  const heights = estimateRegionHeights(normalized.regions, grows)
-  const regions = normalized.regions.map((region, i) => ({ ...region, grow: grows[i] }))
   const safeCtx = ctx || {}
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan
   // call (tests) and the full buildPlannedPages path share one source of truth
   // for "which parts does this page actually show."
   const pageCtx = { ...safeCtx, parts: effectivePartsForPage(safeCtx.parts, normalized) }
-  return col({ padding: PAGE_PAD, gap: PAGE_GAP }, regions.map((region, i) => buildRegionNode(region, normalized, pageCtx, heights[i])))
+  const heights = estimateRegionHeights(normalized.regions, grows, normalized, pageCtx)
+
+  // ── Measure then solve ────────────────────────────────────────────────────
+  // Bounded data blocks take exactly their measured natural height (grow:0,
+  // compressible toward their legible min if the page genuinely overflows);
+  // absorbers (illustration/spacer, or a split containing one) split ALL the
+  // slack by their plan weights. The AI's weights now express PRIORITY among
+  // absorbers, not arbitrary heights for data blocks - a two-row table can no
+  // longer be stretched into a half-page band of white.
+  const measures = normalized.regions.map((r) => measureNode(r, normalized, pageCtx, CONTENT_W))
+  const hasAbsorber = measures.some((m) => m.canAbsorb)
+  const regions = normalized.regions.map((region, i) => {
+    const m = measures[i]
+    let _sizing
+    if (FIXED_BASIS[region.type]) _sizing = { basis: FIXED_BASIS[region.type], grow: 0, shrink: 0 }
+    else if (m.canAbsorb) _sizing = { grow: grows[i], min: m.min }
+    else _sizing = { basis: m.natural || 0, grow: 0, shrink: 1, min: m.min }
+    return { ...region, grow: grows[i], _sizing }
+  })
+
+  const nodes = regions.map((region, i) => buildRegionNode(region, normalized, pageCtx, heights[i]))
+  // A page with no absorber at all (pure data pages) parks the slack in ONE
+  // deliberate place - an invisible spacer before the last chrome strip - so
+  // the disclaimer stays pinned to the page bottom and the content reads
+  // top-anchored, instead of the leftover appearing as a random gap.
+  if (!hasAbsorber) {
+    const lastFixed = regions.length > 0 && FIXED_BASIS[regions[regions.length - 1].type] ? 1 : 0
+    nodes.splice(nodes.length - lastFixed, 0, leaf({ grow: 1, min: 0, render: () => "" }))
+  }
+  return col({ padding: PAGE_PAD, gap: PAGE_GAP }, nodes)
 }
 
 function pageName(page, i) {

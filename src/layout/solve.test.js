@@ -44,14 +44,14 @@ describe("solveLayout", () => {
     expect(resolved.children[1].width).toBe(100)
   })
 
-  it("clamps a growing child to its max", () => {
+  it("clamps a growing child to its max and hands the surplus to its sibling", () => {
     const tree = row({}, [leaf({ grow: 1, max: 60 }), leaf({ grow: 1 })])
     const resolved = solveLayout(tree, { width: 200, height: 50 })
     expect(resolved.children[0].width).toBe(60)
-    // the extra space beyond the clamped child's max is NOT redistributed in
-    // this simplified solver - documented in solve.js. The second child only
-    // gets its share of the original `remaining` pool.
-    expect(resolved.children[1].width).toBe(100)
+    // the surplus beyond the clamped child's max IS redistributed (multi-pass
+    // loop, see the "solveLayout redistribution" suite) - the sibling fills
+    // the container instead of leaving 40px of dead space at the end.
+    expect(resolved.children[1].width).toBe(140)
   })
 
   it("clamps a growing child to its min even with no free space", () => {
@@ -195,5 +195,45 @@ describe("solveLayout", () => {
     for (let i = 1; i < eight.children.length; i++) {
       expect(eight.children[i].y).toBe(eight.children[i - 1].y + eight.children[i - 1].height)
     }
+  })
+})
+
+describe("solveLayout redistribution (clamped children give space back)", () => {
+  // The old solver documented this as a known simplification: when a growing
+  // child clamps against its max, the surplus it couldn't take was simply
+  // LOST - it never reached its unclamped siblings, pooling as blank space at
+  // the end of the container instead. Same on the shrink side against min.
+  // These lock the flexbox-style multi-pass behavior.
+
+  it("re-distributes grow surplus from a max-clamped child to its siblings", () => {
+    const tree = row({}, [leaf({ grow: 1, max: 50 }), leaf({ grow: 1 })])
+    const solved = solveLayout(tree, { width: 300, height: 100 })
+    expect(solved.children[0].width).toBe(50)
+    // old behavior: 150 (its own share only), 100px lost. New: takes ALL the rest.
+    expect(solved.children[1].width).toBe(250)
+  })
+
+  it("handles cascading max clamps across multiple passes", () => {
+    const tree = row({}, [leaf({ grow: 1, max: 40 }), leaf({ grow: 1, max: 80 }), leaf({ grow: 1 })])
+    const solved = solveLayout(tree, { width: 300, height: 100 })
+    expect(solved.children[0].width).toBe(40)
+    expect(solved.children[1].width).toBe(80)
+    expect(solved.children[2].width).toBe(180)
+  })
+
+  it("re-distributes shrink overflow from a min-clamped child to its siblings", () => {
+    // 200+200 basis into 300: proportional shrink wants 150/150, but child A
+    // floors at min:180 - child B must absorb the extra 30 (down to 120).
+    const tree = row({}, [leaf({ basis: 200, min: 180 }), leaf({ basis: 200 })])
+    const solved = solveLayout(tree, { width: 300, height: 100 })
+    expect(solved.children[0].width).toBe(180)
+    expect(solved.children[1].width).toBe(120)
+  })
+
+  it("terminates cleanly when every child clamps (leftover is legitimately unfillable)", () => {
+    const tree = row({}, [leaf({ grow: 1, max: 60 }), leaf({ grow: 1, max: 60 })])
+    const solved = solveLayout(tree, { width: 300, height: 100 })
+    expect(solved.children[0].width).toBe(60)
+    expect(solved.children[1].width).toBe(60)
   })
 })

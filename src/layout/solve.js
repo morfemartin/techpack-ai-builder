@@ -13,12 +13,10 @@
 // "márgenes por porcentaje entre retículas": the gutters between major grid
 // blocks scale proportionally with the format instead of being fixed px.
 //
-// Known simplification vs. real flexbox: when both grow and shrink clamp
-// against min/max, leftover space from a clamped child is NOT redistributed
-// to siblings in a second pass. For tech-pack layouts (a handful of
-// well-behaved regions per page) this has not mattered in practice; if it
-// ever does, add a redistribution loop here rather than working around it
-// at the call site.
+// Clamped children DO give space back: grow/shrink run the classic flexbox
+// multi-pass loop - a child that hits max (growing) or min (shrinking) is
+// frozen at its clamp and the leftover re-distributes among its unfrozen
+// siblings on the next pass (see "solveLayout redistribution" tests).
 
 const AUTO = "auto"
 
@@ -111,27 +109,69 @@ export function solveLayout(node, outer) {
   const usedBasis = bases.reduce((a, b) => a + b, 0)
   const remaining = availableForBasis - usedBasis
 
+  // Multi-pass grow/shrink (the classic flexbox loop): a child that clamps
+  // against max (growing) or min (shrinking) is FROZEN at its clamp and only
+  // the space it actually consumed leaves the pool - the rest re-distributes
+  // among the unfrozen participants on the next pass, instead of being lost
+  // (which used to pool as blank space at the end of the container). Bounded
+  // by children.length passes; each pass either freezes someone or settles.
   const mainSizes = bases.slice()
+  const shrinkWeight = (c, i) => (c.shrink === undefined ? 1 : c.shrink) * bases[i]
   if (remaining > 0) {
-    const totalGrow = children.reduce((a, c) => a + (c.grow || 0), 0)
-    if (totalGrow > 0) {
-      children.forEach((c, i) => {
-        const grow = c.grow || 0
-        if (grow <= 0) return
-        const extra = remaining * (grow / totalGrow)
-        mainSizes[i] = Math.min(Math.max(bases[i] + extra, minOf(c)), maxOf(c))
-      })
+    const frozen = children.map((c) => (c.grow || 0) <= 0)
+    let pool = remaining
+    for (let pass = 0; pass < children.length; pass++) {
+      let activeGrow = 0
+      for (let i = 0; i < children.length; i++) if (!frozen[i]) activeGrow += children[i].grow || 0
+      if (activeGrow <= 0 || pool <= 1e-9) break
+      let clampedThisPass = false
+      let consumedByClamped = 0
+      for (let i = 0; i < children.length; i++) {
+        if (frozen[i]) continue
+        const candidate = mainSizes[i] + pool * ((children[i].grow || 0) / activeGrow)
+        const max = maxOf(children[i])
+        if (candidate >= max) {
+          consumedByClamped += max - mainSizes[i]
+          mainSizes[i] = max
+          frozen[i] = true
+          clampedThisPass = true
+        }
+      }
+      if (!clampedThisPass) {
+        for (let i = 0; i < children.length; i++) {
+          if (!frozen[i]) mainSizes[i] += pool * ((children[i].grow || 0) / activeGrow)
+        }
+        break
+      }
+      pool -= consumedByClamped
     }
   } else if (remaining < 0) {
-    const totalShrinkWeight = children.reduce((a, c, i) => a + (c.shrink === undefined ? 1 : c.shrink) * bases[i], 0)
-    if (totalShrinkWeight > 0) {
-      children.forEach((c, i) => {
-        const shrink = c.shrink === undefined ? 1 : c.shrink
-        const weight = shrink * bases[i]
-        if (weight <= 0) return
-        const delta = remaining * (weight / totalShrinkWeight)
-        mainSizes[i] = Math.min(Math.max(bases[i] + delta, minOf(c)), maxOf(c))
-      })
+    const frozen = children.map((c, i) => shrinkWeight(c, i) <= 0)
+    let pool = -remaining // amount that must be removed
+    for (let pass = 0; pass < children.length; pass++) {
+      let activeWeight = 0
+      for (let i = 0; i < children.length; i++) if (!frozen[i]) activeWeight += shrinkWeight(children[i], i)
+      if (activeWeight <= 0 || pool <= 1e-9) break
+      let clampedThisPass = false
+      let removedByClamped = 0
+      for (let i = 0; i < children.length; i++) {
+        if (frozen[i]) continue
+        const candidate = mainSizes[i] - pool * (shrinkWeight(children[i], i) / activeWeight)
+        const min = minOf(children[i])
+        if (candidate <= min) {
+          removedByClamped += mainSizes[i] - min
+          mainSizes[i] = min
+          frozen[i] = true
+          clampedThisPass = true
+        }
+      }
+      if (!clampedThisPass) {
+        for (let i = 0; i < children.length; i++) {
+          if (!frozen[i]) mainSizes[i] -= pool * (shrinkWeight(children[i], i) / activeWeight)
+        }
+        break
+      }
+      pool -= removedByClamped
     }
   }
 
