@@ -98,6 +98,12 @@ El porqué de cada decisión (impresión, escala de grises, tipografía mono par
 datos, la retícula ligada al motor flexbox) está justificado en
 **[docs/UX-DESIGN.md](docs/UX-DESIGN.md)**.
 
+El motor de layout (grid, alineación, espacio en blanco y el compositor
+row-vs-stack) se desarrolla y prueba de forma aislada con un banco de pruebas
+visual — **[docs/layout-lab/](docs/layout-lab/README.md)** — que renderiza el
+compositor real contra entradas fijas, sin IA ni el wizard. _(Docs going
+forward are written in English.)_
+
 ## Roadmap
 
 - [x] v0.1 — arquitectura multi-prenda + Gorra como primer tipo completo

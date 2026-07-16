@@ -250,6 +250,23 @@ describe("split composition (2D layout)", () => {
     expect(splitNode.children[1].basis).toBe(66)
   })
 
+  // Counterpart to the stack rule: only a partsList reflows to a full-width
+  // strip. A colorSpecs card is narrow, left-weighted content - stacking it
+  // full-width would move the dead space to the RIGHT of a wide band, which
+  // looks worse, so it stays a side column even when short (see the
+  // STACKABLE_TYPES decision + docs/layout-lab before/after). Here the single
+  // color would trip the height threshold if it were stackable; assert it
+  // still resolves to a side-by-side row.
+  it("keeps colorSpecs as a side-by-side column even when short (does NOT stack full-width)", () => {
+    const root = interpretPagePlan(
+      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      ctx
+    )
+    const splitNode = root.children[1]
+    expect(splitNode.direction).toBe("row")
+    expect(splitNode.children).toHaveLength(2)
+  })
+
   it("renders both columns of a split into the same page svg", () => {
     const pages = buildPlannedPages(
       { pages: [{ id: "split-page", title: "Split", purpose: "overview", regions: [{ type: "split", weight: 100, regions: [{ type: "partsList", weight: 40 }, { type: "illustration", weight: 60, slots: 1, refs: ["Frente"] }] }] }] },

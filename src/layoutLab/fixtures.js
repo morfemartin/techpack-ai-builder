@@ -120,9 +120,10 @@ export const FIXTURES = [
   {
     id: "C2-colorspecs-short",
     dataset: "skirt",
-    title: "C2 · colorSpecs corto (2 colores) → APILA",
+    title: "C2 · colorSpecs corto (2 colores) → sigue en FILA",
     tests: "misma página que C pero con la cápsula de 2 tonos.",
-    expected: "Ilustración arriba; la carta de 2 colores abajo, compacta. Contraste directo con C.",
+    expected:
+      "Columna lateral con algo de espacio debajo — a propósito. Las cartas de color NO apilan a ancho completo (ver STACKABLE_TYPES); ese es su idioma de ficha.",
     plan: {
       pages: [
         {

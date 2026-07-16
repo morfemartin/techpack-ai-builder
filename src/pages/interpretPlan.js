@@ -152,6 +152,19 @@ function naturalContentHeight(region, page, ctx) {
 const STACK_MAX_RATIO = 0.5
 const STACK_CONTENT_PAD = 16
 
+// Only these content types stack below the illustration when short. The key
+// distinction is HORIZONTAL fill: a partsList row is a wide 3-column record
+// (#/spec/detail) that reads well stretched to the full page width, so a
+// short parts list becomes a clean full-width strip under the illustration.
+// A colorSpecs card and an embSpecs sheet are the opposite - narrow, left-
+// weighted content (a swatch + a line, a label:value pair). Stacking those
+// full-width just moves the dead space from *below* a side column to the
+// *right* of a wide band, which looks worse - a color card reads as designed
+// as a side column even with some room beneath it. So color/emb specs stay
+// side-by-side (their tech-pack idiom); only partsList reflows to a stack.
+// See docs/layout-lab for the visual before/after that drove this rule.
+const STACKABLE_TYPES = new Set(["partsList"])
+
 // Normalizes region weights into flex `grow` values that sum to 100, keeping
 // their proportions. A missing/invalid/non-positive weight counts as 1 (the
 // minimum share) so a region is never allotted zero height by accident.
@@ -299,14 +312,15 @@ function leafForRegion(region, page, ctx) {
 // horizontal `row` whose children are its inner leaf regions, each given a
 // horizontal grow from its own weight - this is what lets a page place a
 // narrow numbered partsList beside a wide illustration (the real tech-pack
-// idiom). But when the split pairs an illustration with a SHORT bounded
-// content block (a one-row specs table, a handful of colors), stretching
-// that block into a full-height side column just to match the illustration
-// is the "lateral layout with dead white space" the model can't reason about
-// on its own - so when `allottedHeight` shows the content block needs far
-// less than its column would give it, this stacks instead: illustration on
-// top (full width, most of the height), content block below at its own
-// natural height. Everything else stays a leaf.
+// idiom). But when the split pairs an illustration with a SHORT parts list,
+// stretching that table into a full-height side column just to match the
+// illustration is the "lateral layout with dead white space" the model can't
+// reason about on its own - so when `allottedHeight` shows the table needs
+// far less than its column would give it, this stacks instead: illustration
+// on top (full width, most of the height), the table below at its own natural
+// height as a full-width strip. Restricted to STACKABLE_TYPES (partsList) -
+// see that constant for why color/emb specs stay side columns. Everything
+// else stays a leaf.
 function buildRegionNode(region, page, ctx, allottedHeight) {
   if (region.type === "split") {
     const inner = Array.isArray(region.regions) ? region.regions : []
@@ -314,7 +328,7 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
     if (inner.length === 2 && allottedHeight) {
       const illuIdx = inner.findIndex((r) => r.type === "illustration")
       const otherIdx = illuIdx === 0 ? 1 : illuIdx === 1 ? 0 : -1
-      if (illuIdx !== -1 && otherIdx !== -1) {
+      if (illuIdx !== -1 && otherIdx !== -1 && STACKABLE_TYPES.has(inner[otherIdx].type)) {
         const natural = naturalContentHeight(inner[otherIdx], page, ctx)
         if (natural !== null && natural > 0 && natural < allottedHeight * STACK_MAX_RATIO) {
           const contentLeaf = { ...leafForRegion({ ...inner[otherIdx], grow: 0 }, page, ctx), basis: natural + STACK_CONTENT_PAD, grow: 0, shrink: 0 }
