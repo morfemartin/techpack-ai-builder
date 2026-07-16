@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layout Lab · TechPack</title>
+    <!--
+      Herramienta de desarrollo (NO forma parte de la app ni del build de
+      producción — `vite build` solo toma index.html). Banco de pruebas del
+      motor de layout: renderiza fixtures fijos sin tocar la IA ni el chat.
+    -->
+    <style>
+      :root {
+        --ink: #141518;
+        --paper: #e8eaef;
+        --line: #cfd3da;
+        --blue: #1a3fb0;
+        --red: #e5352b;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --ui: -apple-system, "Helvetica Neue", Arial, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--ui); }
+
+      .lab-head {
+        position: sticky; top: 0; z-index: 10;
+        background: var(--ink); color: #fff;
+        padding: 16px 24px; border-bottom: 3px solid var(--red);
+        display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title controls" "toc toc";
+        gap: 12px 24px; align-items: center;
+      }
+      .lab-head .title { grid-area: title; }
+      .lab-head h1 { margin: 0; font-size: 20px; letter-spacing: 0.5px; }
+      .lab-head p { margin: 2px 0 0; font-size: 12px; font-family: var(--mono); color: #9aa0ab; }
+      .controls { grid-area: controls; display: flex; gap: 18px; font-size: 13px; }
+      .controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+      .toc { grid-area: toc; display: flex; flex-wrap: wrap; gap: 6px; }
+      .toc a {
+        font-family: var(--mono); font-size: 11px; text-decoration: none;
+        color: #fff; background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 2px;
+      }
+      .toc a:hover { background: var(--blue); }
+
+      main { padding: 24px; display: flex; flex-direction: column; gap: 40px; max-width: 1400px; margin: 0 auto; }
+
+      .fixture { scroll-margin-top: 120px; }
+      .fx-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 6px; }
+      .fx-head h2 { margin: 0; font-size: 16px; }
+      .chip { font-family: var(--mono); font-size: 11px; background: var(--blue); color: #fff; padding: 2px 8px; }
+
+      .meta { display: flex; gap: 32px; margin: 10px 0 14px; }
+      .meta div { display: flex; flex-direction: column; gap: 2px; }
+      .meta dt { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--red); }
+      .meta dd { margin: 0; font-size: 12.5px; max-width: 620px; line-height: 1.4; }
+
+      .pages { display: flex; flex-wrap: wrap; gap: 20px; }
+      .page { margin: 0; }
+      .page-frame { position: relative; width: 620px; max-width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,0.18); background: #fff; }
+      .page-frame svg { display: block; width: 100%; height: auto; }
+      .page-frame .overlay { position: absolute; inset: 0; pointer-events: none; }
+      figcaption { font-family: var(--mono); font-size: 11px; color: #666; margin-top: 6px; }
+
+      .err { font-family: var(--mono); font-size: 12px; color: #fff; background: var(--red); padding: 10px 12px; border-radius: 2px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/layoutLab/main.js"></script>
+  </body>
+</html>
