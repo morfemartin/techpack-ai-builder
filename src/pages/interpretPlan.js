@@ -16,6 +16,7 @@ import { palette } from "../design/tokens.js"
 import { INSET, ROW } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { measureRegion, selectedDesign } from "./measure.js"
+import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
@@ -284,7 +285,18 @@ function leafForRegion(region, page, ctx) {
         return s
       }
       if (region.type === "illustration") {
-        return renderIllustrationZone(box, { slots: region.slots, refs: region.refs, note: region.note || (design && design.illustrationBrief) || "" })
+        // Structured per-slot briefs: the AI's `briefs[]` normalized against
+        // the page's design data. On non-design pages the design fallback is
+        // suppressed so derived defaults describe the GARMENT, not whichever
+        // design happens to be first.
+        const isDesignPage = typeof page.purpose === "string" && page.purpose.startsWith("design:")
+        const briefsCtx = isDesignPage ? ctx : { ...ctx, designs: [] }
+        return renderIllustrationZone(box, {
+          slots: region.slots,
+          refs: region.refs,
+          briefs: normalizeSlotBriefs(region, page, briefsCtx),
+          note: region.note || (design && design.illustrationBrief) || "",
+        })
       }
       if (region.type === "partsList") {
         // ctx.parts already reflects this page's pieces (see interpretPagePlan)

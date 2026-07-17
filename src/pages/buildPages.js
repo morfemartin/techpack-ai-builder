@@ -5,6 +5,7 @@ import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
 import { COL, CHIP, INSET, ROW, TEXT_PAD } from "../design/metrics.js"
+import { briefLines } from "./briefs.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, startIndex } = {}) {
@@ -164,7 +165,7 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   return s
 }
 
-export function renderIllustrationZone(box, { slots, refs, note } = {}) {
+export function renderIllustrationZone(box, { slots, refs, note, briefs } = {}) {
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
   var noteText = note || ""
   // The illustration is the hero: it takes the WHOLE box (no note band carved
@@ -197,12 +198,38 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
     s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, i + 1)
     s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), 9, true, "start", palette.ink.hex)
 
-    if (i === 0 && noteText) {
-      // fitText shrinks the brief to whatever size makes it fit the available
-      // cell - a long, detailed brief (the kind a real illustrator actually
-      // needs) never gets silently cut off or run into the cell's edge.
-      var innerW = Math.max(40, cellW - 44)
-      var innerH = cellH * 0.6
+    var innerW = Math.max(40, cellW - 44)
+    var innerH = cellH * 0.6
+
+    var brief = Array.isArray(briefs) && briefs[i] ? briefs[i] : null
+    if (brief) {
+      // Structured per-slot brief: pick the richest template mode whose
+      // wrapped lines actually fit this cell (full → checklist → title) -
+      // the degradation ladder means EVERY slot explains itself legibly,
+      // however small the grid makes its cell. Slot 0 also appends the AI's
+      // narrative note below the structured skeleton when there is one.
+      var body = null
+      var modes = ["full", "checklist", "title"]
+      for (var mi = 0; mi < modes.length; mi++) {
+        var candidate = briefLines(brief, modes[mi])
+        if (i === 0 && noteText && modes[mi] !== "title") candidate = candidate.concat([noteText])
+        var wrapped = []
+        candidate.forEach(function (line) {
+          wrapped = wrapped.concat(wrapLines(line, innerW, 9.5))
+        })
+        if (wrapped.length * 13 <= innerH || modes[mi] === "title") {
+          body = wrapped.slice(0, Math.max(2, Math.floor(innerH / 13)))
+          break
+        }
+      }
+      var by0 = y + cellH / 2 - (body.length * 13) / 2 + 6
+      s += TX(x + cellW / 2, by0 - 13 - 4, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
+      body.forEach(function (line, li) {
+        s += TX(x + cellW / 2, by0 + li * 13, line, 9.5, li === 0, "middle", "#9AA0AB")
+      })
+    } else if (i === 0 && noteText) {
+      // Legacy path (registered garments / plans without structured briefs):
+      // fitText shrinks the narrative brief until it fits the primary cell.
       var fit = fitText(noteText, innerW, innerH, { maxSize: 11, minSize: 7.5 })
       var startY = y + cellH / 2 - (fit.lines.length * fit.lineHeight) / 2 + fit.lineHeight / 2
       s += TX(x + cellW / 2, startY - fit.lineHeight - 6, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
