@@ -21,6 +21,8 @@ import { EmbForm } from "./components/EmbForm.jsx"
 import { SvgModal } from "./components/SvgModal.jsx"
 import { Preview } from "./components/Preview.jsx"
 import { GarmentChat } from "./components/GarmentChat.jsx"
+import { ReviewChat } from "./components/ReviewChat.jsx"
+import { buildReviewFindings } from "./core/reviewDiff.js"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
@@ -165,6 +167,8 @@ export default function App() {
   const [plannedPreviewError, setPlannedPreviewError] = useState(null)
   const [monoMode, setMonoMode] = useState(false) // grayscale toggle - render-time only, never re-triggers AI planning
   const [viewAllPages, setViewAllPages] = useState(false) // "see every page at once" contact sheet
+  const [reviewFindings, setReviewFindings] = useState(null) // problems from the pre-download intent-vs-document diff
+  const [pendingPages, setPendingPages] = useState(null) // the generated pages held behind the review gate
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -409,7 +413,7 @@ export default function App() {
     }
   }
 
-  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages } = {}) {
+  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan } = {}) {
     var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
     function publishPages(pages) {
       if (onPages) onPages(pages)
@@ -443,6 +447,10 @@ export default function App() {
         var rendered = buildPlannedPages({ pages: plannedPages }, ctx)
         publishPages(outline.pages.map((p, idx) => (idx < rendered.length ? rendered[idx] : placeholders[idx])))
       }
+      // Hand the planned document (pages with their regions) to the caller so
+      // the pre-download review can diff intake intent against what each page
+      // actually carries.
+      if (onPlan) onPlan({ pages: plannedPages })
       return buildPlannedPages({ pages: plannedPages }, ctx)
     } finally {
       setDocumentPlanning(false)
@@ -450,24 +458,52 @@ export default function App() {
     }
   }
 
+  // Applies grayscale (if toggled) and opens the SVG export modal. The single
+  // choke point every export path funnels through, AFTER the review gate.
+  function publishForExport(pages) {
+    if (monoMode) pages = pages.map((p) => ({ ...p, svg: toGrayscale(p.svg) }))
+    setSvgPages(pages)
+  }
+
   async function handleGenerate(lang) {
     var tx = await ensureTx(lang)
     var pages
+    var plan = null
     if (garmentId === "custom" && customGarment) {
       try {
-        pages = await buildCustomDocumentPages(lang, tx)
+        pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p) })
       } catch {
         pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
       }
     } else {
       pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
     }
-    // Grayscale is a pure render-time post-process (toGrayscale maps every hex
-    // to its luminance gray) - applied here so the EXPORTED file matches
-    // whatever the user was looking at, without threading a mono flag through
-    // the whole planning pipeline.
-    if (monoMode) pages = pages.map((p) => ({ ...p, svg: toGrayscale(p.svg) }))
-    setSvgPages(pages)
+
+    // Pre-download review round: diff the user's intake intent against the
+    // generated document. If anything is missing or unplaced, hold the pages
+    // behind the review chat; otherwise export straight away. Only the
+    // AI-planned custom path carries a plan to diff - registered garments use
+    // the fixed template and skip the review.
+    if (plan) {
+      var findings = buildReviewFindings({ hdr, parts, designs }, plan)
+      var problems = findings.filter((f) => f.kind === "missing" || f.kind === "unplaced")
+      if (problems.length > 0) {
+        setPendingPages(pages)
+        setReviewFindings(findings)
+        return
+      }
+    }
+    publishForExport(pages)
+  }
+
+  function finishReview() {
+    // The user walked (or skipped) the review; export what was generated.
+    // Corrections they made to parts/designs already live in state and will
+    // re-plan on the next generate; here we ship the reviewed document.
+    const pages = pendingPages
+    setReviewFindings(null)
+    setPendingPages(null)
+    if (pages) publishForExport(pages)
   }
 
   var previewPlanKey = step === 5 && garmentId === "custom" && customGarment
@@ -995,6 +1031,7 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: C.shell.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.white.hex }}>
       {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
+      {reviewFindings && <ReviewChat findings={reviewFindings} onComplete={finishReview} onSkip={finishReview} />}
       <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
         {/* Wordmark — Morfe mark in white on the black shell */}
         <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>
