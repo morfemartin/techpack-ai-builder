@@ -61,6 +61,16 @@
       figcaption { font-family: var(--mono); font-size: 11px; color: #666; margin-top: 6px; }
 
       .err { font-family: var(--mono); font-size: 12px; color: #fff; background: var(--red); padding: 10px 12px; border-radius: 2px; }
+
+      .controls .tab { font-family: var(--ui); font-size: 13px; padding: 4px 12px; background: rgba(255,255,255,0.1); color: #fff; border: none; cursor: pointer; }
+      .controls .tab.on { background: var(--blue); }
+      .ai-controls { display: flex; gap: 10px; margin: 12px 0; }
+      .ai-controls select, .ai-controls button { font-family: var(--ui); font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+      .ai-controls button { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 700; }
+      .ai-controls button:disabled { opacity: 0.5; cursor: default; }
+      .ai-log { font-family: var(--mono); font-size: 11px; color: #333; background: #fff; border: 1px solid var(--line); padding: 8px 10px; margin-bottom: 14px; max-height: 220px; overflow-y: auto; }
+      .ai-log .log-line { padding: 1px 0; border-bottom: 1px solid #f0f0f0; }
+      code { font-family: var(--mono); font-size: 0.9em; background: rgba(0,0,0,0.06); padding: 1px 4px; }
     </style>
   </head>
   <body>

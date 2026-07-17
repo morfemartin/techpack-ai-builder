@@ -153,8 +153,10 @@ export function briefLines(brief, mode) {
   const lines = [];
 
   // Title lines always present in all modes
+  // The renderer already prints a "BRIEF PARA EL ILUSTRADOR" caption above,
+  // so the title line is just the view name (no repeated "BRIEF").
   const viewUpper = typeof brief.view === 'string' ? brief.view.toUpperCase() : '';
-  lines.push('BRIEF · ' + viewUpper);
+  lines.push(viewUpper);
   if (brief.garmentPart && brief.garmentPart.length > 0) {
     lines.push(brief.garmentPart);
   }

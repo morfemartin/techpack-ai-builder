@@ -87,6 +87,24 @@ A few of the results rendered:
 
 ---
 
+## AI-plan tab (Phase 2)
+
+The **AI plan** tab runs the real pipeline — `planDocumentOutline` +
+`planPageLayout` + the page contracts — against a chosen dataset through the
+dev proxy, so the whole plan → contract → render path can be watched end to
+end without the six-step wizard. Pick a garment, hit **Plan with AI**, and the
+log shows each outline and per-page call, whether the contract validated
+clean after repair, and the rendered pages as they arrive. (Needs `npm run
+dev` and a working DeepSeek proxy; it degrades to a logged error if the
+upstream times out.)
+
+The **Grid** toggle overlays the shared `COL` column template (blue dashed
+guides) and a whole-pixel baseline, so P1 alignment can be checked against the
+exact metrics every renderer now shares.
+
+See [../layout-contracts.md](../layout-contracts.md) for the full architecture
+behind these tabs.
+
 ## Adding a scenario
 
 1. Add or extend a garment in `datasets.js` (it only needs `hdr`, `parts`, `designs`, `garment.partLabels`).
