@@ -1,6 +1,6 @@
 # Layout Lab
 
-A developer-only harness for testing the tech-pack **layout engine in isolation** — no AI, no network, no six-step wizard, no chat. It renders the real page compositor against fixed inputs so layout behavior (grid, alignment, whitespace, and the row-vs-stack decision) can be inspected deterministically and reviewed visually.
+A developer-only harness for testing the tech-pack **layout engine and AI planning pipeline** without the six-step wizard or chat. Its Design system tab renders fixed inputs deterministically; its AI plan tab exercises the live planner with contract fallbacks.
 
 > Open it with the dev server running: **`npm run dev`** → [http://localhost:3001/layout-lab.html](http://localhost:3001/layout-lab.html)
 > It is **not** part of the production build — `vite build` only bundles `index.html`.
@@ -16,12 +16,12 @@ A generated tech-pack page is produced in two independent stages:
 
 When a page looks wrong, the first question is always: *is it a bad plan, or a bad layout?* You can't answer that while the plan is coming from a live, non-deterministic model that is also subject to network timeouts. So the Lab freezes stage 1 with hand-written **fixtures** and exercises only stage 2. Same inputs, same output, every time.
 
-This is **Phase 1** of a two-phase test plan:
+Both phases of the test plan are available:
 
 | Phase | What's fixed | What's tested | AI / network |
 | --- | --- | --- | --- |
-| **1 · Design system** (this doc) | The plan (hand-written fixtures) | The layout engine only | None |
-| **2 · Plan + design** (next) | Only the garment datasets | The AI planner **and** the layout | AI planner, no wizard/chat |
+| **1 · Design system** | The plan (hand-written fixtures) | Layout, contracts, briefs, review diff | None |
+| **2 · Plan + design** | Only the garment datasets | The AI planner **and** the layout | AI planner with deterministic fallback, no wizard/chat |
 
 Phase 2 reuses the exact same garment datasets but lets `planDocumentOutline` + `planPageLayout` generate the plan, so the whole pipeline is exercised while still skipping the questionnaire and the chat.
 
@@ -30,8 +30,8 @@ Phase 2 reuses the exact same garment datasets but lets `planDocumentOutline` + 
 ## What's in it
 
 - **`datasets.js`** — 5 complex garments with unique designs, each defining the `ctx` (header, parts, designs) the engine consumes: a technical 3-in-1 parka, an oversized hoodie, a pleated midi skirt, a wool/leather varsity jacket, and a sublimated bikini set.
-- **`fixtures.js`** — 9 scenario plans, each pinned to a dataset and labelled with **what it tests** and the **expected** result.
-- **`main.js`** — renders every fixture with `buildPlannedPages(...)`, plus **grayscale** and **grid-overlay** toggles (the overlay draws a 12-column grid + baseline + margin so alignment can be judged by eye).
+- **`fixtures.js`** — 13 scenario plans, including dedicated measure-pass, contract-repair, per-slot brief, and review-diff samples.
+- **`main.js`** — renders every fixture with `buildPlannedPages(...)`, displays deterministic diagnostics, and provides **grayscale** and **grid-overlay** toggles.
 
 ---
 
@@ -74,6 +74,10 @@ Compositor decision was verified against the layout tree directly, not by eye.
 | **F** · pagination | Parka (16 parts) | Parts list in a short band | **2 pages** — continues 1…16, nothing dropped |
 | **G** · note block | Bikini | Note band + full-width illustration | No split — note over illustration |
 | **H** · full document | Varsity | 4-page doc (overview + 3 designs) | Coherent; each design uses its own data |
+| **I** · measure pass | Bikini | Bounded one-row BOM + absorber | Compact strip; illustration receives slack |
+| **J** · contract repair | Hoodie | Invalid design page | Forbidden BOM dropped; mandatory regions inserted |
+| **K** · per-slot briefs | Parka | Two distinct structured briefs | Each art board carries its own instructions |
+| **L** · review diff | Varsity | Three omitted design pages | Every omission appears in diagnostics |
 
 A few of the results rendered:
 
@@ -95,8 +99,9 @@ dev proxy, so the whole plan → contract → render path can be watched end to
 end without the six-step wizard. Pick a garment, hit **Plan with AI**, and the
 log shows each outline and per-page call, whether the contract validated
 clean after repair, and the rendered pages as they arrive. (Needs `npm run
-dev` and a working DeepSeek proxy; it degrades to a logged error if the
-upstream times out.)
+dev` and the local proxy. If DeepSeek times out or reports exhausted capacity,
+the log identifies the failure and renders the deterministic contract fallback
+instead of leaving the Lab stalled.)
 
 The **Grid** toggle overlays the shared `COL` column template (blue dashed
 guides) and a whole-pixel baseline, so P1 alignment can be checked against the

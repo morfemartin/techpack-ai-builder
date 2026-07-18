@@ -89,6 +89,13 @@ describe("buildReviewFindings", () => {
     expect(emb.kind).toBe("unplaced")
   })
 
+  it("does not treat an empty embroidery form as an unplaced worksheet", () => {
+    const emptyEmbIntake = JSON.parse(JSON.stringify(intake))
+    emptyEmbIntake.designs[1].emb = { machine: "", stitches: "", stopSeq: [] }
+    const findings = buildReviewFindings(emptyEmbIntake, document)
+    expect(findings.find((f) => f.topic === "design-emb" && f.field === "Ghost")).toBeUndefined()
+  })
+
   it("never crashes on empty inputs", () => {
     expect(buildReviewFindings({}, {})).toEqual(expect.any(Array))
     expect(buildReviewFindings(null, null)).toEqual(expect.any(Array))

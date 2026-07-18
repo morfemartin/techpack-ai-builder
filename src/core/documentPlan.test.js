@@ -7,12 +7,24 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { extractLastCompletedRegionType, fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "./documentPlan.js"
+import { extractLastCompletedRegionType, fallbackDocumentOutline, planDocumentOutline, planPageLayout, withPlanningTimeout } from "./documentPlan.js"
 
 describe("document plan AI wrappers", () => {
   beforeEach(() => {
     deepseekChat.mockReset()
     deepseekChatStream.mockReset()
+  })
+
+  it("bounds stalled planning calls so the caller can use its fallback", async () => {
+    vi.useFakeTimers()
+    try {
+      const result = withPlanningTimeout(new Promise(() => {}), 25)
+      const rejection = expect(result).rejects.toThrow("planning_timeout")
+      await vi.advanceTimersByTimeAsync(25)
+      await rejection
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("normalizes an outline response into page descriptors", async () => {

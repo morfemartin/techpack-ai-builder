@@ -17,6 +17,7 @@
 import { buildPlannedPages } from "../pages/interpretPlan.js"
 import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
 import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
+import { buildReviewFindings, summarizeConfirmed } from "../core/reviewDiff.js"
 import { COL } from "../design/metrics.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
@@ -69,12 +70,42 @@ function pageFigure(p) {
     </figure>`
 }
 
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
 function renderFixture(fx) {
   const dataset = DATASETS[fx.dataset]
   let pagesHtml = ""
   let error = ""
+  let diagnostics = []
   try {
-    const pages = buildPlannedPages(fx.plan, ctxFor(dataset), { mono: state.mono })
+    const ctx = ctxFor(dataset)
+    let plan = fx.plan
+    if (fx.contractRepair) {
+      plan = {
+        pages: fx.plan.pages.map((page) => {
+          const result = repairPage(page, ctx)
+          diagnostics.push(...result.repairs.map((repair) => "contract: " + repair))
+          const violations = validatePage(result.page, ctx)
+          diagnostics.push("contract clean after repair: " + (violations.length === 0 ? "yes" : "NO"))
+          return result.page
+        }),
+      }
+    }
+    if (fx.reviewSample) {
+      const findings = buildReviewFindings(ctx, plan)
+      const confirmed = summarizeConfirmed(findings)
+      diagnostics.push(`confirmed: ${confirmed.header} header · ${confirmed.parts} parts · ${confirmed.designs} designs`)
+      findings
+        .filter((finding) => finding.kind !== "confirmed")
+        .forEach((finding) => diagnostics.push(`${finding.kind}: ${finding.topic}:${finding.field}`))
+    }
+    const pages = buildPlannedPages(plan, ctx, { mono: state.mono })
     pagesHtml = pages.map(pageFigure).join("")
   } catch (e) {
     error = `<div class="err">Error al renderizar: ${String((e && e.message) || e)}</div>`
@@ -86,6 +117,7 @@ function renderFixture(fx) {
         <div><dt>Tests</dt><dd>${fx.tests}</dd></div>
         <div><dt>Expected</dt><dd>${fx.expected}</dd></div>
       </dl>
+      ${diagnostics.length ? `<div class="diagnostics">${diagnostics.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : ""}
       ${error}
       <div class="pages">${pagesHtml}</div>
     </section>`

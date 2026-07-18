@@ -22,6 +22,7 @@
 
 import { ROW } from "../design/metrics.js"
 import { wrapLines } from "../core/svgPrimitives.js"
+import { hasEmbSpecs } from "../core/helpers.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
 // wins, then the page's first `covers` entry, then the first design. Moved
@@ -84,7 +85,7 @@ export function measureRegion(region, page, ctx, width) {
 
   if (type === "embSpecs") {
     const design = selectedDesign(page, ctx)
-    const emb = design && design.emb ? design.emb : null
+    const emb = design && hasEmbSpecs(design.emb) ? design.emb : null
     if (!emb) return { natural: 0, min: 0, canAbsorb: false }
     const stopSeq = Array.isArray(emb.stopSeq) ? emb.stopSeq : []
     const totalRows = 14 + (stopSeq.length > 0 ? 1 + stopSeq.length : 0)

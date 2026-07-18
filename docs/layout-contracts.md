@@ -130,6 +130,24 @@ bounded DeepSeek call just rephrases them conversationally. Confirmed data is
 a one-line summary, never re-asked. Always skippable — the review protects the
 user, it never holds the download hostage.
 
+`applyReviewAnswers` is the write-back boundary. Completing the walk applies
+answers to cloned intake data, repairs the outline and affected pages, then
+commits the new state only after the corrected SVG document renders. Choosing
+to remove a part, design, color card, or embroidery worksheet deletes that data
+from the project. **Download anyway** is a separate path and performs no
+mutation. Only structurally affected pages are sent back to the AI planner;
+all provider failures fall back to `repairPage`.
+
+The outline, every page, and each intake-analysis phase also have an external
+time budget. When DeepSeek does not answer, the wizard uses the contractual
+outline/layout fallback or continues without designs/briefs instead of staying
+blocked behind the provider's internal retries.
+
+Embroidery presence is based on `hasEmbSpecs`, not object truthiness. The UI
+creates every design with an `EMPTY_EMB` object, and that empty form must not
+create an embroidery page, consume layout height, or appear as an unplaced
+review finding.
+
 ---
 
 ## Why DeepSeek can execute this

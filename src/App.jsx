@@ -10,7 +10,8 @@ import { toGrayscale } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
-import { planDocumentOutline, planPageLayout } from "./core/documentPlan.js"
+import { repairPage } from "./pages/pageContracts.js"
+import { fallbackDocumentOutline, planDocumentOutline, planPageLayout, withPlanningTimeout } from "./core/documentPlan.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
 import { downloadGarmentFile } from "./garments/exportGarment.js"
@@ -23,6 +24,7 @@ import { Preview } from "./components/Preview.jsx"
 import { GarmentChat } from "./components/GarmentChat.jsx"
 import { ReviewChat } from "./components/ReviewChat.jsx"
 import { buildReviewFindings } from "./core/reviewDiff.js"
+import { applyReviewAnswers } from "./core/applyReviewAnswers.js"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
@@ -168,7 +170,7 @@ export default function App() {
   const [monoMode, setMonoMode] = useState(false) // grayscale toggle - render-time only, never re-triggers AI planning
   const [viewAllPages, setViewAllPages] = useState(false) // "see every page at once" contact sheet
   const [reviewFindings, setReviewFindings] = useState(null) // problems from the pre-download intent-vs-document diff
-  const [pendingPages, setPendingPages] = useState(null) // the generated pages held behind the review gate
+  const [pendingReview, setPendingReview] = useState(null) // {pages, plan, lang, tx, garmentType} held behind the review gate
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -422,7 +424,12 @@ export default function App() {
     setDocumentPlanning(true)
     setDocumentPlanStatus("Estructurando el documento...")
     try {
-      var outline = await planDocumentOutline({ garmentType, parts, designs, lang })
+      var outline
+      try {
+        outline = await withPlanningTimeout(planDocumentOutline({ garmentType, parts, designs, lang }))
+      } catch {
+        outline = fallbackDocumentOutline({ garmentType, parts, designs, lang })
+      }
       var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, outline.pages.length) }))
       publishPages(placeholders)
       var plannedPages = []
@@ -431,14 +438,16 @@ export default function App() {
         var page = outline.pages[i]
         setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
         try {
-          var planned = await planPageLayout(
-            page,
-            { garmentType, parts, designs, lang },
-            {
-              onProgress: (progress) => {
-                setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+          var planned = await withPlanningTimeout(
+            planPageLayout(
+              page,
+              { garmentType, parts, designs, lang },
+              {
+                onProgress: (progress) => {
+                  setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+                },
               },
-            }
+            ),
           )
           plannedPages.push(planned)
         } catch {
@@ -488,7 +497,8 @@ export default function App() {
       var findings = buildReviewFindings({ hdr, parts, designs }, plan)
       var problems = findings.filter((f) => f.kind === "missing" || f.kind === "unplaced")
       if (problems.length > 0) {
-        setPendingPages(pages)
+        var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+        setPendingReview({ pages, plan, lang, tx, garmentType })
         setReviewFindings(findings)
         return
       }
@@ -496,14 +506,71 @@ export default function App() {
     publishForExport(pages)
   }
 
-  function finishReview() {
-    // The user walked (or skipped) the review; export what was generated.
-    // Corrections they made to parts/designs already live in state and will
-    // re-plan on the next generate; here we ship the reviewed document.
-    const pages = pendingPages
+  function skipReview() {
+    const pages = pendingReview && pendingReview.pages
     setReviewFindings(null)
-    setPendingPages(null)
+    setPendingReview(null)
     if (pages) publishForExport(pages)
+  }
+
+  async function finishReview(answers) {
+    if (!pendingReview) return
+    const pending = pendingReview
+    const applied = applyReviewAnswers({ hdr, parts, designs, plan: pending.plan }, answers)
+    const planCtx = {
+      garmentType: pending.garmentType,
+      parts: applied.parts,
+      designs: applied.designs,
+      lang: pending.lang,
+    }
+    const affected = new Set(applied.affectedPageIds)
+    const revisedPlan = { pages: [] }
+
+    setDocumentPlanning(true)
+    try {
+      for (var i = 0; i < applied.plan.pages.length; i++) {
+        var page = applied.plan.pages[i]
+        if (!affected.has(page.id)) {
+          revisedPlan.pages.push(page)
+          continue
+        }
+
+        setDocumentPlanStatus("Aplicando revision: pagina " + (i + 1) + " de " + applied.plan.pages.length + "...")
+        try {
+          var replanned = await withPlanningTimeout(planPageLayout(page, planCtx))
+          revisedPlan.pages.push(replanned)
+        } catch {
+          // Review completion cannot be held hostage by the provider. The
+          // deterministic contract already knows the required page shape.
+          revisedPlan.pages.push(repairPage(page, planCtx).page)
+        }
+      }
+
+      const renderCtx = {
+        lang: pending.lang,
+        hdr: applied.hdr,
+        parts: applied.parts,
+        designs: applied.designs,
+        logo,
+        txData: pending.tx,
+        garment,
+      }
+      const rendered = buildPlannedPages(revisedPlan, renderCtx)
+
+      // Commit the snapshots only after the corrected document rendered.
+      setHdr(applied.hdr)
+      setParts(applied.parts)
+      setDesigns(applied.designs)
+      setTxCache({})
+      setPlannedPreviewPages(rendered)
+      setPlannedPreviewKey("")
+      setReviewFindings(null)
+      setPendingReview(null)
+      publishForExport(rendered)
+    } finally {
+      setDocumentPlanning(false)
+      setDocumentPlanStatus("")
+    }
   }
 
   var previewPlanKey = step === 5 && garmentId === "custom" && customGarment
@@ -1031,7 +1098,7 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: C.shell.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.white.hex }}>
       {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
-      {reviewFindings && <ReviewChat findings={reviewFindings} onComplete={finishReview} onSkip={finishReview} />}
+      {reviewFindings && <ReviewChat findings={reviewFindings} onComplete={finishReview} onSkip={skipReview} />}
       <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
         {/* Wordmark — Morfe mark in white on the black shell */}
         <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>

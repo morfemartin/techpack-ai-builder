@@ -50,6 +50,8 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
   const [answers, setAnswers] = useState([])
   const [typing, setTyping] = useState(false) // free-text mode for "Completar ahora"
   const [text, setText] = useState("")
+  const [applying, setApplying] = useState(false)
+  const [applyError, setApplyError] = useState("")
   const summary = summarizeConfirmed(findings)
   const rephrased = useRef(false)
 
@@ -72,12 +74,8 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
   const current = fields[idx]
   const done = idx >= fields.length
 
-  useEffect(() => {
-    if (done && fields.length > 0) onComplete(answers)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [done])
-
   function answer(choiceIdx, value) {
+    if (applying) return
     setAnswers((a) => [...a, { key: current.key, choice: choiceIdx, option: current.options[choiceIdx], value: value || "" }])
     setTyping(false)
     setText("")
@@ -85,6 +83,7 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
   }
 
   function back() {
+    if (applying) return
     if (typing) {
       setTyping(false)
       setText("")
@@ -96,12 +95,25 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
   }
 
   function pick(i) {
+    if (applying) return
     // The "type it now" option needs a value before it can be answered.
     if (/escrib/i.test(current.options[i])) {
       setTyping(true)
       return
     }
     answer(i)
+  }
+
+  async function complete() {
+    if (applying) return
+    setApplying(true)
+    setApplyError("")
+    try {
+      await onComplete(answers)
+    } catch (error) {
+      setApplyError((error && error.message) || "No se pudo aplicar la revisión.")
+      setApplying(false)
+    }
   }
 
   const btn = (fill, on) => ({
@@ -133,7 +145,7 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
               {done ? "Listo" : `Pregunta ${idx + 1} de ${fields.length}`}
             </div>
           </div>
-          <button onClick={onSkip} style={{ ...btn(C.white.hex, C.ink.hex) }} title="Saltar la revisión y generar igual">
+          <button onClick={onSkip} disabled={applying} style={{ ...btn(C.white.hex, C.ink.hex), opacity: applying ? 0.45 : 1 }} title="Saltar la revisión y generar igual">
             Descargar igual
           </button>
         </div>
@@ -194,10 +206,28 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
               )}
             </div>
           )}
+
+          {done && (
+            <div style={{ border: hair, padding: space(4), color: C.ink.hex }}>
+              <div style={{ fontSize: type.size.sm, fontWeight: 700, marginBottom: space(1) }}>Revisión completada</div>
+              <div style={{ fontSize: type.size.xs, opacity: 0.65, marginBottom: space(3) }}>
+                Aplicaremos {answers.length} decisiones y regeneraremos únicamente las páginas afectadas.
+              </div>
+              {applyError && (
+                <div style={{ color: role.index.fill, fontSize: type.size.xs, marginBottom: space(2) }}>
+                  <Icon name="error" size={14} color={role.index.fill} /> {applyError}
+                </div>
+              )}
+              <button onClick={complete} disabled={applying} style={{ ...btn(role.priority.fill, role.priority.on), opacity: applying ? 0.55 : 1 }}>
+                <Icon name={applying ? "hourglass" : "check"} size={14} color={C.white.hex} />
+                {applying ? "Aplicando revisión..." : applyError ? "Reintentar" : "Aplicar y descargar"}
+              </button>
+            </div>
+          )}
         </div>
 
         <div style={{ padding: `${space(2)}px ${space(4)}px`, borderTop: hair, display: "flex", justifyContent: "space-between" }}>
-          <button onClick={back} disabled={idx === 0 && !typing} style={{ ...btn(C.white.hex, C.ink.hex), opacity: idx === 0 && !typing ? 0.4 : 1 }}>
+          <button onClick={back} disabled={applying || (idx === 0 && !typing)} style={{ ...btn(C.white.hex, C.ink.hex), opacity: applying || (idx === 0 && !typing) ? 0.4 : 1 }}>
             <Icon name="arrow_back" size={14} /> Volver
           </button>
           <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.5, alignSelf: "center" }}>

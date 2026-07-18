@@ -62,6 +62,11 @@ describe("measureRegion", () => {
     expect(m.natural).toBe(0)
   })
 
+  it("embSpecs treats an EMPTY_EMB-shaped object as no data", () => {
+    const result = measureRegion({ type: "embSpecs" }, { purpose: "design:Logo" }, { designs: [{ name: "Logo", emb: { machine: "", stopSeq: [] } }] }, 400)
+    expect(result).toEqual({ natural: 0, min: 0, canAbsorb: false })
+  })
+
   it("note: wraps its text at the given width and measures the wrapped lines", () => {
     const narrow = measureRegion({ type: "note", note: "una nota larga que definitivamente necesita varias lineas para caber" }, page, ctx, 200)
     const wide = measureRegion({ type: "note", note: "una nota larga que definitivamente necesita varias lineas para caber" }, page, ctx, 900)

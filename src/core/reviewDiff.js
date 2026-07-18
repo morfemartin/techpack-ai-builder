@@ -1,3 +1,5 @@
+import { hasEmbSpecs } from "./helpers.js"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // REVIEW DIFF — the deterministic half of the pre-download review round.
 //
@@ -112,7 +114,7 @@ export function buildReviewFindings(intake, document) {
     if (hasColors && !types.has("colorSpecs")) {
       findings.push({ kind: "unplaced", topic: "design-colors", field: design.name, expected: design.colors.length + " colores", foundOn: null })
     }
-    if (design.emb && !types.has("embSpecs")) {
+    if (hasEmbSpecs(design.emb) && !types.has("embSpecs")) {
       findings.push({ kind: "unplaced", topic: "design-emb", field: design.name, expected: "ficha de bordado", foundOn: null })
     }
   }

@@ -358,4 +358,134 @@ export const FIXTURES = [
       ],
     },
   },
+
+  {
+    id: "I-measure-pass",
+    dataset: "bikini",
+    title: "I · Measure pass · bounded content returns slack",
+    tests: "illustration absorber + a one-piece BOM measured at its natural height.",
+    expected: "The parts table is a compact bottom strip; all remaining height belongs to the illustration, with no internal dead band.",
+    plan: {
+      pages: [
+        {
+          id: "measure-pass",
+          title: "Measure pass",
+          purpose: "overview",
+          pieces: ["top"],
+          regions: [
+            { type: "header", weight: 10 },
+            { type: "titleBar", weight: 5 },
+            { type: "illustration", weight: 70, slots: 2, refs: ["Front", "Back"] },
+            { type: "partsList", weight: 10 },
+            { type: "disclaimer", weight: 5 },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
+    id: "J-contract-repair",
+    dataset: "hoodie",
+    title: "J · Contract repair · malformed design page",
+    tests: "a design page missing chrome/illustration and incorrectly repeating the BOM.",
+    expected: "Diagnostics show dropped partsList plus inserted mandatory regions; the rendered page is contract-clean.",
+    contractRepair: true,
+    plan: {
+      pages: [
+        {
+          id: "repair-hoodie-emb",
+          title: "Bordado pecho denso",
+          purpose: "design:Bordado pecho denso",
+          regions: [
+            { type: "partsList", weight: 35 },
+            { type: "embSpecs", weight: 40 },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
+    id: "K-per-slot-briefs",
+    dataset: "parka",
+    title: "K · Structured briefs · one brief per slot",
+    tests: "two illustration slots carry different structured instructions.",
+    expected: "Front and close-up boards each show their own view, must-mark checklist, placement and measurement guidance.",
+    plan: {
+      pages: [
+        {
+          id: "briefs-parka-print",
+          title: "Print espalda topográfico",
+          purpose: "design:Print espalda topográfico",
+          regions: [
+            { type: "header", weight: 10 },
+            { type: "titleBar", weight: 5 },
+            { type: "colorSpecs", weight: 20 },
+            {
+              type: "illustration",
+              weight: 57,
+              slots: 2,
+              refs: ["Back placement", "Seam close-up"],
+              briefs: [
+                {
+                  garmentPart: "Back shell",
+                  view: "Back placement",
+                  mustMark: ["neck seam landmark", "print boundary"],
+                  measurements: [{ label: "40mm below neck seam", perSize: false }],
+                  placementLandmark: "Centered on back neck seam",
+                  factoryNote: "Keep artwork clear of ventilation opening",
+                },
+                {
+                  garmentPart: "Side seam",
+                  view: "Seam close-up",
+                  mustMark: ["artwork continuation", "registration notch"],
+                  measurements: [{ label: "bleed allowance", perSize: false }],
+                  placementLandmark: "Match front and back pattern notches",
+                  factoryNote: "Approve print registration before cutting",
+                },
+              ],
+            },
+            { type: "disclaimer", weight: 8 },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
+    id: "L-review-diff",
+    dataset: "varsity",
+    title: "L · Review diff · omitted design pages",
+    tests: "intake truth contains three designs while the sample document only carries cover + overview.",
+    expected: "The diagnostic lists every unplaced design before export while confirmed header/BOM data remains summarized.",
+    reviewSample: true,
+    plan: {
+      pages: [
+        {
+          id: "review-cover",
+          title: "Varsity cover",
+          purpose: "cover",
+          regions: [
+            { type: "header", weight: 10 },
+            { type: "titleBar", weight: 5 },
+            { type: "illustration", weight: 77, slots: 1, refs: ["Hero view"] },
+            { type: "disclaimer", weight: 8 },
+          ],
+        },
+        {
+          id: "review-overview",
+          title: "Varsity overview",
+          purpose: "overview",
+          regions: [
+            { type: "header", weight: 10 },
+            { type: "titleBar", weight: 5 },
+            { type: "illustration", weight: 50, slots: 2, refs: ["Front", "Back"] },
+            { type: "partsList", weight: 27 },
+            { type: "disclaimer", weight: 8 },
+          ],
+        },
+      ],
+    },
+  },
 ]

@@ -4,6 +4,21 @@ import { normalizePlan } from "../pages/interpretPlan.js"
 import { repairOutline, repairPage } from "../pages/pageContracts.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
+const PLANNING_TIMEOUT_MS = 10000
+
+export async function withPlanningTimeout(promise, timeoutMs = PLANNING_TIMEOUT_MS) {
+  let timer = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("planning_timeout")), timeoutMs)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 function safeString(value, fallback) {
   return typeof value === "string" && value.trim() ? value.trim() : fallback

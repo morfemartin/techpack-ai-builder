@@ -22,6 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { selectedDesign } from "./measure.js"
+import { hasEmbSpecs } from "../core/helpers.js"
 
 export const CONTRACTS = {
   cover: {
@@ -90,8 +91,7 @@ function designHasColors(design) {
   return !!(design && Array.isArray(design.colors) && design.colors.some((c) => c && typeof c.hex === "string" && c.hex.trim()))
 }
 function designHasEmb(design) {
-  // emb is an OBJECT (machine/stitches/stopSeq...), never an array
-  return !!(design && design.emb)
+  return !!(design && hasEmbSpecs(design.emb))
 }
 
 // The conditional mandatory extras for a design page: only what ITS design
