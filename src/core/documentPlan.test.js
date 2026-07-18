@@ -7,7 +7,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { extractLastCompletedRegionType, planDocumentOutline, planPageLayout } from "./documentPlan.js"
+import { extractLastCompletedRegionType, fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "./documentPlan.js"
 
 describe("document plan AI wrappers", () => {
   beforeEach(() => {
@@ -45,6 +45,12 @@ describe("document plan AI wrappers", () => {
   it("falls back to cover + overview plus design pages when the outline is empty", async () => {
     deepseekChat.mockResolvedValueOnce('{"pages":[]}')
     const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
+
+    expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
+  })
+
+  it("exposes the same contract-repaired fallback outline for non-blocking labs", () => {
+    const outline = fallbackDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
 
     expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
   })

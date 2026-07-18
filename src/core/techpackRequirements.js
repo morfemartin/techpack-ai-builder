@@ -151,7 +151,124 @@ function hasGeneralAsk(fields) {
   return fields.some((f) => f && f.category === "general" && f.status === FIELD_STATUS.ASK)
 }
 
-function fallbackGeneralQuestions() {
+function fallbackGeneralQuestions(garmentType = "") {
+  const garment = String(garmentType || "").toLowerCase()
+  if (/hoodie|sudadera|buzo|capucha/.test(garment)) {
+    return [
+      {
+        key: "fabric",
+        label: "Tela principal",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Felpa 300-350 g/m2", "French terry", "Fleece pesado", "Algodon premium"],
+        why: "define tacto, caida y costo",
+      },
+      {
+        key: "fit",
+        label: "Fit / silueta",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Regular", "Oversized", "Relaxed", "Boxy"],
+        why: "define patronaje y medidas",
+      },
+      {
+        key: "hood",
+        label: "Capucha",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Doble tela", "Forrada", "Con cordon", "Sin cordon"],
+        why: "define consumo y acabado",
+      },
+      {
+        key: "pocket",
+        label: "Bolsillo",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Canguro", "Sin bolsillo", "Laterales", "Cremallera"],
+        why: "cambia piezas frontales",
+      },
+      {
+        key: "cuffs_hem",
+        label: "Punos y bajo",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Rib 2x2", "Rib 1x1", "Misma tela", "Elastico oculto"],
+        why: "define terminaciones",
+      },
+      {
+        key: "closure",
+        label: "Cierre",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Pullover", "Zipper completo", "Medio zipper", "Broches"],
+        why: "define avios y proceso",
+      },
+    ]
+  }
+  if (/polo/.test(garment)) {
+    return [
+      {
+        key: "fabric",
+        label: "Tela principal",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Algodon pique", "Jersey algodon", "Performance stretch", "Mezcla CVC"],
+        why: "define tacto, caida y costo",
+      },
+      {
+        key: "fit",
+        label: "Fit / silueta",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Regular", "Slim", "Relaxed", "Golf fit"],
+        why: "define patronaje y medidas",
+      },
+      {
+        key: "collar",
+        label: "Cuello",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Rib tejido", "Auto tela", "Cuello polo plano", "Especial"],
+        why: "cambia construccion superior",
+      },
+      {
+        key: "sleeve",
+        label: "Manga",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Corta con rib", "Corta dobladillo", "Larga", "Raglan"],
+        why: "define piezas y consumo",
+      },
+      {
+        key: "placket",
+        label: "Tapeta",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["2 botones", "3 botones", "Sin botones", "Zipper corto"],
+        why: "define avios frontales",
+      },
+      {
+        key: "hem_finish",
+        label: "Terminacion bajo",
+        category: "general",
+        status: FIELD_STATUS.ASK,
+        value: "",
+        options: ["Bajo recto", "Bajo curvo", "Aberturas laterales", "Rib inferior"],
+        why: "define acabado final",
+      },
+    ]
+  }
   return [
     {
       key: "fabric",
@@ -218,8 +335,12 @@ export function ensureMinimumGeneralQuestions(reqs, seed) {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
   if (hasSeedFacts(seed) || hasGeneralAsk(fields)) return reqs
   const existingKeys = new Set(fields.map((f) => f && f.key).filter(Boolean))
-  const fallbacks = fallbackGeneralQuestions().filter((f) => !existingKeys.has(f.key))
+  const fallbacks = fallbackGeneralQuestions(reqs && reqs.garmentType).filter((f) => !existingKeys.has(f.key))
   return { ...reqs, fields: [...fields, ...fallbacks] }
+}
+
+export function fallbackRequirements(garmentType, seed) {
+  return ensureMinimumGeneralQuestions(normalizeRequirements({ garmentType, fields: [] }, garmentType), seed)
 }
 
 // ── Pure walker helpers (no DeepSeek). Delegated spec, see techpackRequirements.test.js ──

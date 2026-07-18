@@ -15,8 +15,8 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { buildPlannedPages } from "../pages/interpretPlan.js"
-import { planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
-import { validateOutline, validatePage } from "../pages/pageContracts.js"
+import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
+import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
 import { COL } from "../design/metrics.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
@@ -26,6 +26,18 @@ const PAGE_H = 900
 const PAGE_PAD = 26
 
 const state = { mono: false, grid: false, tab: "design", aiDataset: "parka", aiPages: null, aiLog: [], aiRunning: false }
+const AI_OUTLINE_TIMEOUT_MS = 12000
+const AI_PAGE_TIMEOUT_MS = 10000
+
+function withTimeout(promise, ms, label) {
+  let timer
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(label + " timed out after " + Math.round(ms / 1000) + "s")), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
 
 // Grid overlay in page coordinates: the outer margin, a whole-pixel baseline
 // every 32px (ROW.table), and the shared COL column stops (index/label/value)
@@ -116,7 +128,14 @@ async function runAiPlan() {
   state.aiLog = ["Outline: asking the model which pages the document needs…"]
   render()
   try {
-    const outline = await planDocumentOutline(planCtx)
+    let outline
+    try {
+      outline = await withTimeout(planDocumentOutline(planCtx), AI_OUTLINE_TIMEOUT_MS, "Outline")
+    } catch (e) {
+      outline = fallbackDocumentOutline(planCtx)
+      state.aiLog.push(`Outline: ${String((e && e.message) || e)} · using contract fallback [${outline.pages.map((p) => p.purpose).join(", ")}]`)
+      render()
+    }
     const outlineViolations = validateOutline(outline, planCtx)
     state.aiLog.push(`Outline: ${outline.pages.length} pages [${outline.pages.map((p) => p.purpose).join(", ")}] · contract clean after repair: ${outlineViolations.length === 0 ? "yes" : "NO (" + outlineViolations.length + ")"}`)
     render()
@@ -127,10 +146,13 @@ async function runAiPlan() {
       render()
       let p
       try {
-        p = await planPageLayout(page, planCtx)
+        p = await withTimeout(planPageLayout(page, planCtx), AI_PAGE_TIMEOUT_MS, "Page " + (i + 1))
       } catch (e) {
-        p = { ...page, regions: [{ type: "header", weight: 10 }, { type: "illustration", weight: 60, slots: 1 }, { type: "disclaimer", weight: 8 }] }
-        state.aiLog[state.aiLog.length - 1] += " (fell back)"
+        p = repairPage(
+          { ...page, regions: [{ type: "header", weight: 10 }, { type: "illustration", weight: 60, slots: 1 }, { type: "disclaimer", weight: 8 }] },
+          planCtx
+        ).page
+        state.aiLog[state.aiLog.length - 1] += " (" + String((e && e.message) || e) + " · fell back)"
       }
       const viol = validatePage(p, planCtx)
       state.aiLog[state.aiLog.length - 1] = `Page ${i + 1}/${outline.pages.length} (${page.purpose}): ${p.regions.map((r) => r.type).join(", ")} · contract clean: ${viol.length === 0 ? "yes" : "NO"}`

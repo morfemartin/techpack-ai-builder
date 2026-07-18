@@ -39,6 +39,10 @@ function fallbackOutline({ garmentType, designs }) {
   }
 }
 
+export function fallbackDocumentOutline(context = {}) {
+  return repairOutline(fallbackOutline(context), context).outline
+}
+
 function normalizeOutline(raw, context) {
   const fallback = fallbackOutline(context || {})
   if (!raw || typeof raw !== "object" || !Array.isArray(raw.pages) || raw.pages.length === 0) return fallback
