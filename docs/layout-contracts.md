@@ -149,6 +149,12 @@ weighted working row (`60/16/24`, or a wider two-column variant when only one
 data block exists), preventing mandatory blocks from becoming stacked
 full-width bands that steal height from the artwork.
 
+BOM pages receive the same protection when the model proposes `illustration`
+and `partsList` as separate top-level bands. They are normalized into a
+`34/66` table/artwork split; the existing content-aware gate keeps long tables
+beside the artwork and only stacks genuinely short tables as compact strips.
+An explicit split authored by the planner is preserved unchanged.
+
 Embroidery presence is based on `hasEmbSpecs`, not object truthiness. The UI
 creates every design with an `EMPTY_EMB` object, and that empty form must not
 create an embroidery page, consume layout height, or appear as an unplaced

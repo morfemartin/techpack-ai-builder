@@ -178,6 +178,7 @@ const STACK_CONTENT_PAD = 16
 const STACKABLE_TYPES = new Set(["partsList"])
 
 const DESIGN_COLUMN_TYPES = new Set(["illustration", "colorSpecs", "embSpecs"])
+const BOM_PURPOSES = new Set(["overview", "structure", "lining"])
 
 // Contract repair guarantees that every required design block exists, but it
 // intentionally does not choose a visual composition. Consolidate the common
@@ -233,6 +234,55 @@ export function composeDesignPageRegions(page) {
     if (!consumed.has(index)) composed.push(region)
   })
   return { ...page, regions: composed }
+}
+
+// The AI sometimes returns a long BOM and its illustration as independent
+// top-level bands. Both blocks are valid, so page contracts correctly leave
+// them alone, but measure-then-solve then gives the table its full natural
+// height and squeezes the artwork into the remainder. Normalize that valid-but-
+// poor proposal into the same split grammar used by deterministic fixtures.
+// buildRegionNode still makes the final row-vs-stack decision from real part
+// count: long BOMs stay beside the artwork; short BOMs become a compact strip.
+export function composeBomPageRegions(page) {
+  if (!page || typeof page !== "object" || !BOM_PURPOSES.has(String(page.purpose || ""))) return page
+  const regions = Array.isArray(page.regions) ? page.regions : []
+  const candidates = []
+  const consumed = new Set()
+
+  regions.forEach((region, index) => {
+    if (region.type === "illustration" || region.type === "partsList") {
+      candidates.push(region)
+      consumed.add(index)
+      return
+    }
+    if (region.type !== "split" || !Array.isArray(region.regions) || region.regions.length === 0) return
+    if (!region.regions.every((inner) => inner.type === "illustration" || inner.type === "partsList")) return
+    candidates.push(...region.regions)
+    consumed.add(index)
+  })
+
+  const illustration = candidates.find((region) => region.type === "illustration")
+  const partsList = candidates.find((region) => region.type === "partsList")
+  if (!illustration || !partsList) return page
+  if (consumed.size === 1 && regions[[...consumed][0]].type === "split") return page
+
+  const firstConsumed = Math.min(...consumed)
+  const composed = []
+  regions.forEach((region, index) => {
+    if (index === firstConsumed) {
+      composed.push({
+        type: "split",
+        weight: safeWeight(region.weight),
+        regions: [{ ...partsList, weight: 34 }, { ...illustration, weight: 66 }],
+      })
+    }
+    if (!consumed.has(index)) composed.push(region)
+  })
+  return { ...page, regions: composed }
+}
+
+export function composePageRegions(page) {
+  return composeDesignPageRegions(composeBomPageRegions(page))
 }
 
 // Normalizes region weights into flex `grow` values that sum to 100, keeping
@@ -422,7 +472,7 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
 }
 
 export function interpretPagePlan(page, ctx) {
-  const normalized = composeDesignPageRegions(normalizePlan({ pages: [page] }).pages[0])
+  const normalized = composePageRegions(normalizePlan({ pages: [page] }).pages[0])
   const grows = weightsToGrow(normalized.regions)
   const safeCtx = ctx || {}
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan

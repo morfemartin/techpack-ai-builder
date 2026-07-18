@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { VOCAB, buildPlannedPages, composeDesignPageRegions, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { VOCAB, buildPlannedPages, composeBomPageRegions, composeDesignPageRegions, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
 import { solveLayout } from "../layout/solve.js"
 
 describe("weightsToGrow", () => {
@@ -219,6 +219,61 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("Blue")
     expect(pages[0].svg).toContain("Tajima")
     expect(pages[0].svg).toContain("12000")
+  })
+})
+
+describe("BOM-page composition", () => {
+  function aiBandPlan() {
+    return {
+      id: "overview",
+      purpose: "overview",
+      regions: [
+        { type: "header", weight: 10 },
+        { type: "titleBar", weight: 5 },
+        { type: "illustration", weight: 20, slots: 1 },
+        { type: "partsList", weight: 60 },
+        { type: "disclaimer", weight: 5 },
+      ],
+    }
+  }
+
+  it("rewrites AI-proposed illustration/table bands as one 34/66 working split", () => {
+    const page = aiBandPlan()
+    const before = JSON.stringify(page)
+    const result = composeBomPageRegions(page)
+
+    expect(JSON.stringify(page)).toBe(before)
+    expect(result.regions.map((region) => region.type)).toEqual(["header", "titleBar", "split", "disclaimer"])
+    expect(result.regions[2].regions.map((region) => [region.type, region.weight])).toEqual([
+      ["partsList", 34],
+      ["illustration", 66],
+    ])
+  })
+
+  it("keeps a 16-row BOM beside the illustration with the artwork wider", () => {
+    const parts = Array.from({ length: 16 }, (_, index) => ({ id: "part-" + index, val: "Spec", on: true }))
+    const root = interpretPagePlan(aiBandPlan(), { parts })
+    const solved = solveLayout(root, { width: 1200, height: 900 })
+    const workingArea = solved.children[2]
+
+    expect(root.children[2].direction).toBe("row")
+    expect(workingArea.children[0].height).toBe(workingArea.height)
+    expect(workingArea.children[1].height).toBe(workingArea.height)
+    expect(workingArea.children[1].width).toBeGreaterThan(workingArea.children[0].width)
+  })
+
+  it("still stacks a one-row BOM as a compact strip below the artwork", () => {
+    const root = interpretPagePlan(aiBandPlan(), { parts: [{ id: "body", val: "Spec", on: true }] })
+    const workingArea = root.children[2]
+
+    expect(workingArea.direction).toBe("column")
+    expect(workingArea.children[0].grow).toBe(1)
+    expect(workingArea.children[1].basis).toBe(68)
+  })
+
+  it("does not rewrite non-BOM pages", () => {
+    const page = { ...aiBandPlan(), purpose: "cover" }
+    expect(composeBomPageRegions(page)).toBe(page)
   })
 })
 
