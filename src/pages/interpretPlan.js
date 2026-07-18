@@ -177,6 +177,64 @@ const STACK_CONTENT_PAD = 16
 // See docs/layout-lab for the visual before/after that drove this rule.
 const STACKABLE_TYPES = new Set(["partsList"])
 
+const DESIGN_COLUMN_TYPES = new Set(["illustration", "colorSpecs", "embSpecs"])
+
+// Contract repair guarantees that every required design block exists, but it
+// intentionally does not choose a visual composition. Consolidate the common
+// design-page shape here: illustration + narrow technical data become one
+// horizontal working area instead of three full-width bands. This also folds
+// a contract-inserted top-level spec into an AI-proposed illustration/spec
+// split, which is the exact source of the wasted space in the dense-embroidery
+// fixture.
+export function composeDesignPageRegions(page) {
+  if (!page || typeof page !== "object" || !String(page.purpose || "").startsWith("design:")) return page
+  const regions = Array.isArray(page.regions) ? page.regions : []
+  const candidates = []
+  const consumed = new Set()
+
+  regions.forEach((region, index) => {
+    if (DESIGN_COLUMN_TYPES.has(region.type)) {
+      candidates.push(region)
+      consumed.add(index)
+      return
+    }
+    if (region.type !== "split" || !Array.isArray(region.regions) || region.regions.length === 0) return
+    if (!region.regions.every((inner) => DESIGN_COLUMN_TYPES.has(inner.type))) return
+    candidates.push(...region.regions)
+    consumed.add(index)
+  })
+
+  const byType = new Map()
+  candidates.forEach((region) => {
+    if (!byType.has(region.type)) byType.set(region.type, region)
+  })
+  const illustration = byType.get("illustration")
+  const colors = byType.get("colorSpecs")
+  const embroidery = byType.get("embSpecs")
+  if (!illustration || (!colors && !embroidery)) return page
+
+  let columns
+  if (colors && embroidery) {
+    columns = [
+      { ...illustration, weight: 60 },
+      { ...colors, weight: 16 },
+      { ...embroidery, weight: 24 },
+    ]
+  } else if (colors) {
+    columns = [{ ...illustration, weight: 76 }, { ...colors, weight: 24 }]
+  } else {
+    columns = [{ ...illustration, weight: 64 }, { ...embroidery, weight: 36 }]
+  }
+
+  const firstConsumed = Math.min(...consumed)
+  const composed = []
+  regions.forEach((region, index) => {
+    if (index === firstConsumed) composed.push({ type: "split", weight: safeWeight(region.weight), regions: columns })
+    if (!consumed.has(index)) composed.push(region)
+  })
+  return { ...page, regions: composed }
+}
+
 // Normalizes region weights into flex `grow` values that sum to 100, keeping
 // their proportions. A missing/invalid/non-positive weight counts as 1 (the
 // minimum share) so a region is never allotted zero height by accident.
@@ -364,7 +422,7 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
 }
 
 export function interpretPagePlan(page, ctx) {
-  const normalized = normalizePlan({ pages: [page] }).pages[0]
+  const normalized = composeDesignPageRegions(normalizePlan({ pages: [page] }).pages[0])
   const grows = weightsToGrow(normalized.regions)
   const safeCtx = ctx || {}
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan

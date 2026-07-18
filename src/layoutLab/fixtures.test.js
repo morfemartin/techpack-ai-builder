@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildPlannedPages } from "../pages/interpretPlan.js"
+import { buildPlannedPages, interpretPagePlan } from "../pages/interpretPlan.js"
 import { repairPage, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings } from "../core/reviewDiff.js"
 import { DATASETS, ctxFor } from "./datasets.js"
@@ -34,6 +34,10 @@ describe("Layout Lab closure fixtures", () => {
     const result = repairPage(item.plan.pages[0], ctx)
     expect(result.repairs).toEqual(expect.arrayContaining(["dropped forbidden partsList", "inserted header", "inserted titleBar", "inserted illustration", "inserted disclaimer"]))
     expect(validatePage(result.page, ctx)).toEqual([])
+    const root = interpretPagePlan(result.page, ctx)
+    const workingArea = root.children[2]
+    expect(workingArea.direction).toBe("row")
+    expect(workingArea.children.map((child) => child.grow)).toEqual([60, 16, 24])
   })
 
   it("per-slot fixture renders distinct structured briefs", () => {

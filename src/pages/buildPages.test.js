@@ -175,6 +175,13 @@ describe("reusable page block helpers", () => {
     expect(svg).toContain("| #003DA5")
   })
 
+  it("uses compact color rows in a narrow design-data column", () => {
+    const svg = renderColorSpecs({ x: 0, y: 0, width: 180, height: 500 }, { colors: [{ name: "Blue & White", hex: "#003DA5" }] })
+
+    expect(svg).toContain("Blue &amp; White  #003DA5")
+    expect(svg).not.toContain("C:100 M:63")
+  })
+
   it("renders embroidery specs and stop sequences from partial data", () => {
     const svg = renderEmbSpecs(
       { x: 0, y: 0, width: 430, height: 340 },

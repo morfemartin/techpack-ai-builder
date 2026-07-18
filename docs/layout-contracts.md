@@ -143,6 +143,12 @@ time budget. When DeepSeek does not answer, the wizard uses the contractual
 outline/layout fallback or continues without designs/briefs instead of staying
 blocked behind the provider's internal retries.
 
+After contract repair, design pages receive one final deterministic composition
+pass. Illustration, colors, and embroidery data are consolidated into a
+weighted working row (`60/16/24`, or a wider two-column variant when only one
+data block exists), preventing mandatory blocks from becoming stacked
+full-width bands that steal height from the artwork.
+
 Embroidery presence is based on `hasEmbSpecs`, not object truthiness. The UI
 creates every design with an `EMPTY_EMB` object, and that empty form must not
 create an embroidery page, consume layout height, or appear as an unplaced

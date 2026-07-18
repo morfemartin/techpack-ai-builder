@@ -389,7 +389,7 @@ export const FIXTURES = [
     dataset: "hoodie",
     title: "J · Contract repair · malformed design page",
     tests: "a design page missing chrome/illustration and incorrectly repeating the BOM.",
-    expected: "Diagnostics show dropped partsList plus inserted mandatory regions; the rendered page is contract-clean.",
+    expected: "Diagnostics show the repair; illustration, colors and embroidery then share one 60/16/24 working row with no stacked data bands.",
     contractRepair: true,
     plan: {
       pages: [

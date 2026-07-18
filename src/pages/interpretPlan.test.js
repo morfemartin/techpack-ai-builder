@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { VOCAB, buildPlannedPages, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { VOCAB, buildPlannedPages, composeDesignPageRegions, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { solveLayout } from "../layout/solve.js"
 
 describe("weightsToGrow", () => {
   it("returns exact proportions when weights already sum to 100", () => {
@@ -218,6 +219,86 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("Blue")
     expect(pages[0].svg).toContain("Tajima")
     expect(pages[0].svg).toContain("12000")
+  })
+})
+
+describe("design-page composition", () => {
+  it("packs illustration, colors and embroidery into one weighted row", () => {
+    const page = {
+      id: "design",
+      purpose: "design:Chest",
+      regions: [
+        { type: "header", weight: 10 },
+        { type: "titleBar", weight: 5 },
+        { type: "illustration", weight: 40, slots: 1 },
+        { type: "colorSpecs", weight: 20 },
+        { type: "embSpecs", weight: 25 },
+        { type: "disclaimer", weight: 5 },
+      ],
+    }
+    const before = JSON.stringify(page)
+    const result = composeDesignPageRegions(page)
+    const split = result.regions[2]
+
+    expect(JSON.stringify(page)).toBe(before)
+    expect(result.regions.map((region) => region.type)).toEqual(["header", "titleBar", "split", "disclaimer"])
+    expect(split.regions.map((region) => [region.type, region.weight])).toEqual([
+      ["illustration", 60],
+      ["colorSpecs", 16],
+      ["embSpecs", 24],
+    ])
+  })
+
+  it("folds a contract-inserted color block into an existing illustration/embroidery split", () => {
+    const result = composeDesignPageRegions({
+      id: "design",
+      purpose: "design:Chest",
+      regions: [
+        { type: "header", weight: 10 },
+        { type: "titleBar", weight: 5 },
+        { type: "split", weight: 75, regions: [{ type: "embSpecs", weight: 40 }, { type: "illustration", weight: 60, slots: 1 }] },
+        { type: "colorSpecs", weight: 20 },
+        { type: "disclaimer", weight: 5 },
+      ],
+    })
+
+    expect(result.regions.filter((region) => region.type === "split")).toHaveLength(1)
+    expect(result.regions[2].regions.map((region) => region.type)).toEqual(["illustration", "colorSpecs", "embSpecs"])
+  })
+
+  it("leaves non-design pages and unrelated splits unchanged", () => {
+    const overview = { purpose: "overview", regions: [{ type: "illustration" }, { type: "colorSpecs" }] }
+    const mixed = { purpose: "design:Chest", regions: [{ type: "split", regions: [{ type: "illustration" }, { type: "note" }] }, { type: "colorSpecs" }] }
+    expect(composeDesignPageRegions(overview)).toBe(overview)
+    expect(composeDesignPageRegions(mixed)).toBe(mixed)
+  })
+
+  it("gives the illustration the largest solved column in the dense design case", () => {
+    const page = {
+      id: "design",
+      purpose: "design:Chest",
+      regions: [
+        { type: "header", weight: 10 },
+        { type: "titleBar", weight: 5 },
+        { type: "illustration", weight: 40, slots: 1 },
+        { type: "colorSpecs", weight: 20 },
+        { type: "embSpecs", weight: 25 },
+        { type: "disclaimer", weight: 5 },
+      ],
+    }
+    const ctx = { designs: [{ name: "Chest", colors: [{ name: "Black", hex: "#000000" }], emb: { machine: "Tajima", stitches: "12000" } }] }
+    const root = interpretPagePlan(page, ctx)
+    const split = root.children[2]
+    const solved = solveLayout(root, { width: 1200, height: 900 })
+    const solvedSplit = solved.children[2]
+
+    expect(split.direction).toBe("row")
+    expect(split.children).toHaveLength(3)
+    expect(split.children.map((child) => child.grow)).toEqual([60, 16, 24])
+    expect(solvedSplit.height).toBeGreaterThan(650)
+    expect(solvedSplit.children.map((child) => child.height)).toEqual([solvedSplit.height, solvedSplit.height, solvedSplit.height])
+    expect(solvedSplit.children[0].width).toBeGreaterThan(solvedSplit.children[1].width + solvedSplit.children[2].width)
+    expect(solvedSplit.children[1].width).toBeLessThan(solvedSplit.children[2].width)
   })
 })
 

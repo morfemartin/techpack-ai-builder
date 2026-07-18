@@ -98,7 +98,11 @@ export function renderColorSpecs(box, { colors } = {}) {
   ty += 20 + SECTION_RULE_GAP
   var rowH = colorRowHeight(safe.length, limitY - ty)
   var swatch = Math.min(20, rowH - 4)
-  var small = rowH < 26
+  // A color card may be intentionally composed as a narrow data column next
+  // to the illustration and embroidery sheet. In that shape the full CMYK
+  // sentence would cross into its neighbour even when the row is tall, so
+  // compact by available width as well as by row height.
+  var small = rowH < 26 || W < 260
   var textX = box.x + INSET + swatch + TEXT_PAD * 2
   safe.forEach(function (col) {
     var cm = h2c(col.hex)
