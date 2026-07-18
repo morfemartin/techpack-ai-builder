@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { VOCAB, buildPlannedPages, composeBomPageRegions, composeDesignPageRegions, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { VOCAB, buildPlannedPages, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
 import { solveLayout } from "../layout/solve.js"
 
 describe("weightsToGrow", () => {
@@ -222,141 +222,6 @@ describe("interpretPagePlan", () => {
   })
 })
 
-describe("BOM-page composition", () => {
-  function aiBandPlan() {
-    return {
-      id: "overview",
-      purpose: "overview",
-      regions: [
-        { type: "header", weight: 10 },
-        { type: "titleBar", weight: 5 },
-        { type: "illustration", weight: 20, slots: 1 },
-        { type: "partsList", weight: 60 },
-        { type: "disclaimer", weight: 5 },
-      ],
-    }
-  }
-
-  it("rewrites AI-proposed illustration/table bands as one 34/66 working split", () => {
-    const page = aiBandPlan()
-    const before = JSON.stringify(page)
-    const result = composeBomPageRegions(page)
-
-    expect(JSON.stringify(page)).toBe(before)
-    expect(result.regions.map((region) => region.type)).toEqual(["header", "titleBar", "split", "disclaimer"])
-    expect(result.regions[2].regions.map((region) => [region.type, region.weight])).toEqual([
-      ["partsList", 34],
-      ["illustration", 66],
-    ])
-  })
-
-  it("keeps a 16-row BOM beside the illustration with the artwork wider", () => {
-    const parts = Array.from({ length: 16 }, (_, index) => ({ id: "part-" + index, val: "Spec", on: true }))
-    const root = interpretPagePlan(aiBandPlan(), { parts })
-    const solved = solveLayout(root, { width: 1200, height: 900 })
-    const workingArea = solved.children[2]
-
-    expect(root.children[2].direction).toBe("row")
-    expect(workingArea.children[0].height).toBe(workingArea.height)
-    expect(workingArea.children[1].height).toBe(workingArea.height)
-    expect(workingArea.children[1].width).toBeGreaterThan(workingArea.children[0].width)
-  })
-
-  it("still stacks a one-row BOM as a compact strip below the artwork", () => {
-    const root = interpretPagePlan(aiBandPlan(), { parts: [{ id: "body", val: "Spec", on: true }] })
-    const workingArea = root.children[2]
-
-    expect(workingArea.direction).toBe("column")
-    expect(workingArea.children[0].grow).toBe(1)
-    expect(workingArea.children[1].basis).toBe(68)
-  })
-
-  it("does not rewrite non-BOM pages", () => {
-    const page = { ...aiBandPlan(), purpose: "cover" }
-    expect(composeBomPageRegions(page)).toBe(page)
-  })
-})
-
-describe("design-page composition", () => {
-  it("packs illustration, colors and embroidery into one weighted row", () => {
-    const page = {
-      id: "design",
-      purpose: "design:Chest",
-      regions: [
-        { type: "header", weight: 10 },
-        { type: "titleBar", weight: 5 },
-        { type: "illustration", weight: 40, slots: 1 },
-        { type: "colorSpecs", weight: 20 },
-        { type: "embSpecs", weight: 25 },
-        { type: "disclaimer", weight: 5 },
-      ],
-    }
-    const before = JSON.stringify(page)
-    const result = composeDesignPageRegions(page)
-    const split = result.regions[2]
-
-    expect(JSON.stringify(page)).toBe(before)
-    expect(result.regions.map((region) => region.type)).toEqual(["header", "titleBar", "split", "disclaimer"])
-    expect(split.regions.map((region) => [region.type, region.weight])).toEqual([
-      ["illustration", 60],
-      ["colorSpecs", 16],
-      ["embSpecs", 24],
-    ])
-  })
-
-  it("folds a contract-inserted color block into an existing illustration/embroidery split", () => {
-    const result = composeDesignPageRegions({
-      id: "design",
-      purpose: "design:Chest",
-      regions: [
-        { type: "header", weight: 10 },
-        { type: "titleBar", weight: 5 },
-        { type: "split", weight: 75, regions: [{ type: "embSpecs", weight: 40 }, { type: "illustration", weight: 60, slots: 1 }] },
-        { type: "colorSpecs", weight: 20 },
-        { type: "disclaimer", weight: 5 },
-      ],
-    })
-
-    expect(result.regions.filter((region) => region.type === "split")).toHaveLength(1)
-    expect(result.regions[2].regions.map((region) => region.type)).toEqual(["illustration", "colorSpecs", "embSpecs"])
-  })
-
-  it("leaves non-design pages and unrelated splits unchanged", () => {
-    const overview = { purpose: "overview", regions: [{ type: "illustration" }, { type: "colorSpecs" }] }
-    const mixed = { purpose: "design:Chest", regions: [{ type: "split", regions: [{ type: "illustration" }, { type: "note" }] }, { type: "colorSpecs" }] }
-    expect(composeDesignPageRegions(overview)).toBe(overview)
-    expect(composeDesignPageRegions(mixed)).toBe(mixed)
-  })
-
-  it("gives the illustration the largest solved column in the dense design case", () => {
-    const page = {
-      id: "design",
-      purpose: "design:Chest",
-      regions: [
-        { type: "header", weight: 10 },
-        { type: "titleBar", weight: 5 },
-        { type: "illustration", weight: 40, slots: 1 },
-        { type: "colorSpecs", weight: 20 },
-        { type: "embSpecs", weight: 25 },
-        { type: "disclaimer", weight: 5 },
-      ],
-    }
-    const ctx = { designs: [{ name: "Chest", colors: [{ name: "Black", hex: "#000000" }], emb: { machine: "Tajima", stitches: "12000" } }] }
-    const root = interpretPagePlan(page, ctx)
-    const split = root.children[2]
-    const solved = solveLayout(root, { width: 1200, height: 900 })
-    const solvedSplit = solved.children[2]
-
-    expect(split.direction).toBe("row")
-    expect(split.children).toHaveLength(3)
-    expect(split.children.map((child) => child.grow)).toEqual([60, 16, 24])
-    expect(solvedSplit.height).toBeGreaterThan(650)
-    expect(solvedSplit.children.map((child) => child.height)).toEqual([solvedSplit.height, solvedSplit.height, solvedSplit.height])
-    expect(solvedSplit.children[0].width).toBeGreaterThan(solvedSplit.children[1].width + solvedSplit.children[2].width)
-    expect(solvedSplit.children[1].width).toBeLessThan(solvedSplit.children[2].width)
-  })
-})
-
 describe("split composition (2D layout)", () => {
   const ctx = {
     lang: "ES",
@@ -382,9 +247,8 @@ describe("split composition (2D layout)", () => {
   })
 
   it("builds a horizontal row for a split when the content column has enough real content to fill it", () => {
-    // 12 parts rows (20 + 12*30 = 380px natural) is comfortably more than
-    // half of this split's ~718px allotted share of the page, so a real
-    // side-by-side split still reads as intentional here, not whitespace.
+    // A dense table cannot share the vertical axis with a useful illustration,
+    // so the evaluator chooses columns and sizes them from content constraints.
     const fullCtx = { ...ctx, parts: Array.from({ length: 12 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true })) }
     const root = interpretPagePlan(
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
@@ -394,8 +258,9 @@ describe("split composition (2D layout)", () => {
     const splitNode = root.children[1]
     expect(splitNode.direction).toBe("row")
     expect(splitNode.children).toHaveLength(2)
-    expect(splitNode.children[0].grow).toBe(25)
-    expect(splitNode.children[1].grow).toBe(75)
+    expect(splitNode.children.every((child) => child.grow === 0)).toBe(true)
+    expect(splitNode.children[0].basis).toBeGreaterThanOrEqual(320)
+    expect(splitNode.children[1].basis).toBeGreaterThan(splitNode.children[0].basis)
   })
 
   // The core fix for the reported design critique: a split that pairs an
@@ -410,32 +275,22 @@ describe("split composition (2D layout)", () => {
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
       ctx
     )
-    const splitNode = root.children[1]
-    expect(splitNode.direction).toBe("column")
-    expect(splitNode.children).toHaveLength(2)
-    // illustration first (on top), grows to fill whatever height is freed up
-    expect(splitNode.children[0].grow).toBe(1)
-    // the parts list sits below, sized to its own natural height - not
-    // stretched: 20px table header + 1 row * 32px (ROW.table) + 16px pad = 68px
-    expect(splitNode.children[1].grow).toBe(0)
-    expect(splitNode.children[1].basis).toBe(68)
+    // Stack is represented as normal top-level regions so the page solver can
+    // give every reclaimed pixel to the illustration.
+    expect(root.children).toHaveLength(4)
+    expect(root.children[1].grow).toBeGreaterThan(0)
+    expect(root.children[2].grow).toBe(0)
+    expect(root.children[2].basis).toBe(52)
   })
 
-  // Counterpart to the stack rule: only a partsList reflows to a full-width
-  // strip. A colorSpecs card is narrow, left-weighted content - stacking it
-  // full-width would move the dead space to the RIGHT of a wide band, which
-  // looks worse, so it stays a side column even when short (see the
-  // STACKABLE_TYPES decision + docs/layout-lab before/after). Here the single
-  // color would trip the height threshold if it were stackable; assert it
-  // still resolves to a side-by-side row.
-  it("keeps colorSpecs as a side-by-side column even when short (does NOT stack full-width)", () => {
+  it("places one short color band below when that preserves more illustration area", () => {
     const root = interpretPagePlan(
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
       ctx
     )
-    const splitNode = root.children[1]
-    expect(splitNode.direction).toBe("row")
-    expect(splitNode.children).toHaveLength(2)
+    expect(root.children).toHaveLength(4)
+    expect(root.children[1].grow).toBeGreaterThan(0)
+    expect(root.children[2].basis).toBeGreaterThan(0)
   })
 
   it("renders both columns of a split into the same page svg", () => {
@@ -539,5 +394,41 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     const smallCtx = { ...ctx, parts: manyParts.slice(0, 3) }
     const pages = buildPlannedPages(overflowPlan, smallCtx)
     expect(pages).toHaveLength(1)
+  })
+})
+
+describe("buildPlannedPages design-table pagination", () => {
+  const colors = Array.from({ length: 50 }, (_, index) => ({
+    name: "Color " + (index + 1),
+    hex: "#" + (index + 1).toString(16).padStart(6, "0"),
+  }))
+  const stopSeq = Array.from({ length: 60 }, (_, index) => ({ stop: index + 1, name: "Thread " + (index + 1), stitches: 1000 + index }))
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: [],
+    designs: [{ name: "Dense", colors, emb: { machine: "Tajima", stitches: "60000", stopSeq } }],
+  }
+  const plan = { pages: [{
+    id: "dense",
+    title: "Dense design",
+    purpose: "design:Dense",
+    regions: [
+      { type: "header" },
+      { type: "titleBar" },
+      { type: "illustration", slots: 1 },
+      { type: "colorSpecs" },
+      { type: "embSpecs" },
+      { type: "disclaimer" },
+    ],
+  }] }
+
+  it("continues colors and embroidery stops instead of clipping rows below their legible floor", () => {
+    const pages = buildPlannedPages(plan, ctx)
+    const allSvg = pages.map((item) => item.svg).join("\n")
+    expect(pages.length).toBeGreaterThan(1)
+    expect(pages[1].name).toContain("data_cont")
+    colors.forEach((color) => expect(allSvg.split(">" + color.name + "  " + color.hex + "<").length - 1).toBe(1))
+    stopSeq.forEach((stop) => expect(allSvg.split(": " + stop.name + " (").length - 1).toBe(1))
   })
 })

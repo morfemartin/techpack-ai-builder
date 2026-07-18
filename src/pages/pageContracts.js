@@ -28,26 +28,50 @@ export const CONTRACTS = {
   cover: {
     mandatory: ["header", "titleBar", "illustration", "disclaimer"],
     forbidden: ["partsList", "colorSpecs", "embSpecs"],
+    priorityRank: { illustration: 3 },
+    illustrationShare: { min: 0.7, max: 1 },
+    minIllustrationHeight: 420,
+    dataSide: "right",
   },
   overview: {
     mandatory: ["header", "titleBar", "illustration", "partsList", "disclaimer"],
     forbidden: [],
+    priorityRank: { illustration: 3, partsList: 2, note: 1 },
+    illustrationShare: { min: 0.5, max: 0.72 },
+    minIllustrationHeight: 320,
+    dataSide: "left",
   },
   structure: {
     mandatory: ["header", "titleBar", "illustration", "partsList", "disclaimer"],
     forbidden: [],
+    priorityRank: { illustration: 3, partsList: 2, note: 1 },
+    illustrationShare: { min: 0.5, max: 0.72 },
+    minIllustrationHeight: 320,
+    dataSide: "left",
   },
   lining: {
     mandatory: ["header", "titleBar", "illustration", "partsList", "disclaimer"],
     forbidden: [],
+    priorityRank: { illustration: 3, partsList: 2, note: 1 },
+    illustrationShare: { min: 0.5, max: 0.72 },
+    minIllustrationHeight: 320,
+    dataSide: "left",
   },
   label: {
     mandatory: ["header", "titleBar", "illustration", "disclaimer"],
     forbidden: [],
+    priorityRank: { illustration: 3, colorSpecs: 1, note: 1 },
+    illustrationShare: { min: 0.65, max: 0.85 },
+    minIllustrationHeight: 400,
+    dataSide: "right",
   },
   design: {
     mandatory: ["header", "titleBar", "illustration", "disclaimer"],
     forbidden: ["partsList"],
+    priorityRank: { illustration: 3, embSpecs: 2, colorSpecs: 1, note: 1 },
+    illustrationShare: { min: 0.55, max: 0.78 },
+    minIllustrationHeight: 360,
+    dataSide: "right",
   },
 }
 
@@ -58,6 +82,16 @@ export function purposeFamily(purpose) {
   const p = purpose.trim()
   if (p.startsWith("design:")) return "design"
   return CONTRACTS[p] && p !== "design" ? p : "structure"
+}
+
+export function layoutPolicyFor(page) {
+  return CONTRACTS[purposeFamily(page && page.purpose)]
+}
+
+export function normalizePriority(value, fallback = 1) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(1, Math.min(3, Math.round(numeric)))
 }
 
 // The design a "design:<name>" page is strictly about - null for any other
@@ -135,6 +169,12 @@ export function validatePage(page, ctx) {
 
   for (const [type, count] of typeCounts) {
     if (SINGLETONS.has(type) && count > 1) errors.push({ code: "duplicate-region", type })
+  }
+
+  for (const leaf of leaves) {
+    if (leaf.priority !== undefined && normalizePriority(leaf.priority) !== Number(leaf.priority)) {
+      errors.push({ code: "invalid-priority", type: leaf.type })
+    }
   }
 
   return errors
@@ -229,7 +269,20 @@ export function repairPage(page, ctx) {
   const reordered = [header, titleBar, ...middle, disclaimer].filter(Boolean)
   if (reordered.map((r) => r.type).join(",") !== before) repairs.push("reordered chrome")
 
-  return { page: { ...page, regions: reordered }, repairs }
+  const priorities = contract.priorityRank || {}
+  function applyPriorities(regs) {
+    return regs.map((region) => {
+      if (region.type === "split" && Array.isArray(region.regions)) {
+        return { ...region, regions: applyPriorities(region.regions) }
+      }
+      const fallback = priorities[region.type] || 1
+      const priority = normalizePriority(region.priority, fallback)
+      if (region.priority !== priority) repairs.push("set priority " + region.type + "=" + priority)
+      return { ...region, priority }
+    })
+  }
+
+  return { page: { ...page, regions: applyPriorities(reordered) }, repairs }
 }
 
 // ── Document-level contract ──────────────────────────────────────────────────

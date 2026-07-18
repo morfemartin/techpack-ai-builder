@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { CONTRACTS, purposeFamily, validatePage, repairPage, validateOutline, repairOutline } from "./pageContracts.js"
+import { CONTRACTS, layoutPolicyFor, normalizePriority, purposeFamily, validatePage, repairPage, validateOutline, repairOutline } from "./pageContracts.js"
 
 // Contract for the page-contract system (Phase 2 of Layout Engine v2):
 // deterministic encoding of how a tech-pack designer thinks - what MUST be
@@ -32,6 +32,21 @@ describe("purposeFamily", () => {
     expect(purposeFamily("overview")).toBe("overview")
     expect(purposeFamily("cover")).toBe("cover")
     expect(purposeFamily("whatever")).toBe("structure")
+  })
+})
+
+describe("layout policy", () => {
+  it("exposes purpose-specific priorities and bounded illustration shares", () => {
+    const overview = layoutPolicyFor({ purpose: "overview" })
+    expect(overview.priorityRank.illustration).toBeGreaterThan(overview.priorityRank.partsList)
+    expect(layoutPolicyFor({ purpose: "design:Chest Logo" }).illustrationShare).toEqual({ min: 0.55, max: 0.78 })
+  })
+
+  it("normalizes arbitrary model priorities into the supported 1-3 range", () => {
+    expect(normalizePriority(-20)).toBe(1)
+    expect(normalizePriority(2.4)).toBe(2)
+    expect(normalizePriority(99)).toBe(3)
+    expect(normalizePriority("bad", 2)).toBe(2)
   })
 })
 
@@ -97,6 +112,13 @@ describe("validatePage", () => {
 })
 
 describe("repairPage", () => {
+  it("assigns contract priorities recursively and clamps invalid model values", () => {
+    const page = { id: "p", purpose: "overview", regions: [...chrome, { type: "split", regions: [{ type: "partsList", priority: 99 }, { type: "illustration" }] }, disclaimer] }
+    const { page: fixed } = repairPage(page, ctx)
+    const split = fixed.regions.find((region) => region.type === "split")
+    expect(split.regions.map((region) => [region.type, region.priority])).toEqual([["partsList", 3], ["illustration", 3]])
+    expect(validatePage(fixed, ctx)).toEqual([])
+  })
   it("inserts missing mandatory regions with sensible defaults and reports each repair", () => {
     const page = { id: "p", purpose: "overview", regions: [...chrome, disclaimer] }
     const { page: fixed, repairs } = repairPage(page, ctx)

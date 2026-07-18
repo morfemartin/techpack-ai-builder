@@ -18,6 +18,7 @@ import { toGrayscale } from "../core/colorUtils.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
+import { optimizePageComposition } from "./composition.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
@@ -47,6 +48,7 @@ const SPLIT_GAP = 14
 // blue title bar and the dead whitespace at the bottom of a page in one move -
 // the model's weights now only distribute the CONTENT area.
 const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 20 }
+const STANDARD_WORKING_HEIGHT = PAGE_H - PAGE_PAD * 2 - FIXED_BASIS.header - FIXED_BASIS.titleBar - FIXED_BASIS.disclaimer - PAGE_GAP * 3
 
 // Matches renderPartsList's `compact` row basis plus its table header (both
 // from the shared metrics scale) - used to measure, after solving, whether a
@@ -124,14 +126,6 @@ function measureNode(region, page, ctx, width) {
   return measureRegion(region, page, ctx, width)
 }
 
-// The natural (uncompressed) content height a bounded region needs - null
-// for absorbers. Thin wrapper over the measure registry kept for the split
-// compositor's stack gate.
-function naturalContentHeight(region, page, ctx) {
-  const m = measureRegion(region, page, ctx, CONTENT_W)
-  return m.canAbsorb ? null : m.natural || 0
-}
-
 // Estimates each top-level region's allotted pixel height WITHOUT running a
 // full solve pass, mirroring the measure-then-solve sizing below: fixed
 // chrome takes its strip, bounded regions take their measured natural
@@ -155,134 +149,6 @@ function estimateRegionHeights(regions, grows, page, ctx) {
     if (measures[i].canAbsorb) return absorberGrow > 0 ? slack * (grows[i] / absorberGrow) : slack
     return measures[i].natural || 0
   })
-}
-
-// A bounded content block gets stacked below the illustration (instead of
-// stretched into a side column) only when it needs meaningfully less than
-// half of what the split was allotted - short of that, a side-by-side split
-// still reads as a deliberate two-column composition, not empty space.
-const STACK_MAX_RATIO = 0.5
-const STACK_CONTENT_PAD = 16
-
-// Only these content types stack below the illustration when short. The key
-// distinction is HORIZONTAL fill: a partsList row is a wide 3-column record
-// (#/spec/detail) that reads well stretched to the full page width, so a
-// short parts list becomes a clean full-width strip under the illustration.
-// A colorSpecs card and an embSpecs sheet are the opposite - narrow, left-
-// weighted content (a swatch + a line, a label:value pair). Stacking those
-// full-width just moves the dead space from *below* a side column to the
-// *right* of a wide band, which looks worse - a color card reads as designed
-// as a side column even with some room beneath it. So color/emb specs stay
-// side-by-side (their tech-pack idiom); only partsList reflows to a stack.
-// See docs/layout-lab for the visual before/after that drove this rule.
-const STACKABLE_TYPES = new Set(["partsList"])
-
-const DESIGN_COLUMN_TYPES = new Set(["illustration", "colorSpecs", "embSpecs"])
-const BOM_PURPOSES = new Set(["overview", "structure", "lining"])
-
-// Contract repair guarantees that every required design block exists, but it
-// intentionally does not choose a visual composition. Consolidate the common
-// design-page shape here: illustration + narrow technical data become one
-// horizontal working area instead of three full-width bands. This also folds
-// a contract-inserted top-level spec into an AI-proposed illustration/spec
-// split, which is the exact source of the wasted space in the dense-embroidery
-// fixture.
-export function composeDesignPageRegions(page) {
-  if (!page || typeof page !== "object" || !String(page.purpose || "").startsWith("design:")) return page
-  const regions = Array.isArray(page.regions) ? page.regions : []
-  const candidates = []
-  const consumed = new Set()
-
-  regions.forEach((region, index) => {
-    if (DESIGN_COLUMN_TYPES.has(region.type)) {
-      candidates.push(region)
-      consumed.add(index)
-      return
-    }
-    if (region.type !== "split" || !Array.isArray(region.regions) || region.regions.length === 0) return
-    if (!region.regions.every((inner) => DESIGN_COLUMN_TYPES.has(inner.type))) return
-    candidates.push(...region.regions)
-    consumed.add(index)
-  })
-
-  const byType = new Map()
-  candidates.forEach((region) => {
-    if (!byType.has(region.type)) byType.set(region.type, region)
-  })
-  const illustration = byType.get("illustration")
-  const colors = byType.get("colorSpecs")
-  const embroidery = byType.get("embSpecs")
-  if (!illustration || (!colors && !embroidery)) return page
-
-  let columns
-  if (colors && embroidery) {
-    columns = [
-      { ...illustration, weight: 60 },
-      { ...colors, weight: 16 },
-      { ...embroidery, weight: 24 },
-    ]
-  } else if (colors) {
-    columns = [{ ...illustration, weight: 76 }, { ...colors, weight: 24 }]
-  } else {
-    columns = [{ ...illustration, weight: 64 }, { ...embroidery, weight: 36 }]
-  }
-
-  const firstConsumed = Math.min(...consumed)
-  const composed = []
-  regions.forEach((region, index) => {
-    if (index === firstConsumed) composed.push({ type: "split", weight: safeWeight(region.weight), regions: columns })
-    if (!consumed.has(index)) composed.push(region)
-  })
-  return { ...page, regions: composed }
-}
-
-// The AI sometimes returns a long BOM and its illustration as independent
-// top-level bands. Both blocks are valid, so page contracts correctly leave
-// them alone, but measure-then-solve then gives the table its full natural
-// height and squeezes the artwork into the remainder. Normalize that valid-but-
-// poor proposal into the same split grammar used by deterministic fixtures.
-// buildRegionNode still makes the final row-vs-stack decision from real part
-// count: long BOMs stay beside the artwork; short BOMs become a compact strip.
-export function composeBomPageRegions(page) {
-  if (!page || typeof page !== "object" || !BOM_PURPOSES.has(String(page.purpose || ""))) return page
-  const regions = Array.isArray(page.regions) ? page.regions : []
-  const candidates = []
-  const consumed = new Set()
-
-  regions.forEach((region, index) => {
-    if (region.type === "illustration" || region.type === "partsList") {
-      candidates.push(region)
-      consumed.add(index)
-      return
-    }
-    if (region.type !== "split" || !Array.isArray(region.regions) || region.regions.length === 0) return
-    if (!region.regions.every((inner) => inner.type === "illustration" || inner.type === "partsList")) return
-    candidates.push(...region.regions)
-    consumed.add(index)
-  })
-
-  const illustration = candidates.find((region) => region.type === "illustration")
-  const partsList = candidates.find((region) => region.type === "partsList")
-  if (!illustration || !partsList) return page
-  if (consumed.size === 1 && regions[[...consumed][0]].type === "split") return page
-
-  const firstConsumed = Math.min(...consumed)
-  const composed = []
-  regions.forEach((region, index) => {
-    if (index === firstConsumed) {
-      composed.push({
-        type: "split",
-        weight: safeWeight(region.weight),
-        regions: [{ ...partsList, weight: 34 }, { ...illustration, weight: 66 }],
-      })
-    }
-    if (!consumed.has(index)) composed.push(region)
-  })
-  return { ...page, regions: composed }
-}
-
-export function composePageRegions(page) {
-  return composeDesignPageRegions(composeBomPageRegions(page))
 }
 
 // Normalizes region weights into flex `grow` values that sum to 100, keeping
@@ -375,6 +241,7 @@ function leafForRegion(region, page, ctx) {
     // never on how many parts are shown, so it's a stable measuring stick for
     // "does this page's part count actually fit here" (see partsCapacity).
     _isPartsList: region.type === "partsList",
+    _regionType: region.type,
     render: (box) => {
       if (region.type === "header") {
         return "<g transform='translate(" + box.x + " " + box.y + ")'>" + svgHeader(hdr, ctx && ctx.logo, box.width, box.height) + "</g>"
@@ -427,19 +294,11 @@ function leafForRegion(region, page, ctx) {
   })
 }
 
-// Maps one normalized region to a layout node. A `split` normally becomes a
-// horizontal `row` whose children are its inner leaf regions, each given a
-// horizontal grow from its own weight - this is what lets a page place a
-// narrow numbered partsList beside a wide illustration (the real tech-pack
-// idiom). But when the split pairs an illustration with a SHORT parts list,
-// stretching that table into a full-height side column just to match the
-// illustration is the "lateral layout with dead white space" the model can't
-// reason about on its own - so when `allottedHeight` shows the table needs
-// far less than its column would give it, this stacks instead: illustration
-// on top (full width, most of the height), the table below at its own natural
-// height as a full-width strip. Restricted to STACKABLE_TYPES (partsList) -
-// see that constant for why color/emb specs stay side columns. Everything
-// else stays a leaf.
+// Maps one normalized region to a layout node. Constraint-composed rows carry
+// explicit widths derived from legibility bands and priorities, plus the
+// natural cross-axis height of every bounded table. That lets a short table
+// end where its content ends instead of drawing an empty full-height column.
+// Authored splits without constraint metadata retain their normalized weights.
 function buildRegionNode(region, page, ctx, allottedHeight) {
   if (region.type === "split") {
     const inner = Array.isArray(region.regions) ? region.regions : []
@@ -448,20 +307,15 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
     // interpretPagePlan; inner columns keep weight-driven WIDTH shares.
     const containerSizing = region._sizing || { grow: region.grow }
 
-    if (inner.length === 2 && allottedHeight) {
-      const illuIdx = inner.findIndex((r) => r.type === "illustration")
-      const otherIdx = illuIdx === 0 ? 1 : illuIdx === 1 ? 0 : -1
-      if (illuIdx !== -1 && otherIdx !== -1 && STACKABLE_TYPES.has(inner[otherIdx].type)) {
-        const natural = naturalContentHeight(inner[otherIdx], page, ctx)
-        if (natural !== null && natural > 0 && natural < allottedHeight * STACK_MAX_RATIO) {
-          const contentLeaf = { ...leafForRegion({ ...inner[otherIdx], grow: 0 }, page, ctx), basis: natural + STACK_CONTENT_PAD, grow: 0, shrink: 0 }
-          const illuLeaf = { ...leafForRegion({ ...inner[illuIdx], grow: 1 }, page, ctx), basis: "auto", grow: 1 }
-          // Illustration always on top regardless of the AI's original inner
-          // order - it's the hero and the one region that benefits from
-          // reclaiming the freed height, the content block is a caption below it.
-          return col({ ...containerSizing, gap: SPLIT_GAP }, [illuLeaf, contentLeaf])
-        }
-      }
+    if (region._composition === "constraint-row") {
+      const children = inner.map((r) => ({
+        ...leafForRegion({ ...r, grow: 0 }, page, ctx),
+        basis: r._columnWidth,
+        grow: 0,
+        shrink: 0,
+        crossBasis: r.type === "illustration" ? allottedHeight : Math.min(allottedHeight, r._naturalHeight || allottedHeight),
+      }))
+      return row({ ...containerSizing, gap: SPLIT_GAP, align: "start" }, children)
     }
 
     const grows = weightsToGrow(inner)
@@ -472,9 +326,9 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
 }
 
 export function interpretPagePlan(page, ctx) {
-  const normalized = composePageRegions(normalizePlan({ pages: [page] }).pages[0])
-  const grows = weightsToGrow(normalized.regions)
   const safeCtx = ctx || {}
+  const normalized = optimizePageComposition(normalizePlan({ pages: [page] }).pages[0], safeCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
+  const grows = weightsToGrow(normalized.regions)
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan
   // call (tests) and the full buildPlannedPages path share one source of truth
   // for "which parts does this page actually show."
@@ -495,7 +349,7 @@ export function interpretPagePlan(page, ctx) {
     let _sizing
     if (FIXED_BASIS[region.type]) _sizing = { basis: FIXED_BASIS[region.type], grow: 0, shrink: 0 }
     else if (m.canAbsorb) _sizing = { grow: grows[i], min: m.min }
-    else _sizing = { basis: m.natural || 0, grow: 0, shrink: 1, min: m.min }
+    else _sizing = { basis: m.natural || 0, grow: 0, shrink: 0, min: m.min }
     return { ...region, grow: grows[i], _sizing }
   })
 
@@ -531,6 +385,68 @@ function findPartsListLeaf(node) {
   return null
 }
 
+function findRegionLeaf(node, type) {
+  if (!node) return null
+  if (node._regionType === type) return node
+  if (node.children) {
+    for (const child of node.children) {
+      const found = findRegionLeaf(child, type)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+function availableTableHeight(leafNode) {
+  if (!leafNode) return 0
+  // A natural-height table is deliberately non-shrinkable. When its content
+  // is taller than the page, the solved leaf may extend past the footer; use
+  // the physical page boundary for pagination capacity, never that overflowed
+  // natural box.
+  const bottomChrome = PAGE_PAD + FIXED_BASIS.disclaimer + PAGE_GAP
+  return Math.max(0, Math.min(leafNode.height, PAGE_H - bottomChrome - leafNode.y))
+}
+
+function colorCapacity(height) {
+  return Math.max(0, Math.floor((height - 32) / 16))
+}
+
+function embroideryStopCapacity(height) {
+  // Fourteen base fields + sequence heading/rule consume sixteen rows before
+  // the individual stops. Eleven pixels is the renderer's legible floor.
+  return Math.max(0, Math.floor((height - 38) / 11) - 16)
+}
+
+function withDesignSlice(page, pageCtx, colors, stopSeq) {
+  const designs = pageCtx && Array.isArray(pageCtx.designs) ? pageCtx.designs : []
+  const selected = selectedDesign(page, pageCtx)
+  const index = designs.indexOf(selected)
+  if (index < 0) return pageCtx
+  const design = { ...selected }
+  if (colors !== undefined) design.colors = colors
+  if (stopSeq !== undefined) design.emb = { ...(design.emb || {}), stopSeq, stops: stopSeq.length }
+  return { ...pageCtx, designs: designs.map((item, i) => i === index ? design : item) }
+}
+
+function pageForDataSlice(page, keepColors, keepEmb, continuation) {
+  function filter(regions) {
+    return (regions || []).flatMap((region) => {
+      if (region.type === "colorSpecs" && !keepColors) return []
+      if (region.type === "embSpecs" && !keepEmb) return []
+      if (region.type !== "split") return [region]
+      const inner = filter(region.regions)
+      return inner.length > 0 ? [{ ...region, regions: inner }] : []
+    })
+  }
+  if (!continuation) return { ...page, regions: filter(page.regions) }
+  return {
+    ...page,
+    id: page.id + "-data-cont-" + continuation,
+    title: (page.title || "") + " (cont.)",
+    regions: filter(page.regions),
+  }
+}
+
 export function buildPlannedPages(plan, ctx, opts) {
   const mono = !!(opts && opts.mono)
   const normalized = normalizePlan(plan)
@@ -558,7 +474,33 @@ export function buildPlannedPages(plan, ctx, opts) {
     const partsLeaf = findPartsListLeaf(firstPass)
     const effective = effectivePartsForPage(allParts, page)
 
-    if (!partsLeaf || effective.length <= partsCapacity(partsLeaf.height)) {
+    // Color and embroidery tables use elastic rows down to explicit legible
+    // floors. If even those floors cannot contain every row, continue the
+    // technical data across pages while retaining the page's illustration and
+    // chrome. No row is clipped and no font is reduced below its contract.
+    const design = selectedDesign(page, ctx)
+    const colors = design && Array.isArray(design.colors) ? design.colors.filter((color) => color && color.hex) : []
+    const stopSeq = design && design.emb && Array.isArray(design.emb.stopSeq) ? design.emb.stopSeq : []
+    const colorLeaf = findRegionLeaf(firstPass, "colorSpecs")
+    const embLeaf = findRegionLeaf(firstPass, "embSpecs")
+    const colorCap = colorLeaf ? Math.max(1, colorCapacity(availableTableHeight(colorLeaf))) : colors.length
+    const embCap = embLeaf ? Math.max(1, embroideryStopCapacity(availableTableHeight(embLeaf))) : stopSeq.length
+    const colorOverflow = !!colorLeaf && colors.length > colorCap
+    const embOverflow = !!embLeaf && stopSeq.length > embCap
+
+    if (colorOverflow || embOverflow) {
+      const pageCount = Math.max(colorOverflow ? Math.ceil(colors.length / colorCap) : 1, embOverflow ? Math.ceil(stopSeq.length / embCap) : 1)
+      for (let dataPageIndex = 0; dataPageIndex < pageCount; dataPageIndex++) {
+        const colorChunk = colorOverflow ? colors.slice(dataPageIndex * colorCap, (dataPageIndex + 1) * colorCap) : dataPageIndex === 0 ? colors : []
+        const stopChunk = embOverflow ? stopSeq.slice(dataPageIndex * embCap, (dataPageIndex + 1) * embCap) : dataPageIndex === 0 ? stopSeq : []
+        const slicedPage = pageForDataSlice(page, colorChunk.length > 0, !!embLeaf && (stopChunk.length > 0 || (!embOverflow && dataPageIndex === 0)), dataPageIndex)
+        const slicedCtx = withDesignSlice(slicedPage, ctx, colorChunk, stopChunk)
+        outPages.push({ name: pageName(slicedPage, i), svg: svgFor(resolvedTreeFor(slicedPage, slicedCtx)) })
+      }
+      return
+    }
+
+    if (!partsLeaf || effective.length <= partsCapacity(availableTableHeight(partsLeaf))) {
       outPages.push({ name: pageName(page, i), svg: svgFor(firstPass) })
       return
     }
@@ -570,7 +512,7 @@ export function buildPlannedPages(plan, ctx, opts) {
     // BOM. Every other block already shrinks-to-fit (fitText, dynamic specs
     // row height); the parts list is the one place row height is fixed for
     // readability, so it's the one that paginates instead.
-    const cap = Math.max(1, partsCapacity(partsLeaf.height))
+    const cap = Math.max(1, partsCapacity(availableTableHeight(partsLeaf)))
     const cappedCtx = { ...ctx, parts: effective.slice(0, cap), partsStartIndex: 0 }
     outPages.push({ name: pageName(page, i), svg: svgFor(resolvedTreeFor({ ...page, pieces: undefined }, cappedCtx)) })
 
@@ -591,7 +533,7 @@ export function buildPlannedPages(plan, ctx, opts) {
       }
       const probe = resolvedTreeFor(contPage, { ...ctx, parts: rest, partsStartIndex: startIndex })
       const contLeaf = findPartsListLeaf(probe)
-      const contCap = Math.max(1, partsCapacity(contLeaf ? contLeaf.height : H))
+      const contCap = Math.max(1, partsCapacity(contLeaf ? availableTableHeight(contLeaf) : H))
       const chunk = rest.slice(0, contCap)
       const final = chunk.length === rest.length ? probe : resolvedTreeFor(contPage, { ...ctx, parts: chunk, partsStartIndex: startIndex })
       outPages.push({ name: pageName(contPage, i), svg: svgFor(final) })

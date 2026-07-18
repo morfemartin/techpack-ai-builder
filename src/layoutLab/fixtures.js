@@ -1,4 +1,56 @@
 // ─────────────────────────────────────────────────────────────────────────
+
+function overviewDensityFixture(count) {
+  return {
+    id: `M-bom-${count}`,
+    dataset: "parka",
+    density: { parts: count },
+    title: `M · Same overview · ${count} BOM rows`,
+    tests: `Identical page intent and regions with ${count} real table rows.`,
+    expected: "The decision may change with density, but every row remains legible and the illustration receives the largest area compatible with a complete BOM.",
+    plan: {
+      pages: [{
+        id: `density-bom-${count}`,
+        title: `BOM density ${count}`,
+        purpose: "overview",
+        regions: [
+          { type: "header", weight: 10 },
+          { type: "titleBar", weight: 5 },
+          { type: "illustration", weight: 55, slots: 2, refs: ["Front", "Back"] },
+          { type: "partsList", weight: 25 },
+          { type: "disclaimer", weight: 8 },
+        ],
+      }],
+    },
+  }
+}
+
+function designDensityFixture(kind, count) {
+  const isColor = kind === "colors"
+  return {
+    id: `N-${kind}-${count}`,
+    dataset: "hoodie",
+    density: isColor ? { colors: count } : { colors: 3, embStops: count },
+    title: `N · Same design · ${count} ${isColor ? "colors" : "embroidery stops"}`,
+    tests: `Identical design-page intent with ${count} ${isColor ? "color rows" : "stop rows"}.`,
+    expected: "Technical data must remain complete; the compositor changes arrangement only when measured density requires it and protects the illustration's useful area.",
+    plan: {
+      pages: [{
+        id: `density-${kind}-${count}`,
+        title: `Design density ${count}`,
+        purpose: "design:Bordado pecho denso",
+        regions: [
+          { type: "header", weight: 10 },
+          { type: "titleBar", weight: 5 },
+          { type: "illustration", weight: 55, slots: 1, refs: ["Placement"] },
+          { type: "colorSpecs", weight: 15 },
+          ...(isColor ? [] : [{ type: "embSpecs", weight: 22 }]),
+          { type: "disclaimer", weight: 8 },
+        ],
+      }],
+    },
+  }
+}
 // LAYOUT LAB · Fixtures de plan (Fase 1 — sistema de diseño aislado)
 //
 // Cada fixture fija un PLAN a mano contra un dataset, para aislar y verificar
@@ -120,10 +172,10 @@ export const FIXTURES = [
   {
     id: "C2-colorspecs-short",
     dataset: "skirt",
-    title: "C2 · colorSpecs corto (2 colores) → sigue en FILA",
+    title: "C2 · colorSpecs corto (2 colores) · decisión por área",
     tests: "misma página que C pero con la cápsula de 2 tonos.",
     expected:
-      "Columna lateral con algo de espacio debajo — a propósito. Las cartas de color NO apilan a ancho completo (ver STACKABLE_TYPES); ese es su idioma de ficha.",
+      "El evaluador compara fila y franja usando contenido medido; debe conservar ambos colores completos y escoger la alternativa que deje más área útil de ilustración.",
     plan: {
       pages: [
         {
@@ -389,7 +441,7 @@ export const FIXTURES = [
     dataset: "hoodie",
     title: "J · Contract repair · malformed design page",
     tests: "a design page missing chrome/illustration and incorrectly repeating the BOM.",
-    expected: "Diagnostics show the repair; illustration, colors and embroidery then share one 60/16/24 working row with no stacked data bands.",
+    expected: "Diagnostics show the repair; the compositor chooses from measured content, keeps both technical tables complete and gives the remaining useful area to the illustration.",
     contractRepair: true,
     plan: {
       pages: [
@@ -488,4 +540,7 @@ export const FIXTURES = [
       ],
     },
   },
+  ...[1, 6, 16, 24].map(overviewDensityFixture),
+  ...[1, 3, 10].map((count) => designDensityFixture("colors", count)),
+  ...[0, 6, 30].map((count) => designDensityFixture("stops", count)),
 ]

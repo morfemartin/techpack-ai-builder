@@ -15,12 +15,14 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { buildPlannedPages } from "../pages/interpretPlan.js"
+import { evaluatePageCompositions } from "../pages/composition.js"
 import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
 import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings, summarizeConfirmed } from "../core/reviewDiff.js"
 import { COL } from "../design/metrics.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
+import { ctxForFixture } from "./fixtureContext.js"
 
 const PAGE_W = 1200
 const PAGE_H = 900
@@ -84,7 +86,7 @@ function renderFixture(fx) {
   let error = ""
   let diagnostics = []
   try {
-    const ctx = ctxFor(dataset)
+    const ctx = ctxForFixture(fx)
     let plan = fx.plan
     if (fx.contractRepair) {
       plan = {
@@ -105,6 +107,15 @@ function renderFixture(fx) {
         .filter((finding) => finding.kind !== "confirmed")
         .forEach((finding) => diagnostics.push(`${finding.kind}: ${finding.topic}:${finding.field}`))
     }
+    plan.pages.forEach((page, index) => {
+      const { decision } = evaluatePageCompositions(page, ctx, { width: 1148, height: 674 })
+      if (decision.mode === "unchanged") return
+      const widths = Array.isArray(decision.widths) ? " · widths " + decision.widths.map((value) => Math.round(value)).join("/") + "px" : ""
+      diagnostics.push(
+        `composition page ${index + 1}: ${decision.mode} · complete ${decision.complete ? "yes" : "NO"} · overflow ${Math.round(decision.overflow || 0)}px · illustration ${Math.round(decision.illustrationArea || 0)}px²${widths}`
+      )
+      diagnostics.push("reason: " + decision.reason)
+    })
     const pages = buildPlannedPages(plan, ctx, { mono: state.mono })
     pagesHtml = pages.map(pageFigure).join("")
   } catch (e) {

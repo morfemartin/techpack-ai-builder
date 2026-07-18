@@ -30,16 +30,20 @@ Phase 2 reuses the exact same garment datasets but lets `planDocumentOutline` + 
 ## What's in it
 
 - **`datasets.js`** — 5 complex garments with unique designs, each defining the `ctx` (header, parts, designs) the engine consumes: a technical 3-in-1 parka, an oversized hoodie, a pleated midi skirt, a wool/leather varsity jacket, and a sublimated bikini set.
-- **`fixtures.js`** — 13 scenario plans, including dedicated measure-pass, contract-repair, per-slot brief, and review-diff samples.
+- **`fixtures.js`** — 23 scenario plans, including dedicated measure-pass, contract-repair, per-slot brief, review-diff, and content-density matrices.
 - **`main.js`** — renders every fixture with `buildPlannedPages(...)`, displays deterministic diagnostics, and provides **grayscale** and **grid-overlay** toggles.
 
 ---
 
-## The compositor decision this Lab drove
+## The compositor decision this Lab drives
 
-The layout engine has a **content-aware split compositor**. A `split` region normally lays its children side by side (a parts list beside an illustration — the real tech-pack idiom). But when a `split` pairs an illustration with a **short** block, stretching that block into a full-height side column leaves an obvious band of dead white space. The compositor detects this ahead of time (it estimates the block's natural height from its data volume) and, when the block would fill less than half its column, **stacks** instead: illustration on top at full width, the block below at its natural height.
-
-The Lab surfaced a subtlety that decided *which* blocks are allowed to stack.
+The layout engine evaluates **candidate compositions** rather than applying a
+garment template. For the same page intent it measures the actual BOM, colors,
+embroidery and notes, then compares row and stack candidates against five
+ordered constraints: complete data, legible minimums, purpose-specific
+illustration bands, maximum useful illustration area, and minimum unexplained
+space. The diagnostic above every fixture records the chosen mode, overflow,
+area and calculated column widths.
 
 ### Parts list → stacks (good)
 
@@ -47,7 +51,7 @@ A parts-list row is a wide, three-column record (`#` / spec / detail) that reads
 
 ![Short parts list stacks as a full-width strip under the illustration](./img/b-stack.png)
 
-### Color / embroidery specs → do **not** stack
+### Color / embroidery specs → measured like every other block
 
 A color card is the opposite: narrow, left-weighted content (a swatch + one line per color). Stacking it full width doesn't remove the dead space — it just **moves it from below a side column to the right of a wide band**, which looks worse:
 
@@ -55,7 +59,12 @@ A color card is the opposite: narrow, left-weighted content (a swatch + one line
 | --- | --- |
 | ![10-color card stacked full width, ~85% of the band empty on the right](./img/c-before.png) | ![Same 10-color card as a narrow side column beside the illustration](./img/c-after.png) |
 
-So stacking is restricted to `STACKABLE_TYPES` (currently `partsList`). Color and embroidery specs stay as side columns — their tech-pack idiom — even when short, accepting some room beneath them, which reads as designed rather than as an error. The rule lives in `src/pages/interpretPlan.js` and is locked by unit tests in `interpretPlan.test.js`.
+There is no type whitelist and no fixed ratio. A short card can become a compact
+band when that preserves more useful illustration area; a dense card becomes a
+legible side column. Multiple technical blocks can form separate columns, and
+any block that exceeds its legible capacity continues on another page. The
+pure evaluator lives in `src/pages/composition.js` and is tested independently
+from rendering.
 
 ---
 
@@ -68,7 +77,7 @@ Compositor decision was verified against the layout tree directly, not by eye.
 | **A** · split row | Parka (16 parts) | Full parts list beside illustration | **Row** — table fills its column |
 | **B** · split stack | Bikini (1 part) | Very short parts list beside illustration | **Stack** — full-width strip below |
 | **C** · colorSpecs heavy | Skirt (10 colorways) | Heavy color card beside illustration | **Row** — side column |
-| **C2** · colorSpecs short | Skirt (2 colorways) | Short color card | **Row** — stays a side column (by design) |
+| **C2** · colorSpecs short | Skirt (2 colorways) | Short color card | Candidate chosen by measured area, not type |
 | **D** · embSpecs heavy | Hoodie | Embroidery sheet beside illustration | **Row** — side column |
 | **E** · illustration grid | Varsity (4 views) | 2×2 illustration grid + short parts list | **Stack** — grid on top, strip below |
 | **F** · pagination | Parka (16 parts) | Parts list in a short band | **2 pages** — continues 1…16, nothing dropped |
@@ -78,6 +87,8 @@ Compositor decision was verified against the layout tree directly, not by eye.
 | **J** · contract repair | Hoodie | Invalid design page | Forbidden BOM dropped; mandatory regions inserted |
 | **K** · per-slot briefs | Parka | Two distinct structured briefs | Each art board carries its own instructions |
 | **L** · review diff | Varsity | Three omitted design pages | Every omission appears in diagnostics |
+| **M** · BOM density | Same overview, 1/6/16/24 rows | Decision under changing data only | Stack → row → continuation as needed |
+| **N** · design density | Same design, 1/3/10 colors and 0/6/30 stops | Multiple technical columns | Complete rows with dynamic widths |
 
 A few of the results rendered:
 

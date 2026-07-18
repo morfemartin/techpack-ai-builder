@@ -88,9 +88,9 @@ export function measureRegion(region, page, ctx, width) {
     const emb = design && hasEmbSpecs(design.emb) ? design.emb : null
     if (!emb) return { natural: 0, min: 0, canAbsorb: false }
     const stopSeq = Array.isArray(emb.stopSeq) ? emb.stopSeq : []
-    const totalRows = 14 + (stopSeq.length > 0 ? 1 + stopSeq.length : 0)
+    const totalRows = 14 + (stopSeq.length > 0 ? 2 + stopSeq.length : 0)
     return {
-      natural: 38 + totalRows * ROW.emb,
+      natural: 38 + totalRows * ROW.emb + (stopSeq.length > 0 ? Math.max(0, ROW.emb - 12) : 0),
       min: 38 + totalRows * 11, // renderEmbSpecs' row floor
       canAbsorb: false,
     }

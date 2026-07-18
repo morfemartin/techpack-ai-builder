@@ -143,17 +143,18 @@ time budget. When DeepSeek does not answer, the wizard uses the contractual
 outline/layout fallback or continues without designs/briefs instead of staying
 blocked behind the provider's internal retries.
 
-After contract repair, design pages receive one final deterministic composition
-pass. Illustration, colors, and embroidery data are consolidated into a
-weighted working row (`60/16/24`, or a wider two-column variant when only one
-data block exists), preventing mandatory blocks from becoming stacked
-full-width bands that steal height from the artwork.
+After contract repair, every page receives a deterministic constraint-evaluation
+pass. It measures the real rows, compares stack and row candidates, enforces
+purpose-specific illustration share bands and minimum legible data widths,
+then selects the complete candidate with the largest usable illustration area.
+The result therefore changes with content density; no garment name or fixed
+column percentage selects the composition.
 
-BOM pages receive the same protection when the model proposes `illustration`
-and `partsList` as separate top-level bands. They are normalized into a
-`34/66` table/artwork split; the existing content-aware gate keeps long tables
-beside the artwork and only stacks genuinely short tables as compact strips.
-An explicit split authored by the planner is preserved unchanged.
+Bounded tables keep their natural height when possible and may compress only to
+the renderer's explicit legibility floor. If all rows still cannot fit, BOM,
+color and embroidery data continue onto additional pages. This makes
+`complete` a hard guarantee: a composition may change or paginate, but it does
+not clip rows or silently shrink type below the contract.
 
 Embroidery presence is based on `hasEmbSpecs`, not object truthiness. The UI
 creates every design with an `EMPTY_EMB` object, and that empty form must not

@@ -53,8 +53,9 @@ describe("measureRegion", () => {
   it("embSpecs: section head + 14 fixed fields + sequence header + sequence rows", () => {
     const m = measureRegion({ type: "embSpecs" }, page, ctx, 400)
     expect(m.canAbsorb).toBe(false)
-    // head = 6 + 20 + 12 = 38 (matches renderEmbSpecs), rows = 14 fields + 1 seq header + 1 seq row
-    expect(m.natural).toBe(38 + (14 + 1 + 1) * ROW.emb)
+    // head = 38; the sequence adds its separator row, heading row and stop
+    // row, plus the renderer's 4px ideal breathing offset.
+    expect(m.natural).toBe(38 + (14 + 2 + 1) * ROW.emb + 4)
   })
 
   it("embSpecs with no emb data measures to zero (nothing will render)", () => {
