@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError } from "./deepseekClient.js"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError, resolveAITransport } from "./deepseekClient.js"
 
 function mockFetchOnce(body, ok = true, status = 200) {
   global.fetch = vi.fn().mockResolvedValue({
@@ -65,6 +65,35 @@ function sseEvent(content, finishReason) {
 describe("deepseekClient", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("routes studio text to the private loopback bridge", () => {
+    const storage = new Map()
+    vi.stubGlobal("window", {
+      location: { search: "?studio=local" },
+      localStorage: {
+        getItem: (key) => storage.get(key) || null,
+        setItem: (key, value) => storage.set(key, value),
+      },
+    })
+    expect(resolveAITransport({ messages: [{ role: "user", content: "plan" }] })).toMatchObject({
+      provider: "local",
+      url: "http://127.0.0.1:11435/v1/chat/completions",
+    })
+  })
+
+  it("always routes image messages to NVIDIA even in studio mode", () => {
+    vi.stubGlobal("window", {
+      location: { search: "?studio=local" },
+      localStorage: { getItem: () => "local", setItem: () => {} },
+    })
+    const transport = resolveAITransport({
+      messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,x" } }] }],
+    })
+    expect(transport.provider).toBe("nvidia")
+    expect(transport.url).toBe("/api/deepseek")
   })
 
   it("deepseekChat returns the assistant message content on success", async () => {

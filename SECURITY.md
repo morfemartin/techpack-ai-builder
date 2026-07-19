@@ -31,6 +31,10 @@ intake and translation features. The key is treated as follows:
 - The proxy caps `max_tokens` per request so a discovered endpoint cannot be
   used to run up unbounded charges on a single call.
 - Dependabot watches npm and GitHub Actions dependencies for known vulnerabilities.
+- The optional studio model binds only to `127.0.0.1` behind a restricted
+  bridge. It accepts text only, forces one configured model, caps request size,
+  message count and output tokens, validates `Host`, and allows only configured
+  browser origins. See `docs/STUDIO-AI.md`.
 - GitHub secret scanning + push protection are enabled on the repository.
 
 ## Hardening backlog (not yet implemented)
@@ -54,7 +58,8 @@ intake and translation features. The key is treated as follows:
     UI). This project's `npm test` runs `vitest run` (headless, no UI server)
     and no script/doc in this repo invokes `--ui` — don't add one without
     re-checking this advisory first.
-- An origin/shared-secret check so only your own front-end can call the proxy.
+- An origin/shared-secret check so only your own front-end can call the public
+  NVIDIA proxy. The private studio bridge already enforces an origin allowlist.
 
 ## If a key is ever exposed
 

@@ -16,6 +16,7 @@ Nota: esta demo estática no incluye las funciones asistidas por IA (importar CS
 - [Instalación](#instalación)
 - [Uso rápido](#uso-rápido)
 - [Compatibilidad con Illustrator](#compatibilidad-con-illustrator)
+- [IA privada del estudio](#ia-privada-del-estudio)
 - [Arquitectura multi-prenda](#arquitectura-multi-prenda)
 - [Diseño y UX](#diseño-y-ux)
 - [Roadmap](#roadmap)
@@ -90,6 +91,20 @@ el JSX incluido crea un solo archivo AI con todas las paginas como mesas de
 trabajo nombradas y siete capas semanticas globales. Affinity abre directamente
 los SVG editables incluidos.
 
+## IA privada del estudio
+
+La instalación de Morfe puede usar Qwen local para chat, razonamiento y
+planificación, manteniendo NVIDIA únicamente para visión. El modelo corre con
+MLX en la Mac y no se sube a GitHub Pages ni expone claves en el navegador.
+
+```bash
+uv tool install mlx-lm
+npm run studio:ai
+```
+
+Después abrí `http://localhost:3000/?studio=local`. Configuración, límites y
+modelo de amenazas: **[docs/STUDIO-AI.md](docs/STUDIO-AI.md)**.
+
 ## Arquitectura multi-prenda
 
 Toda la data específica de una prenda (piezas por defecto, nombres de piezas en 3 idiomas, posiciones de diseño disponibles, y el diagrama de silueta de 4 vistas con sus callouts) vive en un único archivo bajo `src/garments/`. El motor de wizard, generación de SVG y vista previa son genéricos y leen de ese archivo — no hay nada hardcodeado a "gorra" fuera de `src/garments/cap.js`.
@@ -142,7 +157,8 @@ Ver [CONTRIBUTING.md](CONTRIBUTING.md) — agregar un tipo de prenda nuevo es la
 
 - React 18 + Vite 5
 - SVG generado 100% en cliente (sin dependencias de canvas/render externo)
-- DeepSeek (vía API OpenAI-compatible de NVIDIA) para el intake asistido y la traducción — a través de un proxy backend, nunca directo desde el navegador
+- Qwen3-8B mediante MLX para IA textual privada del estudio; DeepSeek/NVIDIA continúa disponible para la versión remota
+- NVIDIA Vision para análisis de imágenes, a través de un proxy backend y nunca directo desde el navegador
 - Serverless en Vercel (`api/deepseek.js`) para custodiar la API key del lado servidor
 
 ## ¿Necesitás la ficha técnica de tu marca ya armada, no la herramienta?

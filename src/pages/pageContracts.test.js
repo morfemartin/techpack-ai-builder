@@ -241,7 +241,7 @@ describe("outline contract", () => {
     expect(validateOutline(outline, { parts: manyParts }).map((error) => error.code)).toContain("part-page-overloaded")
     const repaired = repairOutline(outline, { parts: manyParts }).outline
     const structure = repaired.pages.filter((page) => page.purpose === "structure:body")
-    expect(structure.map((page) => page.pieces.length)).toEqual([8, 8, 1])
+    expect(structure.map((page) => page.pieces.length)).toEqual([6, 6, 5])
     expect(validateOutline(repaired, { parts: manyParts })).toEqual([])
   })
 })

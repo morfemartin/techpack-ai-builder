@@ -19,14 +19,15 @@ import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "..
 import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings, summarizeConfirmed } from "../core/reviewDiff.js"
 import { auditSemanticCoverage } from "../core/semanticOutline.js"
+import { getLocalAIHealth, getTextAIProvider } from "../core/deepseekClient.js"
 import { renderGridOverlay } from "./gridOverlay.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { ctxForFixture } from "./fixtureContext.js"
 
-const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false, outlineRunning: false, outlineResult: null, outlineError: "" }
-const AI_OUTLINE_TIMEOUT_MS = 12000
-const AI_PAGE_TIMEOUT_MS = 10000
+const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false, outlineRunning: false, outlineResult: null, outlineError: "", aiHealth: getTextAIProvider() === "local" ? "starting" : "nvidia" }
+const AI_OUTLINE_TIMEOUT_MS = getTextAIProvider() === "local" ? 180000 : 45000
+const AI_PAGE_TIMEOUT_MS = getTextAIProvider() === "local" ? 180000 : 45000
 const BENCHMARK_OUTLINE_TIMEOUT_MS = 300000
 
 function withTimeout(promise, ms, label) {
@@ -161,10 +162,20 @@ function benchmarkBriefTab() {
     const invented = [...new Set(proposedIds.filter((id) => !known.has(id)))]
     const maxLoad = Math.max(0, ...result.outline.pages.map((page) => Array.isArray(page.pieces) ? page.pieces.length : 0))
     const modelRows = result.outline.pages.map((page, index) => [String(index + 1).padStart(2, "0"), page.title, page.objective || "Sin objetivo", (page.pieces || []).join(", ") || "-", (page.views || []).join(", ") || "-"])
+    const refinements = Array.isArray(result.refinements) ? result.refinements : []
+    const refinementHtml = refinements.length
+      ? refinements.map((item) => {
+          const outcome = item.accepted ? "ACEPTADO" : "RECHAZADO - se uso el reparto contractual"
+          const pageSummary = (item.pages || []).map((page) => `${page.title}: ${(page.pieces || []).join(", ")}`).join(" | ")
+          const attempts = Array.isArray(item.attempts) ? ` · ${item.attempts.length} intento${item.attempts.length === 1 ? "" : "s"}` : ""
+          return `<div><strong>${escapeHtml(item.pageId)} - ${outcome}${attempts}</strong>${pageSummary ? `<br>${escapeHtml(pageSummary)}` : ""}</div>`
+        }).join("")
+      : "<div>No hubo sistemas de mas de 8 piezas.</div>"
     modelHtml = `<div class="score-strip"><strong>${result.outline.pages.length} paginas propuestas</strong><strong>${coverage.covered.length}/44 piezas exactas</strong><strong>${coverage.missing.length} omitidas</strong><strong>${coverage.duplicated.length} duplicadas</strong><strong>${invented.length} inventadas</strong><strong>carga maxima ${maxLoad}</strong></div>
       ${dataTable(["P.", "Pagina", "Objetivo", "Piezas", "Vistas"], modelRows)}
+      <details class="diagnostics" ${refinements.length ? "open" : ""}><summary>Refinamiento textil de sistemas - ${refinements.length}</summary>${refinementHtml}</details>
       <details class="diagnostics" ${result.repairs.length ? "open" : ""}><summary>Reparaciones del contrato - ${result.repairs.length}</summary>${result.repairs.length ? result.repairs.map((item) => `<div>${escapeHtml(item)}</div>`).join("") : "<div>Ninguna</div>"}</details>
-      <details class="diagnostics"><summary>Respuesta cruda de DeepSeek</summary><pre>${escapeHtml(result.raw)}</pre></details>`
+      <details class="diagnostics"><summary>Respuesta cruda del modelo</summary><pre>${escapeHtml(result.raw)}</pre></details>`
   }
   return `<main class="brief-main">
     <section class="fixture brief-hero">
@@ -173,9 +184,9 @@ function benchmarkBriefTab() {
       <div class="brief-metrics"><strong>${dataset.parts.length} piezas</strong><strong>${brief.materials.length} materiales</strong><strong>${brief.trims.length} avios</strong><strong>${dataset.designs.length} aplicaciones</strong><strong>${brief.measurements.poms.length} POM</strong></div>
     </section>
     <section class="brief-section comparison-section">
-      <div class="comparison-head"><div><h2>Comparacion textual previa al layout</h2><p>Misma fuente de verdad. La geometria todavia no participa.</p></div><button id="outline-run" ${state.outlineRunning ? "disabled" : ""}>${state.outlineRunning ? "Consultando DeepSeek..." : "Ejecutar DeepSeek - solo texto"}</button></div>
+      <div class="comparison-head"><div><h2>Comparacion textual previa al layout</h2><p>Misma fuente de verdad. La geometria todavia no participa.</p></div><button id="outline-run" ${state.outlineRunning ? "disabled" : ""}>${state.outlineRunning ? "Consultando modelo..." : "Ejecutar modelo - solo texto"}</button></div>
       <div class="comparison-columns">
-        <article><h3>Propuesta real del sistema / DeepSeek</h3>${modelHtml}</article>
+        <article><h3>Propuesta real del sistema / ${getTextAIProvider() === "local" ? "Qwen local" : "NVIDIA"}</h3>${modelHtml}</article>
         <article><h3>Propuesta humana - 18 paginas fisicas</h3>${dataTable(["P.", "Pagina", "Objetivo", "Piezas", "Vistas"], humanRows)}</article>
       </div>
     </section>
@@ -192,7 +203,7 @@ function benchmarkBriefTab() {
     <section class="brief-section"><h2>Medidas - talla base ${brief.measurements.baseSize}</h2>${dataTable(["ID", "POM", "Valor", "Tolerancia"], brief.measurements.poms.map((item) => [item.id, item.name, item.value, item.tolerance]))}<h3>Gradacion</h3>${bulletList(brief.measurements.grading)}<p class="pending">${escapeHtml(brief.measurements.status)}</p></section>
     <section class="brief-section"><h2>Etiquetado y empaque</h2><h3>Etiquetas</h3>${bulletList(brief.labelsAndPackaging.labels)}<h3>Empaque</h3>${bulletList(brief.labelsAndPackaging.pack)}</section>
     <section class="brief-section"><h2>Control de calidad</h2>${bulletList(brief.quality)}</section>
-    <section class="brief-section pending-section"><h2>Pendiente de confirmar - DeepSeek no puede inferir</h2>${bulletList(brief.openPoints)}</section>
+    <section class="brief-section pending-section"><h2>Pendiente de confirmar - la IA no puede inferir</h2>${bulletList(brief.openPoints)}</section>
   </main>`
 }
 
@@ -282,7 +293,7 @@ async function runOutlineComparison() {
     const outline = await withTimeout(
       planDocumentOutline(planCtx, { onProposal: (value) => { telemetry = value } }),
       BENCHMARK_OUTLINE_TIMEOUT_MS,
-      "DeepSeek text outline"
+      "Model text outline"
     )
     state.outlineResult = { ...telemetry, outline }
   } catch (error) {
@@ -303,6 +314,7 @@ function render() {
         <p>Design-system harness — deterministic fixtures + live AI-plan pipeline</p>
       </div>
       <div class="controls">
+        <span class="chip">${getTextAIProvider() === "local" ? `STUDIO · ${state.aiHealth === "ready" ? "QWEN LISTO" : "CARGANDO"}` : "NVIDIA"}</span>
         <button class="tab ${state.tab === "design" ? "on" : ""}" id="tab-design">Design system</button>
         <button class="tab ${state.tab === "brief" ? "on" : ""}" id="tab-brief">Benchmark brief</button>
         <button class="tab ${state.tab === "ai" ? "on" : ""}" id="tab-ai">AI plan</button>
@@ -327,5 +339,11 @@ function render() {
 }
 
 render()
+
+if (getTextAIProvider() === "local") {
+  getLocalAIHealth()
+    .then((health) => { state.aiHealth = health.status; render() })
+    .catch(() => { state.aiHealth = "offline"; render() })
+}
 
 if (import.meta.hot) import.meta.hot.accept()

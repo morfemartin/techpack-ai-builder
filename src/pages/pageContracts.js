@@ -23,7 +23,7 @@
 
 import { selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
-import { partitionPartsBySystem } from "../core/semanticOutline.js"
+import { balancedChunks, partitionPartsBySystem } from "../core/semanticOutline.js"
 
 export const CONTRACTS = {
   index: {
@@ -383,16 +383,15 @@ export function repairOutline(outline, ctx) {
   } else if (partIds.length > 0 && !structuralPages.some(isFullBomPage)) {
     pages = pages.flatMap((page) => {
       if (!isBomFamilyPage(page) || !Array.isArray(page.pieces) || page.pieces.length <= MAX_PARTS_PER_STRUCTURAL_PAGE) return [page]
-      const split = []
-      for (let index = 0; index < page.pieces.length; index += MAX_PARTS_PER_STRUCTURAL_PAGE) {
-        const number = split.length + 1
-        split.push({
+      const split = balancedChunks(page.pieces, MAX_PARTS_PER_STRUCTURAL_PAGE).map((pieces, index) => {
+        const number = index + 1
+        return {
           ...page,
           id: page.id + "-" + number,
           title: page.title + " · " + number,
-          pieces: page.pieces.slice(index, index + MAX_PARTS_PER_STRUCTURAL_PAGE),
-        })
-      }
+          pieces,
+        }
+      })
       repairs.push("split overloaded structural page " + page.id + " into " + split.length)
       return split
     })

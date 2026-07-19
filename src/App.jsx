@@ -4,7 +4,7 @@ import { T } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
 import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
-import { DeepSeekError } from "./core/deepseekClient.js"
+import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
 import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
 import { toGrayscale } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
@@ -128,6 +128,8 @@ function newDesign() {
 }
 
 export default function App() {
+  const [textAIProvider] = useState(() => getTextAIProvider())
+  const [localAIStatus, setLocalAIStatus] = useState(textAIProvider === "local" ? "starting" : "cloud")
   const [step, setStep] = useState(0)
   const [garmentId, setGarmentId] = useState("cap")
   const [langs, setLangs] = useState(["ES"])
@@ -173,6 +175,27 @@ export default function App() {
   const [reviewFindings, setReviewFindings] = useState(null) // problems from the pre-download intent-vs-document diff
   const [pendingReview, setPendingReview] = useState(null) // {pages, plan, lang, tx, garmentType} held behind the review gate
   const tl = T.ES
+
+  useEffect(() => {
+    if (textAIProvider !== "local") return undefined
+    let active = true
+    let timer
+    const check = async () => {
+      try {
+        const health = await getLocalAIHealth()
+        if (active) setLocalAIStatus(health.status === "ready" ? "ready" : "starting")
+        if (active && health.status !== "ready") timer = setTimeout(check, 3000)
+      } catch {
+        if (active) setLocalAIStatus("offline")
+        if (active) timer = setTimeout(check, 3000)
+      }
+    }
+    check()
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [textAIProvider])
 
   function selectGarment(id, { vision = false } = {}) {
     if (id === garmentId && visionEntry === vision) return
@@ -1108,6 +1131,9 @@ export default function App() {
             <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.white.hex }}>TechPack AI Builder</h1>
             <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.white.hex, opacity: 0.55 }}>por Morfe · Generador Open Source de Fichas Técnicas · v0.2</p>
           </div>
+          <span style={{ marginLeft: "auto", padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${localAIStatus === "ready" ? role.highlight.fill : C.white.hex}`, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase" }}>
+            {textAIProvider === "local" ? `Studio AI · ${localAIStatus === "ready" ? "Qwen listo" : localAIStatus === "offline" ? "servicio apagado" : "cargando"}` : "AI · NVIDIA"}
+          </span>
         </div>
         {/* Stepper — red index numbers (enumeration seen first), blue underline = active */}
         <div style={{ display: "flex", border: hair, background: C.white.hex }}>

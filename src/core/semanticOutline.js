@@ -81,9 +81,19 @@ export function classifyPartSystem(part) {
   return best.id
 }
 
-function chunks(items, size) {
+export function balancedChunks(items, size) {
+  const values = Array.isArray(items) ? items : []
+  const limit = Math.max(1, Math.floor(Number(size) || 1))
+  const pageCount = Math.max(1, Math.ceil(values.length / limit))
+  const baseSize = Math.floor(values.length / pageCount)
+  const largerPages = values.length % pageCount
   const result = []
-  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size))
+  let index = 0
+  for (let page = 0; page < pageCount; page++) {
+    const pageSize = baseSize + (page < largerPages ? 1 : 0)
+    if (pageSize > 0) result.push(values.slice(index, index + pageSize))
+    index += pageSize
+  }
   return result
 }
 
@@ -96,7 +106,7 @@ export function partitionPartsBySystem(parts, { maxPartsPerPage = 8 } = {}) {
   const pages = []
   for (const system of SYSTEMS) {
     const members = groups.get(system.id)
-    chunks(members, limit).forEach((pageParts, index, all) => {
+    balancedChunks(members, limit).forEach((pageParts, index, all) => {
       const suffix = all.length > 1 ? " · " + (index + 1) + "/" + all.length : ""
       pages.push({
         id: "structure-" + system.id + (all.length > 1 ? "-" + (index + 1) : ""),
@@ -206,6 +216,8 @@ export function auditSemanticCoverage(plan, parts) {
   const activeIds = (Array.isArray(parts) ? parts : []).filter((part) => part && part.on !== false && clean(part.id)).map((part) => clean(part.id))
   const counts = new Map(activeIds.map((id) => [id, 0]))
   for (const page of (plan && plan.pages) || []) {
+    const purpose = clean(page && page.purpose)
+    if (!(purpose === "overview" || purpose === "lining" || purpose.startsWith("structure:"))) continue
     for (const id of Array.isArray(page.pieces) ? page.pieces : []) {
       if (counts.has(clean(id))) counts.set(clean(id), counts.get(clean(id)) + 1)
     }

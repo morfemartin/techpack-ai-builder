@@ -10,7 +10,10 @@
 // `vite dev` never executes /api/* on its own. Production: Vercel serves it
 // directly. Either way this file just calls the relative URL below.
 
-const PROXY_URL = import.meta.env.VITE_DEEPSEEK_PROXY_URL || "/api/deepseek"
+const NVIDIA_PROXY_URL = import.meta.env.VITE_DEEPSEEK_PROXY_URL || "/api/deepseek"
+const LOCAL_STUDIO_URL = import.meta.env.VITE_LOCAL_STUDIO_AI_URL || "http://127.0.0.1:11435/v1/chat/completions"
+const TEXT_PROVIDER_KEY = "techpack.textProvider"
+const DEFAULT_TEXT_PROVIDER = import.meta.env.VITE_TEXT_AI_PROVIDER || "nvidia"
 // No client-side default model for plain text calls: `model` stays undefined
 // when a caller doesn't specify one, so JSON.stringify() drops the key
 // entirely and api/deepseek.js's own per-environment NVIDIA_MODEL wins - the
@@ -39,14 +42,69 @@ const RETRYABLE_BASE_DELAY_MS = 1500
 // still turning a genuine hang into a clear, RETRYABLE error within a bounded
 // time instead of an infinite spinner.
 const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_DEEPSEEK_FETCH_TIMEOUT_MS) || 30000
+const LOCAL_FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_LOCAL_AI_FETCH_TIMEOUT_MS) || 180000
+
+function queryStudioProvider() {
+  if (typeof window === "undefined") return null
+  try {
+    const requested = new URLSearchParams(window.location.search).get("studio")
+    if (requested === "local" || requested === "nvidia") {
+      window.localStorage.setItem(TEXT_PROVIDER_KEY, requested)
+      return requested
+    }
+  } catch {}
+  return null
+}
+
+export function getTextAIProvider() {
+  const requested = queryStudioProvider()
+  if (requested) return requested
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem(TEXT_PROVIDER_KEY)
+      if (stored === "local" || stored === "nvidia") return stored
+    } catch {}
+  }
+  return DEFAULT_TEXT_PROVIDER === "local" ? "local" : "nvidia"
+}
+
+export function setTextAIProvider(provider) {
+  if (provider !== "local" && provider !== "nvidia") throw new Error("Unsupported text AI provider")
+  if (typeof window !== "undefined") window.localStorage.setItem(TEXT_PROVIDER_KEY, provider)
+  return provider
+}
+
+function containsImage(messages) {
+  return (messages || []).some((message) =>
+    Array.isArray(message && message.content) &&
+    message.content.some((item) => item && (item.type === "image_url" || item.type === "input_image"))
+  )
+}
+
+export function resolveAITransport({ messages, model } = {}) {
+  const vision = containsImage(messages)
+  if (vision) return { provider: "nvidia", url: NVIDIA_PROXY_URL, timeoutMs: FETCH_TIMEOUT_MS }
+  const provider = getTextAIProvider()
+  return provider === "local"
+    ? { provider, url: LOCAL_STUDIO_URL, timeoutMs: LOCAL_FETCH_TIMEOUT_MS }
+    : { provider, url: NVIDIA_PROXY_URL, timeoutMs: FETCH_TIMEOUT_MS }
+}
+
+export async function getLocalAIHealth() {
+  const healthURL = LOCAL_STUDIO_URL.replace(/\/v1\/chat\/completions\/?$/, "/health")
+  const res = await fetchWithTimeout(healthURL, { method: "GET" }, 5000)
+  if (res.status === 503) return res.json()
+  if (!res.ok) throw new Error("Local AI bridge is unavailable")
+  return res.json()
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function fetchWithTimeout(url, options) {
+async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     return await fetch(url, { ...options, signal: controller.signal })
   } finally {
@@ -59,16 +117,20 @@ async function fetchWithTimeout(url, options) {
 // both are transient-in-practice (see isRetryable below) so both get folded
 // into the same networkError flag and retried the same way, just with a
 // message that tells the truth about which one happened.
-function wrapFetchFailure(e) {
+function wrapFetchFailure(e, transport) {
   const timedOut = e && e.name === "AbortError"
+  const local = transport && transport.provider === "local"
   const err = new DeepSeekError(
     timedOut
-      ? "El asistente de IA tardo demasiado en responder (mas de " + FETCH_TIMEOUT_MS / 1000 + "s)."
-      : "No se pudo contactar el asistente de IA (revisa tu conexion).",
+      ? "El asistente de IA " + (local ? "local " : "") + "tardo demasiado en responder."
+      : local
+        ? "Qwen local no esta disponible. Inicia el servicio privado del estudio."
+        : "No se pudo contactar el asistente de IA (revisa tu conexion).",
     e
   )
   err.networkError = true
   err.timedOut = timedOut
+  err.provider = (transport && transport.provider) || "nvidia"
   return err
 }
 
@@ -102,15 +164,16 @@ function isRetryable(err) {
 }
 
 async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
+  const transport = resolveAITransport({ messages, model })
   let res
   try {
-    res = await fetchWithTimeout(PROXY_URL, {
+    res = await fetchWithTimeout(transport.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, chat_template_kwargs: { thinking } }),
-    })
+    }, transport.timeoutMs)
   } catch (e) {
-    throw wrapFetchFailure(e)
+    throw wrapFetchFailure(e, transport)
   }
   if (!res.ok) {
     let detail = ""
@@ -160,15 +223,16 @@ export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0
 }
 
 async function openStream({ messages, maxTokens, temperature, model, thinking }) {
+  const transport = resolveAITransport({ messages, model })
   let res
   try {
-    res = await fetchWithTimeout(PROXY_URL, {
+    res = await fetchWithTimeout(transport.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, stream: true, chat_template_kwargs: { thinking } }),
-    })
+    }, transport.timeoutMs)
   } catch (e) {
-    throw wrapFetchFailure(e)
+    throw wrapFetchFailure(e, transport)
   }
   if (!res.ok) {
     let detail = ""

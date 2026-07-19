@@ -1,13 +1,14 @@
-import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
+import { deepseekChat, deepseekChatStream, getTextAIProvider } from "./deepseekClient.js"
 import { parseJSONOrRepair } from "./techpackRequirements.js"
 import { normalizePlan } from "../pages/interpretPlan.js"
 import { repairOutline, repairPage } from "../pages/pageContracts.js"
 import { buildSemanticOutline } from "./semanticOutline.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
-const PLANNING_TIMEOUT_MS = 10000
+const REMOTE_PLANNING_TIMEOUT_MS = 45000
+const LOCAL_PLANNING_TIMEOUT_MS = 300000
 
-export async function withPlanningTimeout(promise, timeoutMs = PLANNING_TIMEOUT_MS) {
+export async function withPlanningTimeout(promise, timeoutMs = getTextAIProvider() === "local" ? LOCAL_PLANNING_TIMEOUT_MS : REMOTE_PLANNING_TIMEOUT_MS) {
   let timer = null
   try {
     return await Promise.race([
@@ -63,6 +64,96 @@ function normalizeOutline(raw, context) {
   return pages.length > 0 ? { pages } : fallback
 }
 
+function isStructuralPurpose(purpose) {
+  return purpose === "overview" || purpose === "lining" || (typeof purpose === "string" && purpose.startsWith("structure:"))
+}
+
+function validStructuralRefinement(sourcePage, pages) {
+  if (!Array.isArray(pages) || pages.length < 2) return false
+  const expected = Array.isArray(sourcePage.pieces) ? sourcePage.pieces : []
+  const received = pages.flatMap((page) => Array.isArray(page.pieces) ? page.pieces : [])
+  if (pages.some((page) => !isStructuralPurpose(page.purpose) || page.pieces.length < 2 || page.pieces.length > 8)) return false
+  if (received.length !== expected.length || new Set(received).size !== received.length) return false
+  const expectedSet = new Set(expected)
+  return received.every((id) => expectedSet.has(id)) && expected.every((id) => received.includes(id))
+}
+
+function restoreMissingPartsToTheirSystems(outline, parts) {
+  const pages = JSON.parse(JSON.stringify((outline && outline.pages) || []))
+  const structural = pages.filter((page) => isStructuralPurpose(page.purpose))
+  const covered = new Set(structural.flatMap((page) => Array.isArray(page.pieces) ? page.pieces : []))
+  const repairs = []
+
+  for (const part of (parts || []).filter((item) => item && item.on !== false && item.id && !covered.has(item.id))) {
+    const system = safeString(part.system, "").toLowerCase()
+    if (!system) continue
+    const target = structural.find((page) => {
+      const pageSystem = safeString(page.system, "").toLowerCase()
+      const purpose = safeString(page.purpose, "").toLowerCase()
+      return pageSystem === system || purpose === "structure:" + system
+    })
+    if (!target) continue
+    target.pieces = [...(target.pieces || []), part.id]
+    covered.add(part.id)
+    repairs.push("restored " + part.id + " to " + target.id + " before semantic refinement")
+  }
+
+  return { outline: { pages }, repairs }
+}
+
+async function refineOverloadedStructuralPages(outline, context) {
+  const refinements = []
+  const pages = []
+  const partById = new Map((context.parts || []).map((part) => [part && part.id, part]))
+
+  for (const page of outline.pages || []) {
+    if (!isStructuralPurpose(page.purpose) || !Array.isArray(page.pieces) || page.pieces.length <= 8) {
+      pages.push(page)
+      continue
+    }
+
+    const sourceParts = page.pieces.map((id) => partById.get(id)).filter(Boolean)
+    const prompt =
+      "Sos ingeniero textil. Subdividi UN sistema constructivo grande en paginas tecnicas con objetivos fabricables distintos. " +
+      "No dividas por cantidad ni por orden de la lista: conserva juntos pares espejo y componentes que se montan como una unidad. " +
+      "Reglas de ensamblaje: la apertura o vista de cada bolsillo va con SU bolsa; un cargo conserva juntos cuerpo, fuelle y capas exterior/interior de tapa; " +
+      "un refuerzo va con su panel anfitrion; los componentes izquierda/derecha equivalentes permanecen en la misma pagina. Cada pagina debe contener de 2 a 8 ids. " +
+      "Usa cada id exactamente una vez, no inventes ids y devuelve al menos 2 paginas. Titulos, objetivos y vistas deben ser especificos.\n\n" +
+      "Sistema original: " + JSON.stringify({ id: page.id, purpose: page.purpose, pieces: page.pieces }) + "\n" +
+      "Piezas confirmadas: " + JSON.stringify(sourceParts) + "\n\n" +
+      "Devolve SOLO JSON valido: " +
+      '{"pages":[{"id":"...","title":"...","purpose":"structure:...","objective":"...","pieces":["P01","P02"],"views":["..."]}]}'
+
+    const attempts = []
+    let acceptedPages = null
+    let previousRaw = ""
+    for (let attempt = 0; attempt < 2 && !acceptedPages; attempt++) {
+      try {
+        const messages = [{ role: "user", content: prompt }]
+        if (attempt > 0) messages.push(
+          { role: "assistant", content: previousRaw },
+          { role: "user", content: "Esa respuesta incumplio cobertura exacta o el limite de 2 a 8 piezas. Corrigela y verifica cada id antes de responder." }
+        )
+        const raw = await deepseekChat({ messages, maxTokens: 1800, temperature: 0 })
+        previousRaw = raw
+        const parsed = parseJSONOrRepair(raw, "El modelo no devolvio una subdivision estructural valida.")
+        const candidate = normalizeOutline(parsed, context).pages
+          .filter((item) => Array.isArray(item.pieces) && item.pieces.length > 0)
+          .map((item) => ({ ...item, purpose: isStructuralPurpose(item.purpose) ? item.purpose : page.purpose }))
+        const accepted = validStructuralRefinement(page, candidate)
+        attempts.push({ accepted, raw })
+        if (accepted) acceptedPages = candidate
+      } catch (error) {
+        attempts.push({ accepted: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+    refinements.push({ pageId: page.id, accepted: !!acceptedPages, pages: acceptedPages || [], attempts })
+    pages.push(...(acceptedPages || [page]))
+  }
+
+  return { outline: { pages }, refinements }
+}
+
 export function extractLastCompletedRegionType(text) {
   const re = /"type"\s*:\s*"([^"]+)"/g
   let match
@@ -90,15 +181,18 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
 
   const raw = await deepseekChat({
     messages: [{ role: "user", content: instructions }],
-    maxTokens: 2000,
+    maxTokens: 4000,
     temperature: 0.2,
   })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un esquema de documento valido.")
   const proposed = normalizeOutline(parsed, context)
+  const restored = restoreMissingPartsToTheirSystems(proposed, parts)
+  const refined = await refineOverloadedStructuralPages(restored.outline, context)
   // The model proposes; the document contract disposes: a missing cover or
   // BOM page is inserted, uncovered designs get their page, duplicates drop.
-  const repaired = repairOutline(proposed, context)
-  if (typeof onProposal === "function") onProposal({ raw, parsed, proposed, outline: repaired.outline, repairs: repaired.repairs })
+  const repaired = repairOutline(refined.outline, context)
+  const repairs = [...restored.repairs, ...repaired.repairs]
+  if (typeof onProposal === "function") onProposal({ raw, parsed, proposed, refinements: refined.refinements, outline: repaired.outline, repairs })
   return repaired.outline
 }
 

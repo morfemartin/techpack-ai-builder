@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("./deepseekClient.js", () => ({
   deepseekChat: vi.fn(),
   deepseekChatStream: vi.fn(),
+  getTextAIProvider: vi.fn(() => "nvidia"),
   DeepSeekError: class DeepSeekError extends Error {},
 }))
 
@@ -68,6 +69,65 @@ describe("document plan AI wrappers", () => {
     expect(page.objective).toBe("Documentar montaje de capucha")
     expect(page.views).toEqual(["Exterior", "Interior"])
     expect(page.pieces).toEqual(["hood"])
+  })
+
+  it("asks the model to subdivide overloaded systems by construction objective", async () => {
+    const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + String(index + 1).padStart(2, "0"), label: "Piece " + (index + 1), on: true }))
+    deepseekChat
+      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "pockets", title: "Pocket system", purpose: "structure:pockets", pieces: parts.map((part) => part.id) }] }))
+      .mockResolvedValueOnce(JSON.stringify({ pages: [
+        { id: "pocket-openings", title: "Pocket openings", purpose: "structure:pockets-openings", objective: "Build openings", pieces: parts.slice(0, 6).map((part) => part.id), views: ["Exterior"] },
+        { id: "pocket-bags", title: "Pocket bags", purpose: "pockets-bags", objective: "Close pocket bags", pieces: parts.slice(6).map((part) => part.id), views: ["Interior"] },
+      ] }))
+
+    let telemetry
+    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
+    const structural = outline.pages.filter((page) => page.purpose.startsWith("structure:"))
+
+    expect(structural.map((page) => page.pieces.length)).toEqual([6, 3])
+    expect(structural.map((page) => page.objective)).toEqual(["Build openings", "Close pocket bags"])
+    expect(structural[1].purpose).toBe("structure:pockets")
+    expect(telemetry.refinements).toMatchObject([{ pageId: "pockets", accepted: true }])
+    expect(deepseekChat).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries one invalid structural subdivision before using the deterministic fallback", async () => {
+    const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + (index + 1), on: true }))
+    const overloaded = { pages: [{ id: "body", title: "Body", purpose: "structure:body", pieces: parts.map((part) => part.id) }] }
+    deepseekChat
+      .mockResolvedValueOnce(JSON.stringify(overloaded))
+      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "bad", title: "Bad", purpose: "structure:body", pieces: ["P1", "P1"] }] }))
+      .mockResolvedValueOnce(JSON.stringify({ pages: [
+        { id: "body-shell", title: "Shell", purpose: "structure:body", pieces: ["P1", "P2", "P3", "P4", "P5", "P6"] },
+        { id: "body-reinforcement", title: "Reinforcement", purpose: "structure:body", pieces: ["P7", "P8", "P9"] },
+      ] }))
+
+    let telemetry
+    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
+
+    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.id)).toEqual(["body-shell", "body-reinforcement"])
+    expect(telemetry.refinements[0].attempts.map((attempt) => attempt.accepted)).toEqual([false, true])
+    expect(deepseekChat).toHaveBeenCalledTimes(3)
+  })
+
+  it("returns an omitted piece to its structural system before deciding pagination", async () => {
+    const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + (index + 1), system: "upper-body", on: true }))
+    deepseekChat
+      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "upper", title: "Upper", purpose: "structure:upper-body", pieces: parts.slice(0, 8).map((part) => part.id) }] }))
+      .mockResolvedValueOnce(JSON.stringify({ pages: [
+        { id: "upper-shell", title: "Upper shell", purpose: "structure:upper-body", pieces: parts.slice(0, 6).map((part) => part.id) },
+        { id: "seat", title: "Seat", purpose: "structure:upper-body", pieces: parts.slice(6).map((part) => part.id) },
+      ] }))
+
+    let telemetry
+    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
+
+    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.pieces)).toEqual([
+      ["P1", "P2", "P3", "P4", "P5", "P6"],
+      ["P7", "P8", "P9"],
+    ])
+    expect(telemetry.repairs).toContain("restored P9 to upper before semantic refinement")
+    expect(telemetry.refinements[0].accepted).toBe(true)
   })
 
   it("gives the model the confirmed textile brief instead of only names and parts", async () => {
