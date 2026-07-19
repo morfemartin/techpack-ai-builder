@@ -129,15 +129,15 @@ describe("interpretPagePlan", () => {
     // header: fixed strip, does not grow
     expect(root.children[0].grow).toBe(0)
     expect(root.children[0].basis).toBe(64)
-    // partsList: bounded content at its natural height (1 part = 20 header
+    // partsList: bounded content at its natural height (1 part = 16 header
     // strip + 32 table row), never stretched by the plan weight anymore
     expect(root.children[1].grow).toBe(0)
-    expect(root.children[1].basis).toBe(52)
+    expect(root.children[1].basis).toBe(48)
     // slack spacer: the only growing node
     expect(root.children[2].grow).toBe(1)
     // disclaimer: fixed strip, pinned to the bottom
     expect(root.children[3].grow).toBe(0)
-    expect(root.children[3].basis).toBe(20)
+    expect(root.children[3].basis).toBe(24)
   })
 
   it("gives a bounded band its measured height and routes ALL slack to the absorber, whatever the AI's weights say", () => {

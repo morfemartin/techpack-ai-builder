@@ -1,5 +1,5 @@
 import { wrapLines } from "../core/svgPrimitives.js"
-import { COL, PRINT, ROW, TEXT_PAD } from "../design/metrics.js"
+import { COL, PRINT, ROW, TEXT_PAD, snapBaseline } from "../design/metrics.js"
 
 export function effectiveParts(parts, page) {
   const all = Array.isArray(parts) ? parts.filter((part) => part && part.on !== false) : []
@@ -27,7 +27,7 @@ export function partsRowMetrics({ parts, partLabels, txParts, width }) {
       value,
       nameLines,
       valueLines,
-      height: Math.max(ROW.table, lineCount * 14 + 8),
+      height: Math.max(ROW.table, snapBaseline(lineCount * 16 + 8)),
     }
   })
 }

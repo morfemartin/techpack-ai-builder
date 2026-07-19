@@ -46,16 +46,15 @@ describe("measureRegion", () => {
   it("colorSpecs: section head + one color row per color at the ideal row height", () => {
     const m = measureRegion({ type: "colorSpecs" }, page, ctx, 400)
     expect(m.canAbsorb).toBe(false)
-    // section head = rule gap 6 + bar 20 + gap 6 = 32 (matches renderColorSpecs)
+    // section head = 16-unit bar + 16-unit breathing row.
     expect(m.natural).toBe(32 + 2 * ROW.color)
   })
 
   it("embSpecs: section head + 14 fixed fields + sequence header + sequence rows", () => {
     const m = measureRegion({ type: "embSpecs" }, page, ctx, 400)
     expect(m.canAbsorb).toBe(false)
-    // head = 38; the sequence adds its separator row, heading row and stop
-    // row, plus the renderer's 4px ideal breathing offset.
-    expect(m.natural).toBe(38 + (14 + 2 + 1) * ROW.emb + 4)
+    // head = 32; the sequence adds its separator row, heading row and stop row.
+    expect(m.natural).toBe(32 + (14 + 2 + 1) * ROW.emb)
   })
 
   it("embSpecs with no emb data measures to zero (nothing will render)", () => {
@@ -85,9 +84,9 @@ describe("measureRegion", () => {
   })
 
   it("chrome (header/titleBar/disclaimer) reports its fixed strip height as natural", () => {
-    expect(measureRegion({ type: "header" }, page, ctx, 1148).natural).toBe(82)
-    expect(measureRegion({ type: "titleBar" }, page, ctx, 1148).natural).toBe(30)
-    expect(measureRegion({ type: "disclaimer" }, page, ctx, 1148).natural).toBe(20)
+    expect(measureRegion({ type: "header" }, page, ctx, 1148).natural).toBe(64)
+    expect(measureRegion({ type: "titleBar" }, page, ctx, 1148).natural).toBe(32)
+    expect(measureRegion({ type: "disclaimer" }, page, ctx, 1148).natural).toBe(24)
   })
 
   it("unknown region types measure as absorbing zero (never crash the pass)", () => {

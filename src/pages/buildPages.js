@@ -4,7 +4,7 @@ import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
-import { CHROME, COL, CHIP, GRID, INSET, PAGE, PRINT, ROW, TEXT_PAD } from "../design/metrics.js"
+import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PRINT, ROW, TEXT_PAD } from "../design/metrics.js"
 import { briefLines } from "./briefs.js"
 import { partsRowMetrics } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
@@ -57,8 +57,8 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
         var st = colStops(b)
         function textLines(lines, x) {
           var safeLines = Array.isArray(lines) && lines.length ? lines : [""]
-          var startY = b.y + b.height / 2 - ((safeLines.length - 1) * 14) / 2
-          return safeLines.map((line, lineIndex) => TX(x, startY + lineIndex * 14, line, PRINT.minFont, false, "start", undefined, type.svgFonts.data)).join("")
+          var startY = b.y + b.height / 2 - ((safeLines.length - 1) * GRID.baseline) / 2
+          return safeLines.map((line, lineIndex) => TX(x, startY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", undefined, type.svgFonts.data)).join("")
         }
         return (
           R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
@@ -77,33 +77,29 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
 }
 
 // How tall each color row gets: as close to the ideal ROW.color as the
-// available height allows, but NEVER so short a row gets dropped - a
-// saturated color list shrinks its rows (down to a still-legible floor)
-// instead of silently losing entries past some cutoff, matching every other
-// "never truncate, shrink instead" rule in this file.
-function colorRowHeight(count, availH) {
-  if (count <= 0) return ROW.color
-  return Math.max(20, Math.min(ROW.color, Math.floor(availH / count)))
+// available height allows. Rows never shrink off the baseline grid; overflow
+// is handled by document pagination instead of by creating fractional rows.
+function colorRowHeight() {
+  return ROW.color
 }
 
-// Vertical gap between a block's top rule and its section bar.
-var SECTION_RULE_GAP = 6
+// Section modules occupy two baseline units: one title bar and one breathing
+// row before their data begins. This keeps every following row on-grid.
+var SECTION_AFTER_BAR_GAP = GRID.baseline
 
 export function renderColorSpecs(box, { colors } = {}) {
   var s = ""
   var ty = box.y
   var W = box.width
-  var limitY = box.y + box.height
   var safe = (colors || []).filter(function (c) { return c && c.hex })
 
   // Full-width rule + full-width section bar (svgSectionBar): the same edges
   // and left-aligned title grammar as the page titleBar, instead of the old
   // 10px-inset centered bar that never lined up with anything else.
   s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
-  ty += SECTION_RULE_GAP
   s += svgSectionBar(box.x, ty, W, "PANTONE / CMYK")
-  ty += 20 + SECTION_RULE_GAP
-  var rowH = colorRowHeight(safe.length, limitY - ty)
+  ty += BAR.h + SECTION_AFTER_BAR_GAP
+  var rowH = colorRowHeight()
   var swatch = Math.min(20, rowH - 4)
   // A color card may be intentionally composed as a narrow data column next
   // to the illustration and embroidery sheet. In that shape the full CMYK
@@ -126,10 +122,10 @@ export function renderColorSpecs(box, { colors } = {}) {
   return s
 }
 
-function colorSpecsHeight(colors, startY, limitY) {
+function colorSpecsHeight(colors) {
   var safe = (colors || []).filter(function (c) { return c && c.hex })
-  var headH = SECTION_RULE_GAP * 2 + 20
-  var rowH = colorRowHeight(safe.length, limitY - startY - headH)
+  var headH = BAR.h + SECTION_AFTER_BAR_GAP
+  var rowH = colorRowHeight()
   return headH + safe.length * rowH
 }
 
@@ -139,15 +135,13 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   var ef = emb
   var ty = box.y
   var W = box.width
-  var limitY = box.y + box.height
 
   // Same full-width rule + section-bar grammar as renderColorSpecs, and the
   // value column sits on the shared COL.value stop - stacked blocks now share
   // their vertical alignment instead of each picking its own (0.55 vs 0.5).
   s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
-  ty += SECTION_RULE_GAP
   s += svgSectionBar(box.x, ty, W, title || "Embroidery Tech Sheet")
-  ty += 20 + SECTION_RULE_GAP + 6
+  ty += BAR.h + SECTION_AFTER_BAR_GAP
   var valueX = Math.round(box.x + W * COL.value) + TEXT_PAD
   var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
   var seq = ef.stopSeq && ef.stopSeq.length > 0 ? ef.stopSeq : []
@@ -155,15 +149,13 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   // row this block WILL draw (fields + optional sequence header/rows) and fit
   // them all into the available height rather than cutting off at some fixed
   // line height once the box is smaller than expected.
-  var totalRows = er.length + (seq.length > 0 ? 1 + seq.length : 0)
-  var rowH = Math.max(14, Math.min(ROW.emb, Math.floor((limitY - ty) / Math.max(1, totalRows))))
+  var rowH = ROW.emb
   var fontSize = PRINT.minFont
   er.forEach(function (row) {
     s += TX(box.x + INSET, ty, row[0] + ":", fontSize, true, "start") + TX(valueX, ty, row[1] || NA, fontSize, false, "start", undefined, type.svgFonts.data)
     ty += rowH
   })
   if (seq.length > 0) {
-    ty += Math.max(0, rowH - 12)
     s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#eee' stroke-width='0.8'/>"
     ty += rowH
     s += TX(box.x + INSET, ty, "Secuencia:", fontSize, true, "start")
@@ -180,7 +172,7 @@ export function renderReferenceAsset(box, { design } = {}) {
   if (!design || !design.imageData) return ""
   var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
   var pad = INSET
-  var labelH = 24
+  var labelH = BAR.h
   var s = ""
   s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
   s += svgSectionBar(box.x, box.y, box.width, "REFERENCIA - NO A ESCALA")
@@ -197,16 +189,29 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
   // re-flow, and it costs zero extra layout height.
   var cols = Math.ceil(Math.sqrt(slotCount))
   var rows = Math.ceil(slotCount / cols)
-  var gap = 12
-  var cellW = (box.width - gap * (cols + 1)) / cols
-  var cellH = (box.height - gap * (rows + 1)) / rows
+  var xGap = GRID.gutter
+  var yGap = GRID.verticalGap
+  var cellW = (box.width - xGap * (cols + 1)) / cols
+  var availableUnits = Math.max(1, Math.floor((box.height - yGap * (rows + 1)) / GRID.baseline))
+  var baseUnits = Math.floor(availableUnits / rows)
+  var extraUnits = availableUnits % rows
+  var rowHeights = Array.from({ length: rows }, function (_, rowIndex) {
+    return Math.max(1, baseUnits + (rowIndex < extraUnits ? 1 : 0)) * GRID.baseline
+  })
+  var rowOffsets = []
+  var runningY = box.y + yGap
+  rowHeights.forEach(function (height) {
+    rowOffsets.push(runningY)
+    runningY += height + yGap
+  })
   var s = ""
 
   for (var i = 0; i < slotCount; i++) {
     var c = i % cols
     var r = Math.floor(i / cols)
-    var x = box.x + gap + c * (cellW + gap)
-    var y = box.y + gap + r * (cellH + gap)
+    var cellH = rowHeights[r]
+    var x = box.x + xGap + c * (cellW + xGap)
+    var y = rowOffsets[r]
     var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Vista " + (i + 1)
     // Crop-marked art board: a hairline frame with inward corner registration
     // ticks reads as "place artwork here", not a blank box.
@@ -224,9 +229,9 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
 
     var brief = Array.isArray(briefs) ? briefs[i] : null
     var textX = x + INSET
-    var textY = y + 48
+    var textY = y + GRID.baseline * 3
     var textW = Math.max(40, cellW - INSET * 2)
-    var maxLines = Math.max(2, Math.floor((cellH - 76) / 14))
+    var maxLines = Math.max(2, Math.floor((cellH - GRID.baseline * 5) / GRID.baseline))
     var modes = ["full", "checklist", "title"]
     var selectedLines = []
     if (brief) {
@@ -244,15 +249,15 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     }
 
     s += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
-    s += TX(textX, textY - 18, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
+    s += TX(textX, textY - GRID.baseline, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
     selectedLines.forEach(function (line, lineIndex) {
-      var ly = textY + lineIndex * 14
-      if (line.pending) s += R(textX - 4, ly - 7, textW + 8, 14, palette.yellow.hex, palette.ink.hex, "0.5")
+      var ly = textY + lineIndex * GRID.baseline
+      if (line.pending) s += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
       s += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : "#7D8490", type.svgFonts.data)
     })
     if (!brief && noteText) {
       wrapLines(noteText, textW, PRINT.minFont).slice(0, maxLines).forEach(function (line, lineIndex) {
-        s += TX(textX, textY + lineIndex * 14, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
+        s += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
       })
     }
     if (cellH >= 120) s += TX(x + cellW / 2, y + cellH - 16, "AREA EDITABLE PARA ILUSTRACION TECNICA", PRINT.minFont, true, "middle", "#9AA0AB")
@@ -402,7 +407,7 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
 
   ty += 6
   s += renderColorSpecs({ x: 0, y: ty, width: LW, height: by + bodyH - ty }, { colors: d.colors })
-  ty += colorSpecsHeight(d.colors, ty, by + bodyH)
+  ty += colorSpecsHeight(d.colors)
 
   if (isEmb && d.emb) {
     ty += 8

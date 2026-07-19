@@ -13,7 +13,7 @@ import { T } from "../core/i18n.js"
 import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette } from "../design/tokens.js"
-import { CHROME, GRID, INSET, PAGE, PRINT } from "../design/metrics.js"
+import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
@@ -37,7 +37,7 @@ const PAGE_H = PAGE.height
 // what turns a stack of blocks into a *composed* page instead of bands welded to
 // the frame edge. Percent-free px because the solver already resolves them.
 const PAGE_PAD = GRID.margin
-const PAGE_GAP = GRID.gutter
+const PAGE_GAP = CHROME.gap
 // Gutter between the columns of a `split` (side-by-side) region.
 const SPLIT_GAP = GRID.gutter
 
@@ -48,7 +48,7 @@ const SPLIT_GAP = GRID.gutter
 // blue title bar and the dead whitespace at the bottom of a page in one move -
 // the model's weights now only distribute the CONTENT area.
 const FIXED_BASIS = { header: CHROME.header, titleBar: CHROME.titleBar, disclaimer: CHROME.footer }
-const STANDARD_WORKING_HEIGHT = PAGE_H - PAGE_PAD * 2 - FIXED_BASIS.header - FIXED_BASIS.titleBar - FIXED_BASIS.disclaimer - PAGE_GAP * 3
+const STANDARD_WORKING_HEIGHT = PAGE_BODY.height
 
 // Matches renderPartsList's `compact` row basis plus its table header (both
 // from the shared metrics scale) - used to measure, after solving, whether a
@@ -235,8 +235,8 @@ function renderNote(box, text) {
   s += R(box.x, box.y, accent, box.height, palette.yellow.hex, palette.yellow.hex, "0")
   const textX = box.x + accent + INSET
   const lines = wrapLines(note, Math.max(1, box.width - (accent + INSET * 2)), 10)
-  lines.slice(0, Math.max(1, Math.floor((box.height - 16) / 14))).forEach((line, i) => {
-    s += TX(textX, box.y + 12 + i * 14, line, 10, false, "start")
+  lines.slice(0, Math.max(1, Math.floor((box.height - GRID.baseline) / GRID.baseline))).forEach((line, i) => {
+    s += TX(textX, box.y + GRID.baseline + i * GRID.baseline, line, 10, false, "start")
   })
   return s
 }
@@ -245,15 +245,15 @@ function renderDocumentIndex(box, entries) {
   const rows = Array.isArray(entries) ? entries : []
   let s = ""
   s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
-  s += R(box.x, box.y, box.width, 24, palette.blue.hex, palette.ink.hex, "0.8")
-  s += TX(box.x + INSET, box.y + 12, "INDICE DEL HANDOFF", PRINT.bodyFont, true, "start", palette.white.hex)
-  let y = box.y + 42
+  s += R(box.x, box.y, box.width, GRID.baseline, palette.blue.hex, palette.ink.hex, "0.8")
+  s += TX(box.x + INSET, box.y + GRID.baseline / 2, "INDICE DEL HANDOFF", PRINT.bodyFont, true, "start", palette.white.hex)
+  let y = box.y + GRID.baseline * 2 + GRID.baseline / 2
   rows.forEach((entry) => {
     const status = entry.status === "illustration-pending" ? "ILUSTRACION PENDIENTE" : "LISTO"
     s += TX(box.x + INSET, y, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
     s += TX(box.x + 52, y, entry.title || entry.purpose || entry.name, PRINT.minFont, true, "start")
     s += TX(box.x + box.width - INSET, y, status, PRINT.minFont, false, "end", status === "LISTO" ? palette.ink.hex : palette.red.hex)
-    y += 20
+    y += GRID.baseline
   })
   return s
 }
@@ -421,7 +421,7 @@ function buildCompositionNode(ast, page, ctx, isRoot = false) {
   const props = {
     grow: isRoot ? 1 : 0,
     basis: isRoot ? undefined : direction === "row" ? ast.width : ast.height,
-    gap: ast.gap || GRID.gutter,
+    gap: ast.gap || (direction === "column" ? GRID.verticalGap : GRID.gutter),
     align: ast.align || "start",
   }
   return direction === "row" ? row(props, children) : col(props, children)
@@ -531,13 +531,13 @@ function measuredPartsCapacity(parts, pageCtx, width, height) {
 }
 
 function colorCapacity(height) {
-  return Math.max(0, Math.floor((height - 32) / 20))
+  return Math.max(0, Math.floor((height - 32) / 32))
 }
 
 function embroideryStopCapacity(height) {
   // Fourteen base fields + sequence heading/rule consume sixteen rows before
   // the individual stops. Fourteen units is the renderer's legible floor.
-  return Math.max(0, Math.floor((height - 38) / 14) - 16)
+  return Math.max(0, Math.floor((height - 32) / 16) - 16)
 }
 
 function withDesignSlice(page, pageCtx, colors, stopSeq) {

@@ -19,22 +19,22 @@ describe("buildPage1 A4 geometry", () => {
     expect(found).toBeTruthy()
   })
 
-  it("positions the DETAILS bar right below the header, full width, 22px tall", () => {
+  it("positions the legacy DETAILS bar right below the header", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
     expect(rects(svg)).toContainEqual([0, 64, 1188, 22])
   })
 
-  it("keeps the disclaimer bar at the bottom, full width, 20px tall", () => {
+  it("keeps the disclaimer bar at the bottom, full width, 24px tall", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 820, 1188, 20])
+    expect(rects(svg)).toContainEqual([0, 816, 1188, 24])
   })
 
   it("draws the spec-table frame on three macro-grid columns", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 64, 414, 756])
+    expect(rects(svg)).toContainEqual([0, 64, 414, 752])
   })
 
   it("sizes the 4-view grid inside the remaining five columns", () => {
@@ -49,10 +49,10 @@ describe("buildPage1 A4 geometry", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
     const rs = rects(svg)
-    expect(rs).toContainEqual([414, 86, 387, 367])
-    expect(rs).toContainEqual([801, 86, 387, 367])
-    expect(rs).toContainEqual([414, 453, 387, 367])
-    expect(rs).toContainEqual([801, 453, 387, 367])
+    expect(rs).toContainEqual([414, 86, 387, 365])
+    expect(rs).toContainEqual([801, 86, 387, 365])
+    expect(rs).toContainEqual([414, 451, 387, 365])
+    expect(rs).toContainEqual([801, 451, 387, 365])
   })
 
   it("flexes part-row heights to fill exactly 714 units regardless of active count", () => {
@@ -63,10 +63,10 @@ describe("buildPage1 A4 geometry", () => {
     // are 320px wide (lW) - narrower than the disclaimer bar, which also has
     // y > 122 but spans the full page width, so filter on width too.
     const twoRowHeights = rects(two)
-      .filter(([x, y, w]) => x === 0 && w === 414 && y >= 106)
+      .filter(([x, y, w]) => x === 0 && w === 414 && y >= 102 && y < 816)
       .map(([, , , h]) => h)
     const fiveRowHeights = rects(five)
-      .filter(([x, y, w]) => x === 0 && w === 414 && y >= 106)
+      .filter(([x, y, w]) => x === 0 && w === 414 && y >= 102 && y < 816)
       .map(([, , , h]) => h)
 
     expect(twoRowHeights).toHaveLength(2)

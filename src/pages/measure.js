@@ -10,17 +10,16 @@
 // legibility.
 //
 // HARD RULE: these numbers must never disagree with what the renderers in
-// buildPages.js actually draw. The section-head constants mirror the
-// renderers exactly: 32 = renderColorSpecs' rule gap 6 + bar 20 + gap 6;
-// 38 = renderEmbSpecs' rule gap 6 + bar 20 + gaps 12. Row heights come from
-// the shared metrics ROW scale. If a renderer's geometry changes, this
-// module changes with it (measure.test.js locks the agreement).
+// buildPages.js actually draw. Technical module heads occupy 32 units and
+// every following row is an integer multiple of the 16-unit baseline. If a
+// renderer's geometry changes, this module changes with it (measure.test.js
+// locks the agreement).
 //
 // First draft delegated to the local DeepSeek orchestrator against the
 // measure.test.js contract; reviewed and integrated here.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ROW } from "../design/metrics.js"
+import { CHROME, GRID, ROW, snapBaseline } from "../design/metrics.js"
 import { wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { effectiveParts, partsTableMetrics } from "./tableMetrics.js"
@@ -55,9 +54,9 @@ export function measureRegion(region, page, ctx, width) {
   const type = region.type
 
   // Fixed chrome strips (same values as interpretPlan's FIXED_BASIS).
-  if (type === "header") return { natural: 82, min: 82, canAbsorb: false }
-  if (type === "titleBar") return { natural: 30, min: 30, canAbsorb: false }
-  if (type === "disclaimer") return { natural: 20, min: 20, canAbsorb: false }
+  if (type === "header") return { natural: CHROME.header, min: CHROME.header, canAbsorb: false }
+  if (type === "titleBar") return { natural: CHROME.titleBar, min: CHROME.titleBar, canAbsorb: false }
+  if (type === "disclaimer") return { natural: CHROME.footer, min: CHROME.footer, canAbsorb: false }
 
   // Absorbers: fill whatever the page has left over.
   if (type === "illustration") return { natural: null, min: 120, canAbsorb: true }
@@ -84,7 +83,7 @@ export function measureRegion(region, page, ctx, width) {
     if (n === 0) return { natural: 0, min: 0, canAbsorb: false }
     return {
       natural: 32 + n * ROW.color,
-      min: 32 + n * 20, // colorRowHeight's 7pt legible floor
+      min: 32 + n * ROW.color,
       canAbsorb: false,
     }
   }
@@ -96,8 +95,8 @@ export function measureRegion(region, page, ctx, width) {
     const stopSeq = Array.isArray(emb.stopSeq) ? emb.stopSeq : []
     const totalRows = 14 + (stopSeq.length > 0 ? 2 + stopSeq.length : 0)
     return {
-      natural: 38 + totalRows * ROW.emb + (stopSeq.length > 0 ? Math.max(0, ROW.emb - 12) : 0),
-      min: 38 + totalRows * 14, // renderEmbSpecs' 7pt row floor
+      natural: 32 + totalRows * ROW.emb,
+      min: 32 + totalRows * ROW.emb,
       canAbsorb: false,
     }
   }
@@ -106,20 +105,20 @@ export function measureRegion(region, page, ctx, width) {
     const text = typeof region.note === "string" ? region.note : ""
     if (text.trim() === "") return { natural: 0, min: 0, canAbsorb: false }
     const lines = wrapLines(text, Math.max(1, (width || 100) - 20), 10)
-    const natural = 16 + lines.length * 14
+    const natural = snapBaseline(GRID.baseline + lines.length * GRID.baseline)
     return { natural, min: natural, canAbsorb: false } // text never compresses
   }
 
   if (type === "references") {
     const design = selectedDesign(page, ctx)
     return design && design.imageData
-      ? { natural: 120, min: 120, canAbsorb: false }
+      ? { natural: 128, min: 128, canAbsorb: false }
       : { natural: 0, min: 0, canAbsorb: false }
   }
 
   if (type === "documentIndex") {
     const entries = ctx && Array.isArray(ctx.documentIndex) ? ctx.documentIndex : []
-    const natural = 42 + entries.length * 20
+    const natural = 32 + entries.length * GRID.baseline
     return { natural, min: natural, canAbsorb: false }
   }
 

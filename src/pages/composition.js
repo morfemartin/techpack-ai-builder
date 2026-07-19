@@ -1,4 +1,4 @@
-import { GRID } from "../design/metrics.js"
+import { GRID, PAGE_BODY, snapBaseline } from "../design/metrics.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { layoutPolicyFor, normalizePriority } from "./pageContracts.js"
 import { normalizeSlotBriefs } from "./briefs.js"
@@ -20,14 +20,14 @@ function regionNode(region, width, height) {
 }
 
 function groupNode(axis, children, props = {}) {
-  return { kind: "group", axis, gap: GRID.gutter, children, ...props }
+  return { kind: "group", axis, gap: axis === "column" ? GRID.verticalGap : GRID.gutter, children, ...props }
 }
 
 function measured(region, page, ctx, width) {
   const value = measureRegion(region, page, ctx, width)
   return value.canAbsorb
     ? { natural: 0, min: 0, canAbsorb: true }
-    : { natural: Math.max(0, value.natural || 0), min: Math.max(0, value.min || value.natural || 0), canAbsorb: false }
+    : { natural: snapBaseline(Math.max(0, value.natural || 0)), min: snapBaseline(Math.max(0, value.min || value.natural || 0)), canAbsorb: false }
 }
 
 function collectRegions(page, ctx) {
@@ -102,7 +102,7 @@ function findRegionBox(node, type) {
 }
 
 function fitColumnBoxes(boxes, height) {
-  const gaps = GRID.gutter * Math.max(0, boxes.length - 1)
+  const gaps = GRID.verticalGap * Math.max(0, boxes.length - 1)
   const available = Math.max(0, height - gaps)
   const natural = boxes.reduce((sum, item) => sum + item.measure.natural, 0)
   const compressible = boxes.reduce((sum, item) => sum + Math.max(0, item.measure.natural - item.measure.min), 0)
@@ -123,8 +123,8 @@ function heroRailCandidate(page, ctx, illustration, data, width, height, dataLef
     return { region, measure, width: railWidth, height: measure.natural }
   })
   const boxes = fitColumnBoxes(measuredBoxes, height)
-  const railHeight = boxes.reduce((sum, item) => sum + item.height, 0) + GRID.gutter * Math.max(0, boxes.length - 1)
-  const railMinHeight = boxes.reduce((sum, item) => sum + item.measure.min, 0) + GRID.gutter * Math.max(0, boxes.length - 1)
+  const railHeight = boxes.reduce((sum, item) => sum + item.height, 0) + GRID.verticalGap * Math.max(0, boxes.length - 1)
+  const railMinHeight = boxes.reduce((sum, item) => sum + item.measure.min, 0) + GRID.verticalGap * Math.max(0, boxes.length - 1)
   const rail = groupNode("column", boxes.map((item) => regionNode(item.region, item.width, item.height)), { width: railWidth, height: Math.min(height, railHeight), align: "start" })
   const hero = regionNode(illustration, heroWidth, height)
   const children = dataLeft ? [rail, hero] : [hero, rail]
@@ -154,26 +154,31 @@ function slotMosaic(regions, width, height) {
     }
   }
   if (regions.length === 3) {
-    const rowHeight = (height - GRID.gutter) / 2
+    const availableUnits = Math.floor((height - GRID.verticalGap) / GRID.baseline)
+    const topHeight = Math.ceil(availableUnits / 2) * GRID.baseline
+    const bottomHeight = Math.floor(availableUnits / 2) * GRID.baseline
     const cellWidth = (width - GRID.gutter) / 2
-    const lower = groupNode("row", regions.slice(1).map((region) => regionNode(region, cellWidth, rowHeight)), { width, height: rowHeight })
+    const lower = groupNode("row", regions.slice(1).map((region) => regionNode(region, cellWidth, bottomHeight)), { width, height: bottomHeight })
     return {
-      ast: groupNode("column", [regionNode(regions[0], width, rowHeight), lower], { width, height }),
-      boxes: [{ width, height: rowHeight, slots: 1 }, { width: cellWidth, height: rowHeight, slots: 1 }, { width: cellWidth, height: rowHeight, slots: 1 }],
+      ast: groupNode("column", [regionNode(regions[0], width, topHeight), lower], { width, height }),
+      boxes: [{ width, height: topHeight, slots: 1 }, { width: cellWidth, height: bottomHeight, slots: 1 }, { width: cellWidth, height: bottomHeight, slots: 1 }],
     }
   }
   const columns = Math.ceil(Math.sqrt(regions.length))
   const rows = Math.ceil(regions.length / columns)
   const cellWidth = (width - GRID.gutter * (columns - 1)) / columns
-  const cellHeight = (height - GRID.gutter * (rows - 1)) / rows
+  const availableUnits = Math.floor((height - GRID.verticalGap * (rows - 1)) / GRID.baseline)
+  const baseUnits = Math.floor(availableUnits / rows)
+  const remainder = availableUnits % rows
+  const rowHeights = Array.from({ length: rows }, (_, index) => (baseUnits + (index < remainder ? 1 : 0)) * GRID.baseline)
   const rowNodes = []
   for (let rowIndex = 0; rowIndex < rows; rowIndex++) {
     const rowRegions = regions.slice(rowIndex * columns, (rowIndex + 1) * columns)
-    rowNodes.push(groupNode("row", rowRegions.map((region) => regionNode(region, cellWidth, cellHeight)), { width, height: cellHeight }))
+    rowNodes.push(groupNode("row", rowRegions.map((region) => regionNode(region, cellWidth, rowHeights[rowIndex])), { width, height: rowHeights[rowIndex] }))
   }
   return {
     ast: groupNode("column", rowNodes, { width, height }),
-    boxes: regions.map(() => ({ width: cellWidth, height: cellHeight, slots: 1 })),
+    boxes: regions.map((_, index) => ({ width: cellWidth, height: rowHeights[Math.floor(index / columns)], slots: 1 })),
   }
 }
 
@@ -183,7 +188,7 @@ function mosaicCandidate(page, ctx, illustration, data, width, height, dataLeft,
   const leftWidth = GRID.span(railSpan)
   const rightWidth = GRID.span(GRID.columns - railSpan)
   const dataMeasure = measured(data[0], page, ctx, leftWidth)
-  const leftSlotHeight = Math.max(0, height - dataMeasure.natural - GRID.gutter)
+  const leftSlotHeight = Math.max(0, height - dataMeasure.natural - GRID.verticalGap)
   const briefs = normalizeSlotBriefs(illustration, page, ctx)
   const slots = Array.from({ length: slotCount }, (_, index) => singleSlotRegion(illustration, briefs, index))
   const right = slotMosaic(slots.slice(1), rightWidth, height)
@@ -191,7 +196,7 @@ function mosaicCandidate(page, ctx, illustration, data, width, height, dataLeft,
   const left = groupNode("column", [regionNode(data[0], leftWidth, dataMeasure.natural), leftSlot], { width: leftWidth, height })
   const children = [left, right.ast]
   const slotBoxes = [{ width: leftWidth, height: leftSlotHeight, slots: 1 }, ...right.boxes]
-  return candidate("data-slot-mosaic", groupNode("row", children, { width, height }), illustration, [{ region: data[0], measure: dataMeasure, width: leftWidth, height: dataMeasure.natural }], { widths: [leftWidth, rightWidth], slotBoxes, groupOverflow: Math.max(0, dataMeasure.natural + GRID.gutter - height) })
+  return candidate("data-slot-mosaic", groupNode("row", children, { width, height }), illustration, [{ region: data[0], measure: dataMeasure, width: leftWidth, height: dataMeasure.natural }], { widths: [leftWidth, rightWidth], slotBoxes, groupOverflow: Math.max(0, dataMeasure.natural + GRID.verticalGap - height) })
 }
 
 function multiColumnCandidate(page, ctx, illustration, data, width, height, dataLeft) {
@@ -220,10 +225,10 @@ function bottomBandCandidate(page, ctx, illustration, data, width, height) {
     return { region, measure, width: columnWidth, height: measure.natural }
   })
   const bandHeight = Math.max(0, ...boxes.map((item) => item.height))
-  const heroHeight = Math.max(0, height - bandHeight - GRID.gutter)
+  const heroHeight = Math.max(0, height - bandHeight - GRID.verticalGap)
   const band = groupNode("row", boxes.map((item) => regionNode(item.region, item.width, item.height)), { width, height: bandHeight, align: "start" })
   const ast = groupNode("column", [regionNode(illustration, width, heroHeight), band], { width, height })
-  return candidate("hero-bottom-band", ast, illustration, boxes.map((item) => ({ ...item, height: bandHeight })), { heights: [heroHeight, bandHeight], groupOverflow: Math.max(0, bandHeight + GRID.gutter - height) })
+  return candidate("hero-bottom-band", ast, illustration, boxes.map((item) => ({ ...item, height: bandHeight })), { heights: [heroHeight, bandHeight], groupOverflow: Math.max(0, bandHeight + GRID.verticalGap - height) })
 }
 
 function compareCandidates(a, b) {
@@ -252,7 +257,7 @@ function summarize(candidate) {
 
 export function evaluatePageCompositions(page, ctx, dimensions = {}) {
   const width = Number(dimensions.width) || GRID.span(8)
-  const height = Number(dimensions.height) || 628
+  const height = Number(dimensions.height) || PAGE_BODY.height
   const policy = layoutPolicyFor(page)
   const regions = collectRegions(page, ctx)
   const illustration = regions.find((region) => region.type === "illustration")

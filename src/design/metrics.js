@@ -36,6 +36,7 @@ export const GRID = {
   gutter: 12,
   column: 130,
   baseline: 16,
+  verticalGap: 16,
   span(count) {
     const n = Math.max(1, Math.min(8, Number(count) || 1))
     return n * this.column + (n - 1) * this.gutter
@@ -44,9 +45,20 @@ export const GRID = {
 
 export const CHROME = {
   header: 64,
-  titleBar: 28,
-  footer: 20,
-  gap: GRID.gutter,
+  titleBar: 32,
+  footer: 24,
+  gap: GRID.verticalGap,
+}
+
+export const PAGE_BODY = {
+  width: GRID.span(8),
+  height: PAGE.height - GRID.margin * 2 - CHROME.header - CHROME.titleBar - CHROME.footer - CHROME.gap * 3,
+}
+
+export function snapBaseline(value, mode = "ceil") {
+  const units = Number(value) / GRID.baseline
+  const snapped = mode === "floor" ? Math.floor(units) : mode === "round" ? Math.round(units) : Math.ceil(units)
+  return Math.max(0, snapped * GRID.baseline)
 }
 
 export const PRINT = {
@@ -78,9 +90,9 @@ export const COL = {
 
 // ── Row-height scale (multiples of space(1)=4px) ─────────────────────────────
 export const ROW = {
-  tableHeader: space(5), // 20 — table header strip
+  tableHeader: space(4), // 16 — one baseline unit
   table: space(8), // 32 — compact parts-table row (AI-planned pages)
-  color: space(7), // 28 — max color-spec row (2-line label + CMYK)
+  color: space(8), // 32 — two baseline units
   emb: space(4), // 16 — max embroidery key/value row
   kv: space(5), // 20 — generic key/value row (design page info rows)
 }
@@ -92,7 +104,7 @@ export const CHIP = space(4) // 16
 // Inner section title bar (PANTONE/CMYK, embroidery sheet): full block width,
 // left-aligned white label — the same visual grammar as the page titleBar.
 export const BAR = {
-  h: space(5), // 20
+  h: space(4), // 16
   fontSize: PRINT.minFont,
 }
 

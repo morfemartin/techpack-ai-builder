@@ -77,6 +77,12 @@ describe("Layout Lab closure fixtures", () => {
     const fourViewPage = buildPlannedPages(fourViews.plan, ctxForFixture(fourViews), { documentMode: "illustration-handoff" })[0]
     expect(fourViewPage.compositionDecision.mode).toBe("data-slot-mosaic")
     for (const view of [1, 2, 3, 4]) expect(fourViewPage.svg).toContain("id='ARTWORK__V" + view + "'")
+    const artboards = [...fourViewPage.svg.matchAll(/<g id='ARTWORK__V\d+'><rect x='[\d.]+' y='([\d.]+)' width='[\d.]+' height='([\d.]+)'/g)]
+    expect(artboards).toHaveLength(4)
+    artboards.forEach((match) => {
+      expect(Number(match[1]) % 16).toBe(0)
+      expect(Number(match[2]) % 16).toBe(0)
+    })
 
     const denseStops = fixture("N-stops-30")
     const decision = evaluatePageCompositions(denseStops.plan.pages[0], ctxForFixture(denseStops), { width: 1148, height: 674 }).decision
