@@ -60,18 +60,28 @@ describe("Layout Lab closure fixtures", () => {
   })
 
   it("changes composition from measured density while preserving complete candidates", () => {
-    const modes = [1, 6, 16, 24].map((count) => {
+    const results = [1, 6, 16, 24].map((count) => {
       const item = fixture("M-bom-" + count)
-      return evaluatePageCompositions(item.plan.pages[0], ctxForFixture(item), { width: 1148, height: 674 }).decision
+      return buildPlannedPages(item.plan, ctxForFixture(item), { documentMode: "illustration-handoff" })
     })
-    expect(modes.map((decision) => decision.mode)).toEqual(["hero-bottom-band", "hero-bottom-band", "bom-hero", "bom-hero"])
-    expect(modes.every((decision) => decision.complete)).toBe(true)
+    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["data-slot-mosaic", "data-slot-mosaic", "bom-hero", "bom-hero"])
+    expect(results.every((pages) => pages[0].compositionDecision.complete)).toBe(true)
+    expect(results[3]).toHaveLength(2)
+
+    const short = fixture("B-split-stack")
+    const shortPage = buildPlannedPages(short.plan, ctxForFixture(short), { documentMode: "illustration-handoff" })[0]
+    expect(shortPage.compositionDecision.mode).toBe("data-slot-mosaic")
+    expect(shortPage.compositionDecision.illustrationArea).toBeGreaterThan(600000)
+
+    const fourViews = fixture("E-illustration-grid")
+    const fourViewPage = buildPlannedPages(fourViews.plan, ctxForFixture(fourViews), { documentMode: "illustration-handoff" })[0]
+    expect(fourViewPage.compositionDecision.mode).toBe("data-slot-mosaic")
+    for (const view of [1, 2, 3, 4]) expect(fourViewPage.svg).toContain("id='ARTWORK__V" + view + "'")
 
     const denseStops = fixture("N-stops-30")
     const decision = evaluatePageCompositions(denseStops.plan.pages[0], ctxForFixture(denseStops), { width: 1148, height: 674 }).decision
-    expect(decision.mode).toBe("hero-bottom-band")
-    expect(decision.complete).toBe(true)
-    expect(decision.slotValid).toBe(false)
+    expect(decision.valid).toBe(false)
+    expect(decision.candidates.every((candidate) => !candidate.valid)).toBe(true)
     const pages = buildPlannedPages(denseStops.plan, ctxForFixture(denseStops), { documentMode: "illustration-handoff" })
     expect(pages).toHaveLength(2)
     const renderedStops = pages.flatMap((page) => [...page.svg.matchAll(/Stop (\d+):/g)].map((match) => Number(match[1])))

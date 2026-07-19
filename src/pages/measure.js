@@ -23,6 +23,7 @@
 import { ROW } from "../design/metrics.js"
 import { wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
+import { effectiveParts, partsTableMetrics } from "./tableMetrics.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
 // wins, then the page's first `covers` entry, then the first design. Moved
@@ -63,11 +64,16 @@ export function measureRegion(region, page, ctx, width) {
   if (type === "spacer") return { natural: 0, min: 0, canAbsorb: true }
 
   if (type === "partsList") {
-    const parts = ctx && Array.isArray(ctx.parts) ? ctx.parts : []
-    const n = parts.filter((p) => p && p.on !== false).length
+    const parts = effectiveParts(ctx && ctx.parts, page)
+    const garment = ctx && ctx.garment
+    const partLabels = garment && garment.partLabels
+      ? garment.partLabels[(ctx && ctx.lang) || "ES"] || garment.partLabels.ES || {}
+      : {}
+    const txParts = ctx && ctx.txData && ctx.txData.parts
+    const table = partsTableMetrics({ parts, partLabels, txParts, width: width || 300 })
     return {
-      natural: ROW.tableHeader + n * ROW.table,
-      min: ROW.tableHeader + n * 24, // compact renderer's min row
+      natural: table.height,
+      min: table.height,
       canAbsorb: false,
     }
   }

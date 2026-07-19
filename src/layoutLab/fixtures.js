@@ -99,9 +99,9 @@ export const FIXTURES = [
   {
     id: "B-split-stack",
     dataset: "bikini",
-    title: "B · Split que APILA (contenido corto)",
+    title: "B · Mosaico con contenido corto",
     tests: "split[ partsList 1-2 filas | ilustración ] — reproduce el caso del bug reportado.",
-    expected: "Ilustración arriba a todo el ancho; specs abajo como franja compacta a su alto natural.",
+    expected: "La tabla usa solo su altura medida; una vista ocupa el espacio inferior y la otra el campo adyacente.",
     plan: {
       pages: [
         {
@@ -245,9 +245,9 @@ export const FIXTURES = [
   {
     id: "E-illustration-grid",
     dataset: "varsity",
-    title: "E · Ilustración multi-slot (4 vistas) + specs corto",
+    title: "E · Mosaico multi-slot (4 vistas) + specs corto",
     tests: "illustration slots=4 (grilla 2x2) + partsList corto debajo.",
-    expected: "Grilla 2x2 de vistas a todo el ancho; tabla corta apilada abajo a su alto natural.",
+    expected: "Tabla corta arriba, una vista debajo y tres vistas teseladas en el campo derecho.",
     plan: {
       pages: [
         {

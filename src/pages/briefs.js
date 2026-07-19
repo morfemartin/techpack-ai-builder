@@ -119,7 +119,8 @@ export function normalizeSlotBriefs(region, page, ctx) {
     const placementLandmark = coerceString(sourceObj?.placementLandmark) || defaultPlacementLandmark;
     const factoryNote = coerceString(sourceObj?.factoryNote) || defaultFactoryNote;
 
-    const slotCode = 'V' + (i + 1);
+    const slotOffset = Math.max(0, Number(region && region._slotOffset) || 0);
+    const slotCode = 'V' + (slotOffset + i + 1);
     const callouts = mustMark.map((label, index) => ({ id: slotCode + '.' + (index + 1), label }));
     const numberedMeasurements = measurements.map((measurement, index) => ({
       ...measurement,

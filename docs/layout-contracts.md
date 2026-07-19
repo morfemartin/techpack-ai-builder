@@ -46,7 +46,7 @@ planPageLayout ──► normalizePlan ──► repairPage ──► regions
         │
         ▼
 candidate composer ──► layout AST ──► solveLayout ──► A4 SVG
- (8-column grid)       (nested rail)   (whole-pixel)   (editable groups)
+ (grid search)          (rail/mosaic)   (whole-pixel)   (editable groups)
         │
         ▼
 buildReviewFindings ──► ReviewChat (only if problems) ──► export
@@ -71,7 +71,9 @@ coincident edges across blocks.
 ### 2. Measure-then-solve (`src/pages/measure.js` + solver) — kills P2
 
 `measureRegion()` answers, per region type, "how tall does this block want to
-be for its actual data?" — mirroring each renderer's exact geometry.
+be for its actual data at this exact width?" — mirroring each renderer's exact
+geometry. BOM rows use the same wrapping function in measurement and rendering,
+so a long specification increases its row height instead of crossing a cell.
 `interpretPagePlan` then sizes a page so **bounded data blocks take their
 natural height** (`grow: 0`, compressible only toward a legible floor) and
 **every leftover pixel flows to the absorbers** (illustration/spacer, or a
@@ -144,7 +146,11 @@ blocked behind the provider's internal retries.
 
 After contract repair, every page is evaluated on an exact A4 landscape macro
 grid: eight 32.5mm columns, 3mm gutters and 8mm margins. The composer compares
-`hero-rail`, independent data columns, bottom bands and BOM/hero candidates.
+`hero-rail`, independent data columns, bottom bands, BOM/hero and
+`data-slot-mosaic` candidates. Rails enumerate every grid span allowed by the
+module's measured minimum width. A mosaic can place a short data block above
+one artboard and tile the remaining views in the adjacent columns; scoring uses
+the real area and minimum dimensions of every individual slot.
 Completeness, 7pt print legibility and 60mm art slots are hard constraints;
 artwork area, internal waste and page count are ordered tie-breakers.
 

@@ -6,6 +6,7 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { palette, type } from "../design/tokens.js"
 import { CHROME, COL, CHIP, GRID, INSET, PAGE, PRINT, ROW, TEXT_PAD } from "../design/metrics.js"
 import { briefLines } from "./briefs.js"
+import { partsRowMetrics } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, startIndex } = {}) {
@@ -21,7 +22,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   // aligned, so a short parts list reads as a clean table with breathing room
   // instead of a few rows stretched tall with tiny text floating in huge cells.
   // The registered Cap keeps the default flex-fill rows (grow:1) untouched.
-  var rowSizing = compact ? { basis: ROW.table, grow: 0, min: 24 } : { grow: 1, min: 16 }
+  var measuredRows = compact ? partsRowMetrics({ parts: safeParts, partLabels: pn, txParts: txP, width: box.width }) : null
 
   // Header and data rows share the SAME column template (metrics.js COL) and
   // the same alignment - the old header centered its captions at unrelated
@@ -47,20 +48,26 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
 
   var partRows = safeParts.map((p, i) =>
     leaf({
-      ...rowSizing,
+      ...(compact ? { basis: measuredRows[i].height, grow: 0, min: measuredRows[i].height } : { grow: 1, min: 16 }),
       render: (b) => {
         var bg = i % 2 === 0 ? palette.white.hex : "#F7F7F8"
-        var nm = pn[p.id] || p.customName || "P" + p.id
-        var v = txP ? txP[i] : p.val
+        var metric = compact ? measuredRows[i] : null
+        var nm = metric ? metric.name : pn[p.id] || p.customName || "P" + p.id
+        var v = metric ? metric.value : txP ? txP[i] : p.val
         var st = colStops(b)
+        function textLines(lines, x) {
+          var safeLines = Array.isArray(lines) && lines.length ? lines : [""]
+          var startY = b.y + b.height / 2 - ((safeLines.length - 1) * 14) / 2
+          return safeLines.map((line, lineIndex) => TX(x, startY + lineIndex * 14, line, PRINT.minFont, false, "start", undefined, type.svgFonts.data)).join("")
+        }
         return (
           R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
           // role.index chip: shared mark via svgChip - same size everywhere.
           svgChip(b.x + b.width * COL.index, b.y + b.height / 2, start + i + 1, Math.min(b.height - 6, CHIP)) +
           "<line x1='" + st.divLabel + "' y1='" + b.y + "' x2='" + st.divLabel + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, nm, PRINT.minFont, false, "start") +
+          (metric ? textLines(metric.nameLines, st.divLabel + TEXT_PAD) : TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, nm, PRINT.minFont, false, "start")) +
           "<line x1='" + st.divValue + "' y1='" + b.y + "' x2='" + st.divValue + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(st.divValue + TEXT_PAD, b.y + b.height / 2, v || NA, PRINT.minFont, false, "start", undefined, type.svgFonts.data)
+          (metric ? textLines(metric.valueLines, st.divValue + TEXT_PAD) : TX(st.divValue + TEXT_PAD, b.y + b.height / 2, v || NA, PRINT.minFont, false, "start", undefined, type.svgFonts.data))
         )
       },
     })
@@ -181,7 +188,7 @@ export function renderReferenceAsset(box, { design } = {}) {
   return s
 }
 
-export function renderIllustrationZone(box, { slots, refs, note, briefs } = {}) {
+export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset } = {}) {
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
   var noteText = note || ""
   // The illustration is the hero: it takes the WHOLE box (no note band carved
@@ -211,7 +218,8 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs } = {}) 
     })
     // Red index chip + uppercase view label, top-left (the tech-pack "FRONT
     // VIEW" / "BACK VIEW" caption). The chip stays the cell's only attention mark.
-    s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + (i + 1))
+    var viewNumber = Math.max(0, Number(slotOffset) || 0) + i + 1
+    s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + viewNumber)
     s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
 
     var brief = Array.isArray(briefs) ? briefs[i] : null
@@ -235,8 +243,8 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs } = {}) 
       selectedLines = selectedLines.slice(0, maxLines)
     }
 
-    s += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + (i + 1) + "'>"
-    s += TX(textX, textY - 18, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + (i + 1)), PRINT.minFont, true, "start", "#7D8490")
+    s += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
+    s += TX(textX, textY - 18, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
     selectedLines.forEach(function (line, lineIndex) {
       var ly = textY + lineIndex * 14
       if (line.pending) s += R(textX - 4, ly - 7, textW + 8, 14, palette.yellow.hex, palette.ink.hex, "0.5")

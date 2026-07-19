@@ -13,12 +13,13 @@ import { T } from "../core/i18n.js"
 import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette } from "../design/tokens.js"
-import { CHROME, GRID, INSET, PAGE, PRINT, ROW } from "../design/metrics.js"
+import { CHROME, GRID, INSET, PAGE, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
+import { partsCapacityForHeight } from "./tableMetrics.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
@@ -53,12 +54,6 @@ const STANDARD_WORKING_HEIGHT = PAGE_H - PAGE_PAD * 2 - FIXED_BASIS.header - FIX
 // from the shared metrics scale) - used to measure, after solving, whether a
 // page's parts list actually fits the parts assigned to it (see
 // `buildPlannedPages` pagination).
-const COMPACT_ROW_H = ROW.table
-const TABLE_HEADER_H = ROW.tableHeader
-function partsCapacity(height) {
-  return Math.max(0, Math.floor((height - TABLE_HEADER_H) / COMPACT_ROW_H))
-}
-
 // A real technical designer doesn't repeat the whole BOM on every page - a
 // page about the hood shows the hood's pieces, not the zipper's. `page.pieces`
 // (an array of part ids the outline pass assigns per page) narrows the parts
@@ -337,12 +332,16 @@ function leafForRegion(region, page, ctx) {
         // design happens to be first.
         const isDesignPage = typeof page.purpose === "string" && page.purpose.startsWith("design:")
         const briefsCtx = isDesignPage ? ctx : { ...ctx, designs: [] }
-        return semanticGroup(region.type, renderIllustrationZone(box, {
+        const artworkMarkup = renderIllustrationZone(box, {
           slots: region.slots,
           refs: region.refs,
           briefs: normalizeSlotBriefs(region, page, briefsCtx),
           note: region.note || (design && design.illustrationBrief) || "",
-        }))
+          slotOffset: region._slotOffset,
+        })
+        return region._mosaicSlot
+          ? "<g id='ARTWORK__V" + (Number(region._slotOffset) + 1) + "'>" + artworkMarkup + "</g>"
+          : semanticGroup(region.type, artworkMarkup)
       }
       if (region.type === "partsList") {
         // ctx.parts already reflects this page's pieces (see interpretPagePlan)
@@ -523,6 +522,14 @@ function availableTableHeight(leafNode) {
   return Math.max(0, Math.min(leafNode.height, PAGE_H - bottomChrome - leafNode.y))
 }
 
+function measuredPartsCapacity(parts, pageCtx, width, height) {
+  const garment = pageCtx && pageCtx.garment
+  const lang = (pageCtx && pageCtx.lang) || "ES"
+  const partLabels = garment && garment.partLabels ? garment.partLabels[lang] || garment.partLabels.ES || {} : {}
+  const txParts = pageCtx && pageCtx.txData && pageCtx.txData.parts
+  return partsCapacityForHeight({ parts, partLabels, txParts, width: width || GRID.span(3) }, height)
+}
+
 function colorCapacity(height) {
   return Math.max(0, Math.floor((height - 32) / 20))
 }
@@ -647,7 +654,10 @@ export function buildPlannedPages(plan, ctx, opts) {
       return
     }
 
-    if (!partsLeaf || effective.length <= partsCapacity(availableTableHeight(partsLeaf))) {
+    const firstPartsCapacity = partsLeaf
+      ? measuredPartsCapacity(effective, baseCtx, partsLeaf.width, availableTableHeight(partsLeaf))
+      : effective.length
+    if (!partsLeaf || effective.length <= firstPartsCapacity) {
       addDescriptor(page, baseCtx, i)
       return
     }
@@ -659,7 +669,7 @@ export function buildPlannedPages(plan, ctx, opts) {
     // BOM. Every other block already shrinks-to-fit (fitText, dynamic specs
     // row height); the parts list is the one place row height is fixed for
     // readability, so it's the one that paginates instead.
-    const cap = Math.max(1, partsCapacity(availableTableHeight(partsLeaf)))
+    const cap = Math.max(1, firstPartsCapacity)
     const cappedCtx = { ...baseCtx, parts: effective.slice(0, cap), partsStartIndex: 0 }
     addDescriptor({ ...page, pieces: undefined }, cappedCtx, i)
 
@@ -680,7 +690,7 @@ export function buildPlannedPages(plan, ctx, opts) {
       }
       const probe = resolvedTreeFor(contPage, { ...baseCtx, parts: rest, partsStartIndex: startIndex })
       const contLeaf = findPartsListLeaf(probe)
-      const contCap = Math.max(1, partsCapacity(contLeaf ? availableTableHeight(contLeaf) : H))
+      const contCap = Math.max(1, measuredPartsCapacity(rest, baseCtx, contLeaf && contLeaf.width, contLeaf ? availableTableHeight(contLeaf) : H))
       const chunk = rest.slice(0, contCap)
       addDescriptor(contPage, { ...baseCtx, parts: chunk, partsStartIndex: startIndex }, i)
       rest = rest.slice(contCap)

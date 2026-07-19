@@ -39,15 +39,18 @@ Phase 2 reuses the exact same garment datasets but lets `planDocumentOutline` + 
 
 The layout engine evaluates **nested candidate compositions** rather than applying a
 garment template. For the same page intent it measures the actual BOM, colors,
-embroidery and notes, then compares row and stack candidates against five
+embroidery and notes, then compares rail, band and slot-mosaic candidates against five
 ordered constraints: complete data, legible minimums, purpose-specific
 illustration bands, maximum useful illustration area, and minimum unexplained
 space. The diagnostic above every fixture records the chosen mode, overflow,
 area, calculated grid spans, internal waste and rejection reasons.
 
-### Parts list → stacks (good)
+### Parts list → shares space with artwork
 
-A parts-list row is a wide, three-column record (`#` / spec / detail) that reads well stretched to the full page width. A one-row table becomes a clean full-width strip under the illustration, no wasted space:
+A parts-list row is a three-column record (`#` / spec / detail). Its height is
+computed from the wrapped text at each candidate width. A short table can share
+its column with one artboard while the remaining views tile the adjacent area;
+a dense BOM receives more columns or continues on another page.
 
 ![Short parts list stacks as a full-width strip under the illustration](./img/b-stack.png)
 
@@ -75,11 +78,11 @@ Compositor decision was verified against the layout tree directly, not by eye.
 | Fixture | Garment | Tests | Result |
 | --- | --- | --- | --- |
 | **A** · split row | Parka (16 parts) | Full parts list beside illustration | **Row** — table fills its column |
-| **B** · split stack | Bikini (1 part) | Very short parts list beside illustration | **Stack** — full-width strip below |
+| **B** · short BOM mosaic | Bikini (1 part) | Very short parts list beside two views | **Mosaic** — one view below BOM, one in the adjacent field |
 | **C** · colorSpecs heavy | Skirt (10 colorways) | Heavy color card beside illustration | **Row** — side column |
 | **C2** · colorSpecs short | Skirt (2 colorways) | Short color card | Candidate chosen by measured area, not type |
 | **D** · embSpecs heavy | Hoodie | Embroidery sheet beside illustration | **Row** — side column |
-| **E** · illustration grid | Varsity (4 views) | 2×2 illustration grid + short parts list | **Stack** — grid on top, strip below |
+| **E** · illustration mosaic | Varsity (4 views) | Four views + short parts list | **Mosaic** — one view below BOM, three tiled at right |
 | **F** · pagination | Parka (16 parts) | Parts list in a short band | **2 pages** — continues 1…16, nothing dropped |
 | **G** · note block | Bikini | Note band + full-width illustration | No split — note over illustration |
 | **H** · full document | Varsity | 4-page doc (overview + 3 designs) | Coherent; each design uses its own data |
