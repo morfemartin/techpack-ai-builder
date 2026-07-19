@@ -141,9 +141,9 @@ el que arma la ficha técnica en SVG. Un solo sistema numérico para ambos.
 
 - **Micro-grid fija** (`space(n) = n×4px`) para el espaciado interno de los
   componentes.
-- **Márgenes por porcentaje entre las retículas mayores**: el motor resuelve
-  valores como `"6%"`, así los canales entre bloques **escalan con el formato**
-  en lugar de quedar fijos.
+- **Retícula macro A4 horizontal** de 8 columnas exactas: márgenes de 8mm,
+  gutters de 3mm y baseline vertical de 4mm. Las composiciones siempre ocupan
+  spans enteros y conservan escala física al abrirse en Illustrator.
 
 **Por qué importa:** la consistencia. Como la misma lógica ordena la pantalla y
 el impreso, la fábrica aprende la disposición **una vez** y la reconoce en cada

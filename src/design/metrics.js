@@ -16,6 +16,45 @@
 
 import { space } from "./tokens.js"
 
+// A4 landscape at four viewBox units per millimetre. Every exported SVG keeps
+// these physical dimensions so Illustrator and print dialogs open it at the
+// intended scale instead of treating the viewBox as an arbitrary screen graphic.
+export const PAGE = {
+  width: 1188,
+  height: 840,
+  physicalWidth: "297mm",
+  physicalHeight: "210mm",
+  unitsPerMm: 4,
+}
+
+// Eight-column production grid: 8mm page margins, 3mm gutters and exact
+// 32.5mm columns. The arithmetic closes perfectly inside A4:
+// 32 + (8 * 130) + (7 * 12) + 32 = 1188.
+export const GRID = {
+  columns: 8,
+  margin: 32,
+  gutter: 12,
+  column: 130,
+  baseline: 16,
+  span(count) {
+    const n = Math.max(1, Math.min(8, Number(count) || 1))
+    return n * this.column + (n - 1) * this.gutter
+  },
+}
+
+export const CHROME = {
+  header: 64,
+  titleBar: 28,
+  footer: 20,
+  gap: GRID.gutter,
+}
+
+export const PRINT = {
+  minFont: 10, // 2.5mm ~= 7.1pt at the declared physical A4 size
+  captionFont: 10,
+  bodyFont: 11,
+}
+
 // Horizontal content inset inside any block: text, swatches, key/value rows.
 // Rules and section bars are FULL-WIDTH (inset 0) — a bar that is 10px
 // narrower than the page title bar above it reads as a mistake, not a style.
@@ -54,12 +93,12 @@ export const CHIP = space(4) // 16
 // left-aligned white label — the same visual grammar as the page titleBar.
 export const BAR = {
   h: space(5), // 20
-  fontSize: 9,
+  fontSize: PRINT.minFont,
 }
 
 // ── Header grid — one column module for BOTH rows ────────────────────────────
 // svgHeader used to give each row its own ad-hoc cell widths; the rows ended
-// at different x positions (901px vs 1071px on a 1200px page) and no vertical
+// at different x positions and no vertical
 // edge lined up between them. Now: after the fixed logo cell, the width is
 // divided into UNITS equal modules; the top row spans [1,1,1,1,1] and the
 // bottom row spans [1,2,1,1], so every bottom-row edge lands exactly on a

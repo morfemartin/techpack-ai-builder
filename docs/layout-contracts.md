@@ -1,4 +1,4 @@
-# Layout Engine v2 — how the program "thinks like a tech-pack designer"
+# Layout Engine v3 — production grid and illustration handoff
 
 This is the architecture behind the generated tech-pack document: how a weak
 model's proposal becomes a correct, aligned, dead-space-free page. The guiding
@@ -45,9 +45,8 @@ planPageLayout ──► normalizePlan ──► repairPage ──► regions
     briefs[])                                         gone, chrome ordered
         │
         ▼
-interpretPagePlan  ──►  measure-then-solve  ──►  solveLayout  ──►  SVG
-   (build the tree)      (content-sized blocks,   (whole-pixel
-                          slack to absorbers)       snapping)
+candidate composer ──► layout AST ──► solveLayout ──► A4 SVG
+ (8-column grid)       (nested rail)   (whole-pixel)   (editable groups)
         │
         ▼
 buildReviewFindings ──► ReviewChat (only if problems) ──► export
@@ -143,12 +142,11 @@ time budget. When DeepSeek does not answer, the wizard uses the contractual
 outline/layout fallback or continues without designs/briefs instead of staying
 blocked behind the provider's internal retries.
 
-After contract repair, every page receives a deterministic constraint-evaluation
-pass. It measures the real rows, compares stack and row candidates, enforces
-purpose-specific illustration share bands and minimum legible data widths,
-then selects the complete candidate with the largest usable illustration area.
-The result therefore changes with content density; no garment name or fixed
-column percentage selects the composition.
+After contract repair, every page is evaluated on an exact A4 landscape macro
+grid: eight 32.5mm columns, 3mm gutters and 8mm margins. The composer compares
+`hero-rail`, independent data columns, bottom bands and BOM/hero candidates.
+Completeness, 7pt print legibility and 60mm art slots are hard constraints;
+artwork area, internal waste and page count are ordered tie-breakers.
 
 Bounded tables keep their natural height when possible and may compress only to
 the renderer's explicit legibility floor. If all rows still cannot fit, BOM,
@@ -160,6 +158,13 @@ Embroidery presence is based on `hasEmbSpecs`, not object truthiness. The UI
 creates every design with an `EMPTY_EMB` object, and that empty form must not
 create an embroidery page, consume layout height, or appear as an unplaced
 review finding.
+
+In `illustration-handoff` mode, briefs leave the art board and become a separate
+technical rail with deterministic view, design, callout and dimension IDs.
+Uploaded graphics render under `REFERENCES` as `NO A ESCALA`. The final SVG uses
+named groups (`ARTWORK`, `TECH_DATA`, `ILLUSTRATOR_INSTRUCTIONS`, `REFERENCES`,
+`PAGE_CHROME`) and a visible not-approved-for-production status. Document
+assembly paginates first, then creates the cover index and `P. XX / NN` footer.
 
 ---
 

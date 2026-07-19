@@ -41,7 +41,8 @@ Está pensado para dos públicos a la vez:
 - Editor de colores Pantone/nombre + hex, con conversión automática a CMYK.
 - Ficha técnica de bordado dedicada, con extracción automática de datos desde un PDF de máquina Wilcom (requiere API key de Anthropic, opcional).
 - Exportación multi-idioma (ES/EN/ZH) con traducción asistida por IA (opcional).
-- Cada página se genera como un SVG independiente, descargable o copiable — pensado para abrir como artboards separados en Illustrator.
+- Cada página se genera como SVG A4 horizontal (`297×210 mm`), descargable o copiable y agrupado semánticamente para abrir como artboards separados en Illustrator.
+- Cuando faltan dibujos técnicos, el resultado se identifica como **Illustration Handoff**: incluye índice, páginas numeradas, artboards editables e instrucciones textiles para que un diseñador gráfico complete las ilustraciones sin inventar construcción.
 - **Arquitectura multi-prenda desde el diseño**: agregar un nuevo tipo de prenda es un archivo de datos, no una reescritura — ver [abajo](#arquitectura-multi-prenda).
 
 ## Instalación

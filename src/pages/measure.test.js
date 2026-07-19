@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { measureRegion } from "./measure.js"
 import { ROW } from "../design/metrics.js"
 
-// Contract for the measure registry (Phase 1 of Layout Engine v2):
+// Contract for the measure registry used by Layout Engine v3:
 //
 //   measureRegion(region, page, ctx, width) → { natural, min, canAbsorb }
 //

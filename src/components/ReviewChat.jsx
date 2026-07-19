@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// REVIEW CHAT — the pre-download review round (Phase 4 of Layout Engine v2).
+// REVIEW CHAT — the pre-download review round used by Layout Engine v3.
 //
 // Opens when the user hits "Generar SVG" and the deterministic intent-vs-
 // document diff (src/core/reviewDiff.js) found problems: intake data that is

@@ -128,7 +128,7 @@ describe("interpretPagePlan", () => {
     expect(root.children).toHaveLength(4)
     // header: fixed strip, does not grow
     expect(root.children[0].grow).toBe(0)
-    expect(root.children[0].basis).toBe(82)
+    expect(root.children[0].basis).toBe(64)
     // partsList: bounded content at its natural height (1 part = 20 header
     // strip + 32 table row), never stretched by the plan weight anymore
     expect(root.children[1].grow).toBe(0)
@@ -157,15 +157,11 @@ describe("interpretPagePlan", () => {
       },
       ctx
     )
-    expect(root.children).toHaveLength(4) // no spacer injected - the illustration absorbs
-    const note = root.children[1]
-    const illustration = root.children[2]
-    // note: bounded at its wrapped-text natural height (a short line ≈ 30px), grow 0
-    expect(note.grow).toBe(0)
-    expect(note.basis).toBeLessThan(60)
-    expect(note.basis).toBeGreaterThan(0)
-    // illustration: the absorber - the only grower on the page
-    expect(illustration.grow).toBeGreaterThan(0)
+    expect(root.children).toHaveLength(3)
+    const composition = root.children[1]
+    expect(composition.direction).toBe("column")
+    expect(composition.grow).toBe(1)
+    expect(composition.children.some((child) => child.basis > 0)).toBe(true)
   })
 
   it("renders planned pages into the same [{name,svg}] shape as buildAllPages", () => {
@@ -195,7 +191,8 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("Custom Overview")
     expect(pages[0].svg).toContain("FRONT")
     expect(pages[0].svg).toContain("Cuerpo")
-    expect(pages[0].svg).toContain("Todos los disenos")
+    expect(pages[0].svg).toContain("width='297mm'")
+    expect(pages[0].svg).toContain("P. 01 / 01")
   })
 
   it("uses the matching design when a page purpose points to design:name", () => {
@@ -275,12 +272,11 @@ describe("split composition (2D layout)", () => {
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
       ctx
     )
-    // Stack is represented as normal top-level regions so the page solver can
-    // give every reclaimed pixel to the illustration.
-    expect(root.children).toHaveLength(4)
-    expect(root.children[1].grow).toBeGreaterThan(0)
-    expect(root.children[2].grow).toBe(0)
-    expect(root.children[2].basis).toBe(52)
+    expect(root.children).toHaveLength(3)
+    const composition = root.children[1]
+    expect(composition.direction).toBe("column")
+    expect(composition.children).toHaveLength(2)
+    expect(composition.children[0].basis).toBeGreaterThan(composition.children[1].basis)
   })
 
   it("places one short color band below when that preserves more illustration area", () => {
@@ -288,9 +284,9 @@ describe("split composition (2D layout)", () => {
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
       ctx
     )
-    expect(root.children).toHaveLength(4)
-    expect(root.children[1].grow).toBeGreaterThan(0)
-    expect(root.children[2].basis).toBeGreaterThan(0)
+    expect(root.children).toHaveLength(3)
+    expect(root.children[1].direction).toBe("column")
+    expect(root.children[1].children[1].basis).toBeGreaterThan(0)
   })
 
   it("renders both columns of a split into the same page svg", () => {
@@ -428,7 +424,59 @@ describe("buildPlannedPages design-table pagination", () => {
     const allSvg = pages.map((item) => item.svg).join("\n")
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[1].name).toContain("data_cont")
-    colors.forEach((color) => expect(allSvg.split(">" + color.name + "  " + color.hex + "<").length - 1).toBe(1))
+    colors.forEach((color) => {
+      const compact = allSvg.split(">" + color.name + "  " + color.hex + "<").length - 1
+      const expanded = allSvg.split(">" + color.name + "<").length - 1
+      expect(compact + expanded).toBe(1)
+    })
     stopSeq.forEach((stop) => expect(allSvg.split(": " + stop.name + " (").length - 1).toBe(1))
+  })
+})
+
+describe("Layout Engine v3 document assembly", () => {
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: [{ id: "body", val: "Cotton", on: true }],
+    designs: [{
+      name: "Chest",
+      pos: "Pecho izquierdo",
+      colors: [{ name: "Black", hex: "#111111" }],
+      imageData: "aGVsbG8=",
+      imageType: "png",
+    }],
+  }
+  const plan = { pages: [
+    { id: "cover", title: "Hoodie", purpose: "cover", regions: [{ type: "header" }, { type: "titleBar" }, { type: "illustration", slots: 1 }, { type: "disclaimer" }] },
+    { id: "chest", title: "Chest", purpose: "design:Chest", regions: [{ type: "header" }, { type: "titleBar" }, { type: "illustration", slots: 1, briefs: [{ view: "Front", mustMark: ["neck seam"] }] }, { type: "colorSpecs" }, { type: "disclaimer" }] },
+  ] }
+
+  it("renders A4 handoff pages in two passes with index and stable numbering", () => {
+    const pages = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+    expect(pages).toHaveLength(2)
+    expect(pages.map((page) => [page.pageNumber, page.totalPages])).toEqual([[1, 2], [2, 2]])
+    expect(pages[0].svg).toContain("INDICE DEL HANDOFF")
+    expect(pages[0].svg).toContain("P. 01 / 02")
+    expect(pages[1].svg).toContain("P. 02 / 02")
+    expect(pages[1].svg).toContain("ILLUSTRATION HANDOFF - NO APROBADO PARA PRODUCCION")
+  })
+
+  it("emits editable semantic groups, references and textile instructions outside artwork", () => {
+    const page = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })[1]
+    for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS", "REFERENCES", "PAGE_CHROME__HEADER"]) {
+      expect(page.svg).toContain("id='" + id + "'")
+    }
+    expect(page.svg).toContain("V1.1 neck seam")
+    expect(page.svg).toContain("REFERENCIA - NO A ESCALA")
+    const fontSizes = [...page.svg.matchAll(/font-size='([\d.]+)'/g)].map((match) => Number(match[1]))
+    expect(Math.min(...fontSizes)).toBeGreaterThanOrEqual(10)
+  })
+
+  it("inserts a cover-index when a fallback plan omitted the cover", () => {
+    const pages = buildPlannedPages({ pages: [plan.pages[1]] }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+    expect(pages[0].purpose).toBe("cover")
+    expect(pages[0].svg).toContain("INDICE DEL HANDOFF")
+    expect(pages[1].pageNumber).toBe(2)
+    expect(pages[1].totalPages).toBe(2)
   })
 })

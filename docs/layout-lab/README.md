@@ -12,7 +12,7 @@ A developer-only harness for testing the tech-pack **layout engine and AI planni
 A generated tech-pack page is produced in two independent stages:
 
 1. **The plan** — *which* regions a page has, their weights, and how they compose (e.g. a `split` placing a narrow parts list beside a wide illustration). This is authored by the AI (`documentPlan.js`).
-2. **The layout** — *how* those regions resolve into absolute boxes on a 1200×900 artboard, via the deterministic flex solver (`src/layout/solve.js`) and the page interpreter (`src/pages/interpretPlan.js`).
+2. **The layout** — *how* those regions resolve on a physical A4 landscape artboard through the eight-column production grid and deterministic solver.
 
 When a page looks wrong, the first question is always: *is it a bad plan, or a bad layout?* You can't answer that while the plan is coming from a live, non-deterministic model that is also subject to network timeouts. So the Lab freezes stage 1 with hand-written **fixtures** and exercises only stage 2. Same inputs, same output, every time.
 
@@ -37,13 +37,13 @@ Phase 2 reuses the exact same garment datasets but lets `planDocumentOutline` + 
 
 ## The compositor decision this Lab drives
 
-The layout engine evaluates **candidate compositions** rather than applying a
+The layout engine evaluates **nested candidate compositions** rather than applying a
 garment template. For the same page intent it measures the actual BOM, colors,
 embroidery and notes, then compares row and stack candidates against five
 ordered constraints: complete data, legible minimums, purpose-specific
 illustration bands, maximum useful illustration area, and minimum unexplained
 space. The diagnostic above every fixture records the chosen mode, overflow,
-area and calculated column widths.
+area, calculated grid spans, internal waste and rejection reasons.
 
 ### Parts list → stacks (good)
 
@@ -114,9 +114,9 @@ dev` and the local proxy. If DeepSeek times out or reports exhausted capacity,
 the log identifies the failure and renders the deterministic contract fallback
 instead of leaving the Lab stalled.)
 
-The **Grid** toggle overlays the shared `COL` column template (blue dashed
-guides) and a whole-pixel baseline, so P1 alignment can be checked against the
-exact metrics every renderer now shares.
+The **Grid** toggle overlays the eight A4 macro columns, 3mm gutters and 4mm
+vertical baseline, so alignment can be checked against the exact production
+retícula used by the compositor.
 
 See [../layout-contracts.md](../layout-contracts.md) for the full architecture
 behind these tabs.

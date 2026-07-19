@@ -47,6 +47,8 @@ export function normalizeSlotBriefs(region, page, ctx) {
   if (!design && ctx && Array.isArray(ctx.designs) && ctx.designs.length > 0) {
     design = ctx.designs[0] || null;
   }
+  const designIndex = design && ctx && Array.isArray(ctx.designs) ? ctx.designs.indexOf(design) : -1;
+  const designCode = designIndex >= 0 ? 'D' + (designIndex + 1) : '';
 
   // Build default values from design and context
   const defaultGarmentPart = design
@@ -117,13 +119,30 @@ export function normalizeSlotBriefs(region, page, ctx) {
     const placementLandmark = coerceString(sourceObj?.placementLandmark) || defaultPlacementLandmark;
     const factoryNote = coerceString(sourceObj?.factoryNote) || defaultFactoryNote;
 
+    const slotCode = 'V' + (i + 1);
+    const callouts = mustMark.map((label, index) => ({ id: slotCode + '.' + (index + 1), label }));
+    const numberedMeasurements = measurements.map((measurement, index) => ({
+      ...measurement,
+      id: 'DIM-' + (index + 1),
+      unit: 'mm'
+    }));
+    const pending = [];
+    if (mustMark.length === 0) pending.push('Elementos y costuras por señalar');
+    if (numberedMeasurements.length === 0) pending.push('Cotas requeridas');
+    if (!placementLandmark && design) pending.push('Landmark de colocación');
+
     result.push({
+      slotCode,
+      designCode,
       garmentPart,
       view,
       mustMark,
-      measurements,
+      callouts,
+      measurements: numberedMeasurements,
       placementLandmark,
-      factoryNote
+      factoryNote,
+      pending,
+      hasReference: !!(design && design.imageData)
     });
   }
 
@@ -156,7 +175,7 @@ export function briefLines(brief, mode) {
   // The renderer already prints a "BRIEF PARA EL ILUSTRADOR" caption above,
   // so the title line is just the view name (no repeated "BRIEF").
   const viewUpper = typeof brief.view === 'string' ? brief.view.toUpperCase() : '';
-  lines.push(viewUpper);
+  lines.push((brief.slotCode ? brief.slotCode + ' · ' : '') + viewUpper);
   if (brief.garmentPart && brief.garmentPart.length > 0) {
     lines.push(brief.garmentPart);
   }
@@ -167,7 +186,10 @@ export function briefLines(brief, mode) {
 
   // Checklist mode adds mustMark line
   if (brief.mustMark && Array.isArray(brief.mustMark) && brief.mustMark.length > 0) {
-    lines.push('Señalar: ' + brief.mustMark.join(', '));
+    const marks = Array.isArray(brief.callouts) && brief.callouts.length
+      ? brief.callouts.map(item => item.id + ' ' + item.label)
+      : brief.mustMark;
+    lines.push('Señalar: ' + marks.join(', '));
   }
 
   if (mode === 'checklist') {
@@ -181,7 +203,7 @@ export function briefLines(brief, mode) {
 
   if (brief.measurements && Array.isArray(brief.measurements) && brief.measurements.length > 0) {
     const measStrs = brief.measurements.map(m => {
-      let s = m.label || '';
+      let s = (m.id ? m.id + ' ' : '') + (m.label || '');
       if (m.perSize) s += ' (por talla)';
       return s;
     }).filter(s => s.length > 0);
@@ -192,6 +214,11 @@ export function briefLines(brief, mode) {
 
   if (brief.factoryNote && brief.factoryNote.length > 0) {
     lines.push('Fábrica: ' + brief.factoryNote);
+  }
+
+  if (brief.hasReference) lines.push('Referencia gráfica disponible · NO A ESCALA');
+  if (Array.isArray(brief.pending)) {
+    brief.pending.forEach(item => lines.push('PENDIENTE DE CONFIRMAR: ' + item));
   }
 
   return lines;

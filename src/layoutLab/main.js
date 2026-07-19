@@ -15,18 +15,17 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { buildPlannedPages } from "../pages/interpretPlan.js"
-import { evaluatePageCompositions } from "../pages/composition.js"
 import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
 import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings, summarizeConfirmed } from "../core/reviewDiff.js"
-import { COL } from "../design/metrics.js"
+import { GRID, PAGE } from "../design/metrics.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { ctxForFixture } from "./fixtureContext.js"
 
-const PAGE_W = 1200
-const PAGE_H = 900
-const PAGE_PAD = 26
+const PAGE_W = PAGE.width
+const PAGE_H = PAGE.height
+const PAGE_PAD = GRID.margin
 
 const state = { mono: false, grid: false, tab: "design", aiDataset: "parka", aiPages: null, aiLog: [], aiRunning: false }
 const AI_OUTLINE_TIMEOUT_MS = 12000
@@ -49,12 +48,12 @@ function withTimeout(promise, ms, label) {
 function gridOverlay() {
   const inner = PAGE_W - PAGE_PAD * 2
   let rows = ""
-  for (let y = PAGE_PAD; y <= PAGE_H - PAGE_PAD; y += 32) {
+  for (let y = PAGE_PAD; y <= PAGE_H - PAGE_PAD; y += GRID.baseline) {
     rows += `<line x1="${PAGE_PAD}" y1="${y}" x2="${PAGE_W - PAGE_PAD}" y2="${y}" stroke="#E5352B" stroke-width="0.4" opacity="0.22"/>`
   }
   let stops = ""
-  for (const frac of [COL.index, COL.label, COL.value]) {
-    const x = PAGE_PAD + inner * frac
+  for (let column = 1; column < GRID.columns; column++) {
+    const x = PAGE_PAD + column * GRID.column + (column - 0.5) * GRID.gutter
     stops += `<line x1="${x.toFixed(1)}" y1="${PAGE_PAD}" x2="${x.toFixed(1)}" y2="${PAGE_H - PAGE_PAD}" stroke="#1A3FB0" stroke-width="0.5" opacity="0.3" stroke-dasharray="4,4"/>`
   }
   const margin = `<rect x="${PAGE_PAD}" y="${PAGE_PAD}" width="${inner}" height="${PAGE_H - PAGE_PAD * 2}" fill="none" stroke="#E5352B" stroke-width="0.8" opacity="0.5"/>`
@@ -86,7 +85,7 @@ function renderFixture(fx) {
   let error = ""
   let diagnostics = []
   try {
-    const ctx = ctxForFixture(fx)
+    const ctx = { ...ctxForFixture(fx), documentMode: "illustration-handoff" }
     let plan = fx.plan
     if (fx.contractRepair) {
       plan = {
@@ -107,16 +106,20 @@ function renderFixture(fx) {
         .filter((finding) => finding.kind !== "confirmed")
         .forEach((finding) => diagnostics.push(`${finding.kind}: ${finding.topic}:${finding.field}`))
     }
-    plan.pages.forEach((page, index) => {
-      const { decision } = evaluatePageCompositions(page, ctx, { width: 1148, height: 674 })
+    const pages = buildPlannedPages(plan, ctx, { mono: state.mono, documentMode: "illustration-handoff" })
+    pages.forEach((renderedPage, index) => {
+      const decision = renderedPage.compositionDecision
+      if (!decision) return
       if (decision.mode === "unchanged") return
       const widths = Array.isArray(decision.widths) ? " · widths " + decision.widths.map((value) => Math.round(value)).join("/") + "px" : ""
       diagnostics.push(
-        `composition page ${index + 1}: ${decision.mode} · complete ${decision.complete ? "yes" : "NO"} · overflow ${Math.round(decision.overflow || 0)}px · illustration ${Math.round(decision.illustrationArea || 0)}px²${widths}`
+        `composition physical page ${index + 1}: ${decision.mode} · complete ${decision.complete ? "yes" : "NO"} · overflow ${Math.round(decision.overflow || 0)}px · illustration ${Math.round(decision.illustrationArea || 0)}px²${widths}`
       )
       diagnostics.push("reason: " + decision.reason)
+      ;(decision.candidates || []).forEach((candidate) => {
+        diagnostics.push(`candidate ${candidate.mode}: ${candidate.valid ? "VALID" : "rejected"} · complete ${candidate.complete ? "yes" : "NO"} · slots ${candidate.slotValid ? "yes" : "NO"} · overflow ${candidate.overflow || 0}px · art ${candidate.illustrationArea || 0}px² · data waste ${candidate.wastedDataArea || 0}px²`)
+      })
     })
-    const pages = buildPlannedPages(plan, ctx, { mono: state.mono })
     pagesHtml = pages.map(pageFigure).join("")
   } catch (e) {
     error = `<div class="err">Error al renderizar: ${String((e && e.message) || e)}</div>`
@@ -200,7 +203,7 @@ async function runAiPlan() {
       const viol = validatePage(p, planCtx)
       state.aiLog[state.aiLog.length - 1] = `Page ${i + 1}/${outline.pages.length} (${page.purpose}): ${p.regions.map((r) => r.type).join(", ")} · contract clean: ${viol.length === 0 ? "yes" : "NO"}`
       planned.push(p)
-      state.aiPages = buildPlannedPages({ pages: planned }, ctx, { mono: state.mono })
+      state.aiPages = buildPlannedPages({ pages: planned }, ctx, { mono: state.mono, documentMode: "illustration-handoff", includeIndex: true })
       render()
     }
     state.aiLog.push("Done.")

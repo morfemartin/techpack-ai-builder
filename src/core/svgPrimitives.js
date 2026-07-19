@@ -1,5 +1,5 @@
 import { palette, type } from "../design/tokens.js"
-import { BAR, CHIP, HEADER, INSET, headerCells } from "../design/metrics.js"
+import { BAR, CHIP, HEADER, INSET, PRINT, headerCells } from "../design/metrics.js"
 
 export const NA = "N/A"
 
@@ -27,7 +27,7 @@ export function svgChip(cx, cy, label, size) {
   var c = size || CHIP
   return (
     R(cx - c / 2, cy - c / 2, c, c, palette.red.hex, palette.red.hex, "0") +
-    TX(cx, cy, label, 8, true, "middle", palette.white.hex, type.svgFonts.data)
+    TX(cx, cy, label, PRINT.minFont, true, "middle", palette.white.hex, type.svgFonts.data)
   )
 }
 
@@ -42,10 +42,10 @@ export function svgSectionBar(x, y, w, title) {
 // A quiet structural label cell (SEASON, STYLE NO, ...): white fill + ink
 // border + bold ink text - part of the retícula itself, not a colored chip.
 // Color is reserved for the roles that actually need attention (see tokens.js).
-export const LBL = (x, y, w, h, txt) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.8") + TX(x + w / 2, y + h / 2, txt, 9, true, "middle", palette.ink.hex)
+export const LBL = (x, y, w, h, txt) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.8") + TX(x + w / 2, y + h / 2, txt, PRINT.minFont, true, "middle", palette.ink.hex)
 
 // A value cell holding an actual data value -> mono face.
-export const VAL = (x, y, w, h, v) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.6") + TX(x + 5, y + h / 2, v || NA, 9, false, "start", palette.ink.hex, type.svgFonts.data)
+export const VAL = (x, y, w, h, v) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.6") + TX(x + 5, y + h / 2, v || NA, PRINT.minFont, false, "start", palette.ink.hex, type.svgFonts.data)
 
 /* ---- DIMENSION LINE SVG ---- */
 // role.index (red): a precision reference mark, same family as callouts/POM
@@ -63,7 +63,7 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
     s += "<line x1='" + rx + "' y1='" + (ly - 10) + "' x2='" + rx + "' y2='" + (ly + 10) + "' stroke='" + red + "' stroke-width='0.8' stroke-dasharray='2,2'/>"
     var mx = (lx + rx) / 2
     s += R(mx - 22, ly - 9, 44, 18, palette.white.hex, "none")
-    s += TX(mx, ly, label, 9, true, "middle", red, type.svgFonts.data)
+    s += TX(mx, ly, label, PRINT.minFont, true, "middle", red, type.svgFonts.data)
   } else {
     var tx2 = x1 + offset, ty1 = y1, ty2 = y2
     s += "<line x1='" + tx2 + "' y1='" + ty1 + "' x2='" + tx2 + "' y2='" + ty2 + "' stroke='" + red + "' stroke-width='1.2'/>"
@@ -73,7 +73,7 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
     s += "<line x1='" + (tx2 - 10) + "' y1='" + ty2 + "' x2='" + (tx2 + 10) + "' y2='" + ty2 + "' stroke='" + red + "' stroke-width='0.8' stroke-dasharray='2,2'/>"
     var my = (ty1 + ty2) / 2
     s += R(tx2 - 30, my - 9, 60, 18, palette.white.hex, "none")
-    s += TX(tx2, my, label, 9, true, "middle", red, type.svgFonts.data)
+    s += TX(tx2, my, label, PRINT.minFont, true, "middle", red, type.svgFonts.data)
   }
   return s
 }
@@ -84,14 +84,14 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
 // [1,1,1,1,1] and the bottom row [1,2,1,1], so every bottom-row cell edge
 // lands exactly on a top-row edge and both rows fill the page flush to the
 // right margin. The old version gave each row ad-hoc cell widths - the rows
-// ended at different x (901 vs 1071 on a 1200 page) and no edges aligned.
+// ended at different x positions and no edges aligned.
 export function svgHeader(hdr, logo, W, hH) {
   var s = ""
   // Logo slot: pure white (print-first), ink border. Muted placeholder text
   // when no logo was uploaded - not a brand/role color, just a chrome hint.
   s += R(0, 0, HEADER.logo, hH, palette.white.hex, palette.ink.hex, "0.8")
   if (logo) s += "<image href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (hH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
-  else s += TX(HEADER.logo / 2, hH / 2, "LOGO", 9, false, "middle", "#9AA0AB")
+  else s += TX(HEADER.logo / 2, hH / 2, "LOGO", PRINT.minFont, false, "middle", "#9AA0AB")
 
   function headerRow(cells, fields, y) {
     var out = ""
@@ -108,7 +108,7 @@ export function svgHeader(hdr, logo, W, hH) {
 }
 
 export function svgDisc(t, hdr, W, dy, discH) {
-  return R(0, dy, W, discH, palette.white.hex, palette.ink.hex, "0.8") + TX(W / 2, dy + discH / 2, t.disc + " " + (hdr.brand || "[Marca]") + t.discSfx, 9, false, "middle", palette.ink.hex)
+  return R(0, dy, W, discH, palette.white.hex, palette.ink.hex, "0.8") + TX(W / 2, dy + discH / 2, t.disc + " " + (hdr.brand || "[Marca]") + t.discSfx, PRINT.minFont, false, "middle", palette.ink.hex)
 }
 
 // Shrinks font size (within [minSize,maxSize]) until the wrapped text fits
@@ -120,7 +120,7 @@ export function svgDisc(t, hdr, W, dy, discH) {
 export function fitText(text, maxWidth, maxHeight, opts) {
   var o = opts || {}
   var maxSize = o.maxSize || 11
-  var minSize = o.minSize || 7
+  var minSize = o.minSize || PRINT.minFont
   var lineHeightRatio = o.lineHeightRatio || 1.35
   var raw = text == null ? "" : String(text)
   if (!raw) return { size: maxSize, lineHeight: Math.round(maxSize * lineHeightRatio), lines: [] }

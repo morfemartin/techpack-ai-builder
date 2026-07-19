@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { buildReviewFindings, findingsToWalkFields } from "./reviewDiff.js"
 
-// Contract for the pre-download review diff (Phase 4 of Layout Engine v2).
+// Contract for the pre-download review diff used by Layout Engine v3.
 //
 // buildReviewFindings(intake, document) walks the user's intake truth
 // against the generated document plan and reports, per datum, whether the

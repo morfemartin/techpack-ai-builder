@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest"
 import { normalizeSlotBriefs, briefLines } from "./briefs.js"
 
-// Contract for structured illustrator briefs (Phase 3 of Layout Engine v2).
+// Contract for structured illustrator briefs in Layout Engine v3.
 //
-// A brief must answer, for the human illustrator, WITHOUT taking layout
-// space (it renders inside the art board):
+// A brief must answer, for the human illustrator, in a separate technical
+// rail so the art board remains editable:
 //   - which garment part goes in this slot (garmentPart, view)
 //   - what the drawing MUST mark/call out (mustMark[])
 //   - which measurements to draw and how (measurements[{label, perSize}] -
@@ -49,7 +49,10 @@ describe("normalizeSlotBriefs", () => {
     expect(briefs).toHaveLength(1)
     expect(briefs[0].garmentPart).toBe("Panel frontal")
     expect(briefs[0].mustMark).toEqual(["logo bordado", "costura de hombro"])
-    expect(briefs[0].measurements).toEqual([{ label: "Ancho logo", perSize: false }])
+    expect(briefs[0].measurements).toEqual([{ id: "DIM-1", label: "Ancho logo", perSize: false, unit: "mm" }])
+    expect(briefs[0].callouts).toEqual([{ id: "V1.1", label: "logo bordado" }, { id: "V1.2", label: "costura de hombro" }])
+    expect(briefs[0].slotCode).toBe("V1")
+    expect(briefs[0].designCode).toBe("D1")
     expect(briefs[0].factoryNote).toBe("Bordado 3D foam")
   })
 
@@ -79,7 +82,7 @@ describe("normalizeSlotBriefs", () => {
   })
 })
 
-describe("briefLines (the in-board template)", () => {
+describe("briefLines (the illustrator-rail template)", () => {
   const full = {
     garmentPart: "Panel frontal",
     view: "Frente plano",

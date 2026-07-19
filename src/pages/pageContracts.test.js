@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { CONTRACTS, layoutPolicyFor, normalizePriority, purposeFamily, validatePage, repairPage, validateOutline, repairOutline } from "./pageContracts.js"
 
-// Contract for the page-contract system (Phase 2 of Layout Engine v2):
+// Contract for the page-contract system used by Layout Engine v3:
 // deterministic encoding of how a tech-pack designer thinks - what MUST be
 // visually present per page purpose, what never repeats, what deserves a
 // page - applied as validate + repair over whatever the AI proposed. The AI

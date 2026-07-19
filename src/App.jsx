@@ -28,6 +28,7 @@ import { applyReviewAnswers } from "./core/applyReviewAnswers.js"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
+import { GRID, PAGE } from "./design/metrics.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
 const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
@@ -386,18 +387,18 @@ export default function App() {
   }
 
   function placeholderSvg(page, i, total) {
-    var W = 1200
-    var H = 900
+    var W = PAGE.width
+    var H = PAGE.height
     var title = svgSafeText((page && page.title) || "Pagina " + (i + 1))
     var label = "Desarrollando pagina " + (i + 1) + " de " + total
     return (
-      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>" +
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>" +
       "<rect width='" + W + "' height='" + H + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1.5'/>" +
-      "<rect x='80' y='80' width='1040' height='740' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
-      "<rect x='80' y='80' width='8' height='740' fill='" + role.highlight.fill + "'/>" +
-      "<text x='120' y='160' font-family='" + type.svgFonts.ui + "' font-size='32' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
-      "<text x='120' y='214' font-family='" + type.svgFonts.data + "' font-size='18' fill='" + role.priority.fill + "'>" + label + "</text>" +
-      "<text x='120' y='264' font-family='" + type.svgFonts.ui + "' font-size='16' fill='" + C.ink.hex + "'>La IA esta asignando bloques, pesos y notas tecnicas.</text>" +
+      "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='" + GRID.span(8) + "' height='" + (H - GRID.margin * 2) + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
+      "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='8' height='" + (H - GRID.margin * 2) + "' fill='" + role.highlight.fill + "'/>" +
+      "<text x='80' y='130' font-family='" + type.svgFonts.ui + "' font-size='28' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
+      "<text x='80' y='178' font-family='" + type.svgFonts.data + "' font-size='16' fill='" + role.priority.fill + "'>" + label + "</text>" +
+      "<text x='80' y='224' font-family='" + type.svgFonts.ui + "' font-size='14' fill='" + C.ink.hex + "'>La IA esta organizando contenido e instrucciones textiles.</text>" +
       "</svg>"
     )
   }
@@ -453,14 +454,14 @@ export default function App() {
         } catch {
           plannedPages.push(fallbackPageLayout(page))
         }
-        var rendered = buildPlannedPages({ pages: plannedPages }, ctx)
+        var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
         publishPages(outline.pages.map((p, idx) => (idx < rendered.length ? rendered[idx] : placeholders[idx])))
       }
       // Hand the planned document (pages with their regions) to the caller so
       // the pre-download review can diff intake intent against what each page
       // actually carries.
       if (onPlan) onPlan({ pages: plannedPages })
-      return buildPlannedPages({ pages: plannedPages }, ctx)
+      return buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
     } finally {
       setDocumentPlanning(false)
       setDocumentPlanStatus("")
@@ -555,7 +556,7 @@ export default function App() {
         txData: pending.tx,
         garment,
       }
-      const rendered = buildPlannedPages(revisedPlan, renderCtx)
+      const rendered = buildPlannedPages(revisedPlan, renderCtx, { documentMode: "illustration-handoff", includeIndex: true })
 
       // Commit the snapshots only after the corrected document rendered.
       setHdr(applied.hdr)
@@ -1045,9 +1046,9 @@ export default function App() {
                       <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, fontFamily: type.fonts.data, marginBottom: space(1) }}>
                         {i + 1}. {p.name}
                       </div>
-                      <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
+                      <div style={{ width: PAGE.width * 0.54, height: PAGE.height * 0.54, position: "relative" }}>
                         <div
-                          style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                          style={{ width: PAGE.width, height: PAGE.height, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
                           dangerouslySetInnerHTML={{ __html: monoMode ? toGrayscale(p.svg) : p.svg }}
                         />
                       </div>
@@ -1070,14 +1071,14 @@ export default function App() {
                 </div>
               )}
               {activePlannedPage ? (
-                <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
+                <div style={{ width: PAGE.width * 0.54, height: PAGE.height * 0.54, position: "relative" }}>
                   <div
-                    style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                    style={{ width: PAGE.width, height: PAGE.height, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
                     dangerouslySetInnerHTML={{ __html: monoMode ? toGrayscale(activePlannedPage.svg) : activePlannedPage.svg }}
                   />
                 </div>
               ) : (
-                <div style={{ height: 900 * 0.54, border: hair, background: C.white.hex, color: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: space(2) }}>
+                <div style={{ height: PAGE.height * 0.54, border: hair, background: C.white.hex, color: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: space(2) }}>
                   <div style={{ height: 6, width: 260, background: C.canvas.hex, border: hair }}>
                     <div style={{ height: "100%", width: documentPlanning ? "45%" : "0%", background: role.priority.fill }} />
                   </div>

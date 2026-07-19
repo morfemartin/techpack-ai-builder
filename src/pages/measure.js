@@ -23,6 +23,7 @@
 import { ROW } from "../design/metrics.js"
 import { wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
+import { briefLines, normalizeSlotBriefs } from "./briefs.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
 // wins, then the page's first `covers` entry, then the first design. Moved
@@ -78,7 +79,7 @@ export function measureRegion(region, page, ctx, width) {
     if (n === 0) return { natural: 0, min: 0, canAbsorb: false }
     return {
       natural: 32 + n * ROW.color,
-      min: 32 + n * 16, // colorRowHeight's legible floor
+      min: 32 + n * 20, // colorRowHeight's 7pt legible floor
       canAbsorb: false,
     }
   }
@@ -91,7 +92,7 @@ export function measureRegion(region, page, ctx, width) {
     const totalRows = 14 + (stopSeq.length > 0 ? 2 + stopSeq.length : 0)
     return {
       natural: 38 + totalRows * ROW.emb + (stopSeq.length > 0 ? Math.max(0, ROW.emb - 12) : 0),
-      min: 38 + totalRows * 11, // renderEmbSpecs' row floor
+      min: 38 + totalRows * 14, // renderEmbSpecs' 7pt row floor
       canAbsorb: false,
     }
   }
@@ -102,6 +103,35 @@ export function measureRegion(region, page, ctx, width) {
     const lines = wrapLines(text, Math.max(1, (width || 100) - 20), 10)
     const natural = 16 + lines.length * 14
     return { natural, min: natural, canAbsorb: false } // text never compresses
+  }
+
+  if (type === "artworkInstructions") {
+    const briefs = Array.isArray(region.briefs) && region.briefs.length
+      ? region.briefs
+      : normalizeSlotBriefs(region, page, ctx)
+    const usableWidth = Math.max(80, (width || 300) - 24)
+    let lines = 1
+    briefs.forEach((brief) => {
+      briefLines(brief, "full").forEach((line) => {
+        lines += wrapLines(line, usableWidth, 10).length
+      })
+      lines += 1
+    })
+    const natural = 32 + lines * 14
+    return { natural, min: natural, canAbsorb: false }
+  }
+
+  if (type === "references") {
+    const design = selectedDesign(page, ctx)
+    return design && design.imageData
+      ? { natural: 120, min: 120, canAbsorb: false }
+      : { natural: 0, min: 0, canAbsorb: false }
+  }
+
+  if (type === "documentIndex") {
+    const entries = ctx && Array.isArray(ctx.documentIndex) ? ctx.documentIndex : []
+    const natural = 42 + entries.length * 20
+    return { natural, min: natural, canAbsorb: false }
   }
 
   return fallback

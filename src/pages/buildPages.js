@@ -4,7 +4,7 @@ import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
-import { COL, CHIP, INSET, ROW, TEXT_PAD } from "../design/metrics.js"
+import { CHROME, COL, CHIP, GRID, INSET, PAGE, PRINT, ROW, TEXT_PAD } from "../design/metrics.js"
 import { briefLines } from "./briefs.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
@@ -38,9 +38,9 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
       var st = colStops(b)
       return (
         R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
-        TX(b.x + b.width * COL.index, b.y + b.height / 2, "#", 8, true, "middle") +
-        TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, lx.spec || "SPECS", 8, true, "start") +
-        TX(st.divValue + TEXT_PAD, b.y + b.height / 2, lx.detail || "DETAILS", 8, true, "start")
+        TX(b.x + b.width * COL.index, b.y + b.height / 2, "#", PRINT.minFont, true, "middle") +
+        TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, lx.spec || "SPECS", PRINT.minFont, true, "start") +
+        TX(st.divValue + TEXT_PAD, b.y + b.height / 2, lx.detail || "DETAILS", PRINT.minFont, true, "start")
       )
     },
   })
@@ -58,9 +58,9 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
           // role.index chip: shared mark via svgChip - same size everywhere.
           svgChip(b.x + b.width * COL.index, b.y + b.height / 2, start + i + 1, Math.min(b.height - 6, CHIP)) +
           "<line x1='" + st.divLabel + "' y1='" + b.y + "' x2='" + st.divLabel + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, nm, 7, false, "start") +
+          TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, nm, PRINT.minFont, false, "start") +
           "<line x1='" + st.divValue + "' y1='" + b.y + "' x2='" + st.divValue + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(st.divValue + TEXT_PAD, b.y + b.height / 2, v || NA, 7, false, "start", undefined, type.svgFonts.data)
+          TX(st.divValue + TEXT_PAD, b.y + b.height / 2, v || NA, PRINT.minFont, false, "start", undefined, type.svgFonts.data)
         )
       },
     })
@@ -76,7 +76,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
 // "never truncate, shrink instead" rule in this file.
 function colorRowHeight(count, availH) {
   if (count <= 0) return ROW.color
-  return Math.max(16, Math.min(ROW.color, Math.floor(availH / count)))
+  return Math.max(20, Math.min(ROW.color, Math.floor(availH / count)))
 }
 
 // Vertical gap between a block's top rule and its section bar.
@@ -109,10 +109,10 @@ export function renderColorSpecs(box, { colors } = {}) {
     var rowMidY = ty + rowH / 2
     s += R(box.x + INSET, rowMidY - swatch / 2, swatch, swatch, col.hex, palette.ink.hex, "0.5")
     if (small) {
-      s += TX(textX, rowMidY, (col.name || col.hex) + "  " + col.hex, 7.5, true, "start")
+      s += TX(textX, rowMidY, (col.name || col.hex) + "  " + col.hex, PRINT.minFont, true, "start")
     } else {
-      s += TX(textX, rowMidY - 6, col.name || col.hex, 8, true, "start")
-      s += TX(textX, rowMidY + 6, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
+      s += TX(textX, rowMidY - 6, col.name || col.hex, PRINT.minFont, true, "start")
+      s += TX(textX, rowMidY + 7, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, PRINT.minFont, false, "start", undefined, type.svgFonts.data)
     }
     ty += rowH
   })
@@ -149,8 +149,8 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   // them all into the available height rather than cutting off at some fixed
   // line height once the box is smaller than expected.
   var totalRows = er.length + (seq.length > 0 ? 1 + seq.length : 0)
-  var rowH = Math.max(11, Math.min(ROW.emb, Math.floor((limitY - ty) / Math.max(1, totalRows))))
-  var fontSize = Math.max(6.5, Math.min(8, rowH - 6))
+  var rowH = Math.max(14, Math.min(ROW.emb, Math.floor((limitY - ty) / Math.max(1, totalRows))))
+  var fontSize = PRINT.minFont
   er.forEach(function (row) {
     s += TX(box.x + INSET, ty, row[0] + ":", fontSize, true, "start") + TX(valueX, ty, row[1] || NA, fontSize, false, "start", undefined, type.svgFonts.data)
     ty += rowH
@@ -166,6 +166,40 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
       ty += rowH
     })
   }
+  return s
+}
+
+export function renderArtworkInstructions(box, { briefs } = {}) {
+  var list = Array.isArray(briefs) ? briefs : []
+  var s = ""
+  s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+  s += svgSectionBar(box.x, box.y, box.width, "INSTRUCCIONES DE ILUSTRACION")
+  var y = box.y + 20 + INSET
+  list.forEach(function (brief) {
+    var lines = briefLines(brief, "full")
+    lines.forEach(function (line, index) {
+      var pending = line.indexOf("PENDIENTE DE CONFIRMAR") === 0
+      var wrapped = wrapLines(line, Math.max(40, box.width - INSET * 2), PRINT.minFont)
+      wrapped.forEach(function (wrappedLine, wrappedIndex) {
+        if (pending) s += R(box.x + INSET - 4, y - 7, box.width - INSET * 2 + 8, 14, palette.yellow.hex, palette.ink.hex, "0.5")
+        s += TX(box.x + INSET, y, wrappedLine, PRINT.minFont, (index === 0 && wrappedIndex === 0) || pending, "start", palette.ink.hex, index === 0 ? type.svgFonts.ui : type.svgFonts.data)
+        y += 14
+      })
+    })
+    y += 6
+  })
+  return s
+}
+
+export function renderReferenceAsset(box, { design } = {}) {
+  if (!design || !design.imageData) return ""
+  var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
+  var pad = INSET
+  var labelH = 24
+  var s = ""
+  s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+  s += svgSectionBar(box.x, box.y, box.width, "REFERENCIA - NO A ESCALA")
+  s += "<image href='data:" + mime + ";base64," + design.imageData + "' x='" + (box.x + pad) + "' y='" + (box.y + labelH + pad) + "' width='" + (box.width - pad * 2) + "' height='" + Math.max(1, box.height - labelH - pad * 2) + "' preserveAspectRatio='xMidYMid meet'/>"
   return s
 }
 
@@ -199,48 +233,14 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs } = {}) 
     })
     // Red index chip + uppercase view label, top-left (the tech-pack "FRONT
     // VIEW" / "BACK VIEW" caption). The chip stays the cell's only attention mark.
-    s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, i + 1)
-    s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), 9, true, "start", palette.ink.hex)
+    s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + (i + 1))
+    s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
 
     var innerW = Math.max(40, cellW - 44)
     var innerH = cellH * 0.6
 
-    var brief = Array.isArray(briefs) && briefs[i] ? briefs[i] : null
-    if (brief) {
-      // Structured per-slot brief: pick the richest template mode whose
-      // wrapped lines actually fit this cell (full → checklist → title) -
-      // the degradation ladder means EVERY slot explains itself legibly,
-      // however small the grid makes its cell. Slot 0 also appends the AI's
-      // narrative note below the structured skeleton when there is one.
-      var body = null
-      var modes = ["full", "checklist", "title"]
-      for (var mi = 0; mi < modes.length; mi++) {
-        var candidate = briefLines(brief, modes[mi])
-        if (i === 0 && noteText && modes[mi] !== "title") candidate = candidate.concat([noteText])
-        var wrapped = []
-        candidate.forEach(function (line) {
-          wrapped = wrapped.concat(wrapLines(line, innerW, 9.5))
-        })
-        if (wrapped.length * 13 <= innerH || modes[mi] === "title") {
-          body = wrapped.slice(0, Math.max(2, Math.floor(innerH / 13)))
-          break
-        }
-      }
-      var by0 = y + cellH / 2 - (body.length * 13) / 2 + 6
-      s += TX(x + cellW / 2, by0 - 13 - 4, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
-      body.forEach(function (line, li) {
-        s += TX(x + cellW / 2, by0 + li * 13, line, 9.5, li === 0, "middle", "#9AA0AB")
-      })
-    } else if (i === 0 && noteText) {
-      // Legacy path (registered garments / plans without structured briefs):
-      // fitText shrinks the narrative brief until it fits the primary cell.
-      var fit = fitText(noteText, innerW, innerH, { maxSize: 11, minSize: 7.5 })
-      var startY = y + cellH / 2 - (fit.lines.length * fit.lineHeight) / 2 + fit.lineHeight / 2
-      s += TX(x + cellW / 2, startY - fit.lineHeight - 6, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
-      fit.lines.forEach(function (line, li) {
-        s += TX(x + cellW / 2, startY + li * fit.lineHeight, line, fit.size, false, "middle", "#9AA0AB")
-      })
-    }
+    s += TX(x + cellW / 2, y + cellH / 2, "AREA EDITABLE PARA ILUSTRACION TECNICA", PRINT.minFont, true, "middle", "#9AA0AB")
+    if (i === 0 && noteText) s += TX(x + cellW / 2, y + cellH / 2 + 18, "Ver instrucciones textiles en el rail tecnico", PRINT.minFont, false, "middle", "#9AA0AB")
   }
 
   return s
@@ -259,8 +259,8 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var pn = garment.partLabels[lang] || garment.partLabels.ES
   // discH: just enough for svgDisc's single centered 9px line + breathing
   // room - was 28, oversized for one line of text regardless of page content.
-  var W = 1200, H = 900, hH = 80, discH = 20
-  var lW = 320
+  var W = PAGE.width, H = PAGE.height, hH = CHROME.header, discH = CHROME.footer
+  var lW = GRID.span(3)
   var ap = parts.filter(function (p) { return p.on })
   var txP = txData && txData.parts ? txData.parts : null
 
@@ -320,7 +320,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var root = col({}, [headerLeaf, detailsBar, bodyRow, discBar])
   var resolved = solveLayout(root, { x: 0, y: 0, width: W, height: H })
 
-  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
+  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>"
   s += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
   s += renderLayoutToSVG(resolved)
 
@@ -341,12 +341,12 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 /* ---- DESIGN PAGE: garment-independent, only needs the base translations ---- */
 export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   var t = T[lang] || T.ES
-  var W = 1200, H = 900, hH = 80, discH = 20, bodyH = H - hH - discH
+  var W = PAGE.width, H = PAGE.height, hH = CHROME.header, discH = CHROME.footer, bodyH = H - hH - discH
   var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
-  var LW = isEmb ? 430 : 370
+  var LW = GRID.span(3)
   var RX = LW, RW = W - LW, RH = bodyH
 
-  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
+  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>"
   s += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
   s += svgHeader(hdr, logo, W, hH)
   // role.priority: this page's title bar - solid blue, white text.

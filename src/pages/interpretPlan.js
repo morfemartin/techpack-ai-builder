@@ -13,33 +13,32 @@ import { T } from "../core/i18n.js"
 import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette } from "../design/tokens.js"
-import { INSET, ROW } from "../design/metrics.js"
+import { CHROME, GRID, INSET, PAGE, PRINT, ROW } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
-import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
+import { renderArtworkInstructions, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
 // page. `split` (below) is a COMPOSITE, handled separately: it is not a leaf.
-export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "note", "spacer", "disclaimer"]
+export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "artworkInstructions", "references", "documentIndex", "note", "spacer", "disclaimer"]
 
-// Fixed print canvas size - matches buildPages.js's hardcoded 1200x900 for the
-// non-AI-planned pages, so a page reads the same regardless of which builder
+// Shared A4 print canvas, so a page reads the same regardless of which builder
 // made it. Hoisted here (not just local to buildPlannedPages) because the
 // content-aware split compositor below needs it to estimate a region's
 // allotted height WITHOUT running a full solve pass first.
-const PAGE_W = 1200
-const PAGE_H = 900
+const PAGE_W = PAGE.width
+const PAGE_H = PAGE.height
 
 // Page-level breathing room: a consistent outer margin + gutter between bands is
 // what turns a stack of blocks into a *composed* page instead of bands welded to
 // the frame edge. Percent-free px because the solver already resolves them.
-const PAGE_PAD = 26
-const PAGE_GAP = 14
+const PAGE_PAD = GRID.margin
+const PAGE_GAP = GRID.gutter
 // Gutter between the columns of a `split` (side-by-side) region.
-const SPLIT_GAP = 14
+const SPLIT_GAP = GRID.gutter
 
 // Structural blocks are chrome, not content: a real tech pack keeps the header,
 // the section title, and the disclaimer as THIN, FIXED strips and lets the
@@ -47,7 +46,7 @@ const SPLIT_GAP = 14
 // (instead of letting a model weight bloat them) is what kills the oversized
 // blue title bar and the dead whitespace at the bottom of a page in one move -
 // the model's weights now only distribute the CONTENT area.
-const FIXED_BASIS = { header: 82, titleBar: 30, disclaimer: 20 }
+const FIXED_BASIS = { header: CHROME.header, titleBar: CHROME.titleBar, disclaimer: CHROME.footer }
 const STANDARD_WORKING_HEIGHT = PAGE_H - PAGE_PAD * 2 - FIXED_BASIS.header - FIXED_BASIS.titleBar - FIXED_BASIS.disclaimer - PAGE_GAP * 3
 
 // Matches renderPartsList's `compact` row basis plus its table header (both
@@ -219,6 +218,51 @@ function renderNote(box, text) {
   return s
 }
 
+function renderDocumentIndex(box, entries) {
+  const rows = Array.isArray(entries) ? entries : []
+  let s = ""
+  s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+  s += R(box.x, box.y, box.width, 24, palette.blue.hex, palette.ink.hex, "0.8")
+  s += TX(box.x + INSET, box.y + 12, "INDICE DEL HANDOFF", PRINT.bodyFont, true, "start", palette.white.hex)
+  let y = box.y + 42
+  rows.forEach((entry) => {
+    const status = entry.status === "illustration-pending" ? "ILUSTRACION PENDIENTE" : "LISTO"
+    s += TX(box.x + INSET, y, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
+    s += TX(box.x + 52, y, entry.title || entry.purpose || entry.name, PRINT.minFont, true, "start")
+    s += TX(box.x + box.width - INSET, y, status, PRINT.minFont, false, "end", status === "LISTO" ? palette.ink.hex : palette.red.hex)
+    y += 20
+  })
+  return s
+}
+
+function renderDocumentFooter(box, hdr, meta) {
+  const current = Number(meta && meta.pageNumber) || 1
+  const total = Number(meta && meta.totalPages) || 1
+  const handoff = meta && meta.documentMode === "illustration-handoff"
+  let s = "<g id='PAGE_CHROME__FOOTER'>"
+  s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+  s += TX(box.x + INSET, box.y + box.height / 2, handoff ? "ILLUSTRATION HANDOFF - NO APROBADO PARA PRODUCCION" : "TECH PACK", PRINT.minFont, true, "start", handoff ? palette.red.hex : palette.ink.hex)
+  s += TX(box.x + box.width - INSET, box.y + box.height / 2, "P. " + String(current).padStart(2, "0") + " / " + String(total).padStart(2, "0"), PRINT.minFont, true, "end", palette.ink.hex, undefined)
+  s += "</g>"
+  return s
+}
+
+function semanticGroup(type, markup) {
+  const ids = {
+    header: "PAGE_CHROME__HEADER",
+    titleBar: "PAGE_CHROME__TITLE",
+    illustration: "ARTWORK",
+    partsList: "TECH_DATA__BOM",
+    colorSpecs: "TECH_DATA__COLORS",
+    embSpecs: "TECH_DATA__EMBROIDERY",
+    artworkInstructions: "ILLUSTRATOR_INSTRUCTIONS",
+    references: "REFERENCES",
+    documentIndex: "DOCUMENT_INDEX",
+    note: "TECH_DATA__NOTES",
+  }
+  return "<g id='" + (ids[type] || "REGION__" + String(type).toUpperCase()) + "'>" + markup + "</g>"
+}
+
 function leafForRegion(region, page, ctx) {
   const t = T[(ctx && ctx.lang) || "ES"] || T.ES
   const design = selectedDesign(page, ctx)
@@ -244,7 +288,7 @@ function leafForRegion(region, page, ctx) {
     _regionType: region.type,
     render: (box) => {
       if (region.type === "header") {
-        return "<g transform='translate(" + box.x + " " + box.y + ")'>" + svgHeader(hdr, ctx && ctx.logo, box.width, box.height) + "</g>"
+        return semanticGroup(region.type, "<g transform='translate(" + box.x + " " + box.y + ")'>" + svgHeader(hdr, ctx && ctx.logo, box.width, box.height) + "</g>")
       }
       if (region.type === "titleBar") {
         // Asymmetric Bauhaus title: a solid role.index red block anchors the
@@ -257,7 +301,7 @@ function leafForRegion(region, page, ctx) {
         var s = R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8")
         s += R(box.x, box.y, sq, box.height, palette.red.hex, palette.red.hex, "0")
         s += TX(box.x + sq + INSET, box.y + box.height / 2, title, 12, true, "start", palette.white.hex, undefined, 0.6)
-        return s
+        return semanticGroup(region.type, s)
       }
       if (region.type === "illustration") {
         // Structured per-slot briefs: the AI's `briefs[]` normalized against
@@ -266,29 +310,32 @@ function leafForRegion(region, page, ctx) {
         // design happens to be first.
         const isDesignPage = typeof page.purpose === "string" && page.purpose.startsWith("design:")
         const briefsCtx = isDesignPage ? ctx : { ...ctx, designs: [] }
-        return renderIllustrationZone(box, {
+        return semanticGroup(region.type, renderIllustrationZone(box, {
           slots: region.slots,
           refs: region.refs,
           briefs: normalizeSlotBriefs(region, page, briefsCtx),
           note: region.note || (design && design.illustrationBrief) || "",
-        })
+        }))
       }
       if (region.type === "partsList") {
         // ctx.parts already reflects this page's pieces (see interpretPagePlan)
         // and, for a paginated continuation page, the exact remaining slice.
-        return renderPartsList(box, {
+        return semanticGroup(region.type, renderPartsList(box, {
           parts: (ctx && ctx.parts) || [],
           partLabels,
           txParts: txData && txData.parts,
           labels: { spec: t.sp, detail: t.dt },
           compact: true,
           startIndex: (ctx && ctx.partsStartIndex) || 0,
-        })
+        }))
       }
-      if (region.type === "colorSpecs") return renderColorSpecs(box, { colors: design && design.colors })
-      if (region.type === "embSpecs") return renderEmbSpecs(box, { emb: design && design.emb, title: t.embTitle })
-      if (region.type === "note") return renderNote(box, region.note || page.purpose || "")
-      if (region.type === "disclaimer") return svgDisc(t, hdr, box.width, box.y, box.height)
+      if (region.type === "colorSpecs") return semanticGroup(region.type, renderColorSpecs(box, { colors: design && design.colors }))
+      if (region.type === "embSpecs") return semanticGroup(region.type, renderEmbSpecs(box, { emb: design && design.emb, title: t.embTitle }))
+      if (region.type === "artworkInstructions") return semanticGroup(region.type, renderArtworkInstructions(box, { briefs: region.briefs || normalizeSlotBriefs(region, page, ctx) }))
+      if (region.type === "references") return semanticGroup(region.type, renderReferenceAsset(box, { design }))
+      if (region.type === "documentIndex") return semanticGroup(region.type, renderDocumentIndex(box, ctx && ctx.documentIndex))
+      if (region.type === "note") return semanticGroup(region.type, renderNote(box, region.note || page.purpose || ""))
+      if (region.type === "disclaimer") return renderDocumentFooter(box, hdr, ctx && ctx.pageMeta)
       return ""
     },
   })
@@ -325,6 +372,36 @@ function buildRegionNode(region, page, ctx, allottedHeight) {
   return leafForRegion(region, page, ctx)
 }
 
+function buildCompositionNode(ast, page, ctx, isRoot = false) {
+  if (!ast) return leaf({ grow: 1, render: () => "" })
+  if (ast.kind === "region") {
+    return {
+      ...leafForRegion({ ...ast.region, grow: 0 }, page, ctx),
+      basis: isRoot ? undefined : ast.height,
+      grow: isRoot ? 1 : 0,
+      shrink: 0,
+    }
+  }
+  const direction = ast.axis === "column" ? "column" : "row"
+  const children = (ast.children || []).map((child) => {
+    const node = buildCompositionNode(child, page, ctx)
+    return {
+      ...node,
+      basis: direction === "row" ? child.width : child.height,
+      crossBasis: direction === "row" ? child.height : child.width,
+      grow: 0,
+      shrink: 0,
+    }
+  })
+  const props = {
+    grow: isRoot ? 1 : 0,
+    basis: isRoot ? undefined : direction === "row" ? ast.width : ast.height,
+    gap: ast.gap || GRID.gutter,
+    align: ast.align || "start",
+  }
+  return direction === "row" ? row(props, children) : col(props, children)
+}
+
 export function interpretPagePlan(page, ctx) {
   const safeCtx = ctx || {}
   const normalized = optimizePageComposition(normalizePlan({ pages: [page] }).pages[0], safeCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
@@ -333,6 +410,19 @@ export function interpretPagePlan(page, ctx) {
   // call (tests) and the full buildPlannedPages path share one source of truth
   // for "which parts does this page actually show."
   const pageCtx = { ...safeCtx, parts: effectivePartsForPage(safeCtx.parts, normalized) }
+
+  if (normalized._layoutAst) {
+    const byType = (type) => normalized.regions.find((region) => region.type === type)
+    const nodes = []
+    const header = byType("header")
+    const title = byType("titleBar")
+    const footer = byType("disclaimer")
+    if (header) nodes.push(leafForRegion({ ...header, _sizing: { basis: FIXED_BASIS.header, grow: 0, shrink: 0 } }, normalized, pageCtx))
+    if (title) nodes.push(leafForRegion({ ...title, _sizing: { basis: FIXED_BASIS.titleBar, grow: 0, shrink: 0 } }, normalized, pageCtx))
+    nodes.push(buildCompositionNode(normalized._layoutAst, normalized, pageCtx, true))
+    if (footer) nodes.push(leafForRegion({ ...footer, _sizing: { basis: FIXED_BASIS.disclaimer, grow: 0, shrink: 0 } }, normalized, pageCtx))
+    return col({ padding: PAGE_PAD, gap: PAGE_GAP }, nodes)
+  }
   const heights = estimateRegionHeights(normalized.regions, grows, normalized, pageCtx)
 
   // ── Measure then solve ────────────────────────────────────────────────────
@@ -408,13 +498,13 @@ function availableTableHeight(leafNode) {
 }
 
 function colorCapacity(height) {
-  return Math.max(0, Math.floor((height - 32) / 16))
+  return Math.max(0, Math.floor((height - 32) / 20))
 }
 
 function embroideryStopCapacity(height) {
   // Fourteen base fields + sequence heading/rule consume sixteen rows before
-  // the individual stops. Eleven pixels is the renderer's legible floor.
-  return Math.max(0, Math.floor((height - 38) / 11) - 16)
+  // the individual stops. Fourteen units is the renderer's legible floor.
+  return Math.max(0, Math.floor((height - 38) / 14) - 16)
 }
 
 function withDesignSlice(page, pageCtx, colors, stopSeq) {
@@ -447,18 +537,34 @@ function pageForDataSlice(page, keepColors, keepEmb, continuation) {
   }
 }
 
+function composingStopCapacity(page, pageCtx, colors, stopSeq, continuation) {
+  if (!Array.isArray(stopSeq) || stopSeq.length === 0) return 0
+  const slicedPage = pageForDataSlice(page, Array.isArray(colors) && colors.length > 0, true, continuation)
+  for (let count = stopSeq.length; count > 0; count--) {
+    const candidateCtx = withDesignSlice(slicedPage, pageCtx, colors, stopSeq.slice(0, count))
+    const optimized = optimizePageComposition(normalizePlan({ pages: [slicedPage] }).pages[0], candidateCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
+    if (!optimized._compositionDecision || optimized._compositionDecision.valid) return count
+  }
+  return 1
+}
+
 export function buildPlannedPages(plan, ctx, opts) {
   const mono = !!(opts && opts.mono)
+  const documentMode = (opts && opts.documentMode) || (ctx && ctx.documentMode) || "fixture"
+  const includeIndex = !!(opts && opts.includeIndex)
   const normalized = normalizePlan(plan)
   const W = PAGE_W
   const H = PAGE_H
   const allParts = (ctx && ctx.parts) || []
 
+  const baseCtx = { ...(ctx || {}), documentMode }
   function resolvedTreeFor(page, pageCtx) {
-    return solveLayout(interpretPagePlan(page, pageCtx), { x: 0, y: 0, width: W, height: H })
+    return solveLayout(interpretPagePlan(page, { ...baseCtx, ...(pageCtx || {}) }), { x: 0, y: 0, width: W, height: H })
   }
-  function svgFor(resolved) {
-    let svg = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
+  function svgFor(page, pageCtx, meta) {
+    const resolved = resolvedTreeFor(page, { ...pageCtx, pageMeta: meta })
+    let svg = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "' data-document-status='" + documentMode + "'>"
+    svg += "<metadata>{\"documentMode\":\"" + documentMode + "\",\"pageNumber\":" + meta.pageNumber + ",\"totalPages\":" + meta.totalPages + "}</metadata>"
     svg += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
     svg += renderLayoutToSVG(resolved)
     svg += "</svg>"
@@ -467,10 +573,13 @@ export function buildPlannedPages(plan, ctx, opts) {
     return mono ? toGrayscale(svg) : svg
   }
 
-  const outPages = []
+  const descriptors = []
+  function addDescriptor(page, pageCtx, sourceIndex) {
+    descriptors.push({ page, pageCtx: { ...baseCtx, ...(pageCtx || {}) }, sourceIndex, name: pageName(page, sourceIndex) })
+  }
 
   normalized.pages.forEach((page, i) => {
-    const firstPass = resolvedTreeFor(page, ctx)
+    const firstPass = resolvedTreeFor(page, baseCtx)
     const partsLeaf = findPartsListLeaf(firstPass)
     const effective = effectivePartsForPage(allParts, page)
 
@@ -484,24 +593,36 @@ export function buildPlannedPages(plan, ctx, opts) {
     const colorLeaf = findRegionLeaf(firstPass, "colorSpecs")
     const embLeaf = findRegionLeaf(firstPass, "embSpecs")
     const colorCap = colorLeaf ? Math.max(1, colorCapacity(availableTableHeight(colorLeaf))) : colors.length
-    const embCap = embLeaf ? Math.max(1, embroideryStopCapacity(availableTableHeight(embLeaf))) : stopSeq.length
+    const tableEmbCap = embLeaf ? Math.max(1, embroideryStopCapacity(availableTableHeight(embLeaf))) : stopSeq.length
+    const firstEmbCap = embLeaf && stopSeq.length > 0
+      ? Math.min(tableEmbCap, composingStopCapacity(page, baseCtx, colors, stopSeq, 0))
+      : tableEmbCap
+    const continuationEmbCap = embLeaf && stopSeq.length > 0
+      ? composingStopCapacity(page, baseCtx, [], stopSeq, 1)
+      : tableEmbCap
     const colorOverflow = !!colorLeaf && colors.length > colorCap
-    const embOverflow = !!embLeaf && stopSeq.length > embCap
+    const embOverflow = !!embLeaf && stopSeq.length > firstEmbCap
 
     if (colorOverflow || embOverflow) {
-      const pageCount = Math.max(colorOverflow ? Math.ceil(colors.length / colorCap) : 1, embOverflow ? Math.ceil(stopSeq.length / embCap) : 1)
-      for (let dataPageIndex = 0; dataPageIndex < pageCount; dataPageIndex++) {
-        const colorChunk = colorOverflow ? colors.slice(dataPageIndex * colorCap, (dataPageIndex + 1) * colorCap) : dataPageIndex === 0 ? colors : []
-        const stopChunk = embOverflow ? stopSeq.slice(dataPageIndex * embCap, (dataPageIndex + 1) * embCap) : dataPageIndex === 0 ? stopSeq : []
+      let colorOffset = 0
+      let stopOffset = 0
+      let dataPageIndex = 0
+      while (colorOffset < colors.length || stopOffset < stopSeq.length) {
+        const stopCap = dataPageIndex === 0 ? firstEmbCap : continuationEmbCap
+        const colorChunk = colorOverflow ? colors.slice(colorOffset, colorOffset + colorCap) : dataPageIndex === 0 ? colors : []
+        const stopChunk = embOverflow ? stopSeq.slice(stopOffset, stopOffset + stopCap) : dataPageIndex === 0 ? stopSeq : []
         const slicedPage = pageForDataSlice(page, colorChunk.length > 0, !!embLeaf && (stopChunk.length > 0 || (!embOverflow && dataPageIndex === 0)), dataPageIndex)
-        const slicedCtx = withDesignSlice(slicedPage, ctx, colorChunk, stopChunk)
-        outPages.push({ name: pageName(slicedPage, i), svg: svgFor(resolvedTreeFor(slicedPage, slicedCtx)) })
+        const slicedCtx = withDesignSlice(slicedPage, baseCtx, colorChunk, stopChunk)
+        addDescriptor(slicedPage, slicedCtx, i)
+        colorOffset += colorOverflow ? colorChunk.length : colors.length
+        stopOffset += embOverflow ? stopChunk.length : stopSeq.length
+        dataPageIndex++
       }
       return
     }
 
     if (!partsLeaf || effective.length <= partsCapacity(availableTableHeight(partsLeaf))) {
-      outPages.push({ name: pageName(page, i), svg: svgFor(firstPass) })
+      addDescriptor(page, baseCtx, i)
       return
     }
 
@@ -513,8 +634,8 @@ export function buildPlannedPages(plan, ctx, opts) {
     // row height); the parts list is the one place row height is fixed for
     // readability, so it's the one that paginates instead.
     const cap = Math.max(1, partsCapacity(availableTableHeight(partsLeaf)))
-    const cappedCtx = { ...ctx, parts: effective.slice(0, cap), partsStartIndex: 0 }
-    outPages.push({ name: pageName(page, i), svg: svgFor(resolvedTreeFor({ ...page, pieces: undefined }, cappedCtx)) })
+    const cappedCtx = { ...baseCtx, parts: effective.slice(0, cap), partsStartIndex: 0 }
+    addDescriptor({ ...page, pieces: undefined }, cappedCtx, i)
 
     let rest = effective.slice(cap)
     let startIndex = cap
@@ -531,17 +652,67 @@ export function buildPlannedPages(plan, ctx, opts) {
           { type: "disclaimer", weight: 8 },
         ],
       }
-      const probe = resolvedTreeFor(contPage, { ...ctx, parts: rest, partsStartIndex: startIndex })
+      const probe = resolvedTreeFor(contPage, { ...baseCtx, parts: rest, partsStartIndex: startIndex })
       const contLeaf = findPartsListLeaf(probe)
       const contCap = Math.max(1, partsCapacity(contLeaf ? availableTableHeight(contLeaf) : H))
       const chunk = rest.slice(0, contCap)
-      const final = chunk.length === rest.length ? probe : resolvedTreeFor(contPage, { ...ctx, parts: chunk, partsStartIndex: startIndex })
-      outPages.push({ name: pageName(contPage, i), svg: svgFor(final) })
+      addDescriptor(contPage, { ...baseCtx, parts: chunk, partsStartIndex: startIndex }, i)
       rest = rest.slice(contCap)
       startIndex += contCap
       contN++
     }
   })
 
-  return outPages
+  if (includeIndex && !descriptors.some((descriptor) => descriptor.page.purpose === "cover")) {
+    const coverPage = {
+      id: "cover-index",
+      title: (baseCtx.hdr && baseCtx.hdr.pname) || "Illustration Handoff",
+      purpose: "cover",
+      regions: [
+        { type: "header", weight: 1 },
+        { type: "titleBar", weight: 1 },
+        { type: "illustration", weight: 1, slots: 1, refs: ["Vista general"] },
+        { type: "disclaimer", weight: 1 },
+      ],
+    }
+    descriptors.unshift({ page: coverPage, pageCtx: baseCtx, sourceIndex: -1, name: "cover_index" })
+  }
+
+  const totalPages = descriptors.length
+  const indexEntries = descriptors.map((descriptor, index) => ({
+    pageNumber: index + 1,
+    name: descriptor.name,
+    title: descriptor.page.title,
+    purpose: descriptor.page.purpose,
+    status: descriptor.page.regions.some((region) => region.type === "illustration" || (region.type === "split" && (region.regions || []).some((inner) => inner.type === "illustration"))) ? "illustration-pending" : "ready",
+  }))
+
+  if (includeIndex && descriptors.length > 0) {
+    const coverIndex = descriptors.findIndex((descriptor) => descriptor.page.purpose === "cover")
+    const descriptor = descriptors[coverIndex]
+    const regions = descriptor.page.regions.slice()
+    const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
+    regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, { type: "documentIndex", weight: 1 })
+    descriptor.page = { ...descriptor.page, regions }
+    descriptor.pageCtx = { ...descriptor.pageCtx, documentIndex: indexEntries }
+  }
+
+  return descriptors.map((descriptor, index) => {
+    const meta = {
+      id: descriptor.page.id,
+      title: descriptor.page.title,
+      purpose: descriptor.page.purpose,
+      pageNumber: index + 1,
+      totalPages,
+      status: indexEntries[index].status,
+      documentMode,
+    }
+    const composed = optimizePageComposition(normalizePlan({ pages: [descriptor.page] }).pages[0], descriptor.pageCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
+    return {
+      ...meta,
+      name: descriptor.name,
+      compositionDecision: composed._compositionDecision || null,
+      svg: svgFor(descriptor.page, descriptor.pageCtx, meta),
+    }
+  })
 }

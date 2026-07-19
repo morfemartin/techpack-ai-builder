@@ -36,22 +36,15 @@ describe("Layout Lab closure fixtures", () => {
     const result = repairPage(item.plan.pages[0], ctx)
     expect(result.repairs).toEqual(expect.arrayContaining(["dropped forbidden partsList", "inserted header", "inserted titleBar", "inserted illustration", "inserted disclaimer"]))
     expect(validatePage(result.page, ctx)).toEqual([])
-    const root = interpretPagePlan(result.page, ctx)
-    const workingArea = root.children[2]
-    expect(workingArea.direction).toBe("row")
-    expect(workingArea.children.every((child) => child.grow === 0)).toBe(true)
-    const illustration = workingArea.children.find((child) => child._regionType === "illustration")
-    const colors = workingArea.children.find((child) => child._regionType === "colorSpecs")
-    const embroidery = workingArea.children.find((child) => child._regionType === "embSpecs")
-    expect(illustration.basis).toBeGreaterThan(colors.basis)
-    expect(illustration.basis).toBeGreaterThan(embroidery.basis)
-    expect(colors.basis).toBeGreaterThanOrEqual(170)
-    expect(embroidery.basis).toBeGreaterThanOrEqual(300)
+    const decision = evaluatePageCompositions(result.page, ctx).decision
+    expect(decision.mode).toBe("hero-rail")
+    expect(decision.widths).toEqual([698, 414])
+    expect(decision.complete).toBe(true)
   })
 
   it("per-slot fixture renders distinct structured briefs", () => {
     const item = fixture("K-per-slot-briefs")
-    const [page] = buildPlannedPages(item.plan, ctxFor(DATASETS[item.dataset]))
+    const [page] = buildPlannedPages(item.plan, ctxFor(DATASETS[item.dataset]), { documentMode: "illustration-handoff" })
     expect(page.svg).toContain("BACK PLACEMENT")
     expect(page.svg).toContain("SEAM CLOSE-UP")
     expect(page.svg).toContain("neck seam landmark")
@@ -71,13 +64,23 @@ describe("Layout Lab closure fixtures", () => {
       const item = fixture("M-bom-" + count)
       return evaluatePageCompositions(item.plan.pages[0], ctxForFixture(item), { width: 1148, height: 674 }).decision
     })
-    expect(modes.map((decision) => decision.mode)).toEqual(["stack", "stack", "row", "row"])
+    expect(modes.map((decision) => decision.mode)).toEqual(["hero-bottom-band", "hero-bottom-band", "bom-hero", "bom-hero"])
     expect(modes.every((decision) => decision.complete)).toBe(true)
 
     const denseStops = fixture("N-stops-30")
     const decision = evaluatePageCompositions(denseStops.plan.pages[0], ctxForFixture(denseStops), { width: 1148, height: 674 }).decision
-    expect(decision.mode).toBe("row")
+    expect(decision.mode).toBe("hero-bottom-band")
     expect(decision.complete).toBe(true)
-    expect(decision.compressed).toBe(true)
+    expect(decision.slotValid).toBe(false)
+    const pages = buildPlannedPages(denseStops.plan, ctxForFixture(denseStops), { documentMode: "illustration-handoff" })
+    expect(pages).toHaveLength(2)
+    const renderedStops = pages.flatMap((page) => [...page.svg.matchAll(/Stop (\d+):/g)].map((match) => Number(match[1])))
+    expect(renderedStops).toEqual(Array.from({ length: 30 }, (_, index) => index + 1))
+    pages.forEach((page) => {
+      const contentTextY = [...page.svg.matchAll(/<text[^>]* y='([\d.]+)'[^>]*>([^<]*)<\/text>/g)]
+        .filter((match) => !match[2].includes("ILLUSTRATION HANDOFF") && !/^P\. /.test(match[2]))
+        .map((match) => Number(match[1]))
+      expect(Math.max(...contentTextY)).toBeLessThanOrEqual(776)
+    })
   })
 })
