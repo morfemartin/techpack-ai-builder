@@ -456,10 +456,11 @@ describe("Layout Engine v3 document assembly", () => {
     const pages = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })
     expect(pages).toHaveLength(2)
     expect(pages.map((page) => [page.pageNumber, page.totalPages])).toEqual([[1, 2], [2, 2]])
-    expect(pages[0].svg).toContain("INDICE DEL HANDOFF")
+    expect(pages[0].svg).toContain("INDICE DE PRODUCCION")
     expect(pages[0].svg).toContain("P. 01 / 02")
     expect(pages[1].svg).toContain("P. 02 / 02")
-    expect(pages[1].svg).toContain("ILLUSTRATION HANDOFF - NO APROBADO PARA PRODUCCION")
+    expect(pages[1].svg).toContain("V1/2026 · NO APROBADA PARA PRODUCCION")
+    expect(pages[1].svg).toContain("TODOS LOS DERECHOS · Morfe")
   })
 
   it("emits editable references and per-slot instructions nested inside artwork", () => {
@@ -467,6 +468,7 @@ describe("Layout Engine v3 document assembly", () => {
     for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS__V1", "REFERENCES", "PAGE_CHROME__HEADER"]) {
       expect(page.svg).toContain("id='" + id + "'")
     }
+    expect(page.svg).toContain("id='DESIGNER_COMMUNICATION' data-removable='true'")
     const artworkStart = page.svg.indexOf("id='ARTWORK'")
     const instructionsStart = page.svg.indexOf("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
     const artworkEnd = page.svg.indexOf("</g>", instructionsStart)
@@ -493,7 +495,7 @@ describe("Layout Engine v3 document assembly", () => {
   it("inserts a cover-index when a fallback plan omitted the cover", () => {
     const pages = buildPlannedPages({ pages: [plan.pages[1]] }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
     expect(pages[0].purpose).toBe("cover")
-    expect(pages[0].svg).toContain("INDICE DEL HANDOFF")
+    expect(pages[0].svg).toContain("INDICE DE PRODUCCION")
     expect(pages[1].pageNumber).toBe(2)
     expect(pages[1].totalPages).toBe(2)
   })

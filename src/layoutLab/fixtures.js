@@ -5,7 +5,7 @@ import { alpineParkaBenchmark } from "./benchmarkProject.js"
 
 const alpineBenchmarkPlan = buildSemanticDocumentPlan({
   ...alpineParkaBenchmark,
-  garmentType: alpineParkaBenchmark.label,
+  garmentType: alpineParkaBenchmark.hdr.pname,
 })
 
 function overviewDensityFixture(count) {

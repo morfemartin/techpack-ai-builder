@@ -471,5 +471,7 @@ export function ctxFor(dataset, lang = "ES") {
     logo: null,
     txData: null,
     garment: dataset.garment,
+    documentVersion: dataset.documentVersion,
+    approvalStatus: dataset.approvalStatus,
   }
 }

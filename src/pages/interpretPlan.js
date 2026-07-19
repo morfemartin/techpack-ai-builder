@@ -10,12 +10,12 @@
 // layout engine or a DeepSeek call.
 
 import { T } from "../core/i18n.js"
-import { R, TX, svgHeader, svgDisc, wrapLines } from "../core/svgPrimitives.js"
+import { R, TX, svgHeader, svgDisc, wrapLines, fitText, headerHeight } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette } from "../design/tokens.js"
 import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
-import { measureRegion, selectedDesign } from "./measure.js"
+import { documentIndexRows, measureRegion, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
@@ -47,8 +47,12 @@ const SPLIT_GAP = GRID.gutter
 // (instead of letting a model weight bloat them) is what kills the oversized
 // blue title bar and the dead whitespace at the bottom of a page in one move -
 // the model's weights now only distribute the CONTENT area.
-const FIXED_BASIS = { header: CHROME.header, titleBar: CHROME.titleBar, disclaimer: CHROME.footer }
+const FIXED_BASIS = { titleBar: CHROME.titleBar, disclaimer: CHROME.footer }
 const STANDARD_WORKING_HEIGHT = PAGE_BODY.height
+
+function workingHeight(ctx) {
+  return STANDARD_WORKING_HEIGHT - Math.max(0, headerHeight(ctx && ctx.hdr, CONTENT_W) - CHROME.header)
+}
 
 // Matches renderPartsList's `compact` row basis plus its table header (both
 // from the shared metrics scale) - used to measure, after solving, whether a
@@ -242,18 +246,22 @@ function renderNote(box, text) {
 }
 
 function renderDocumentIndex(box, entries) {
-  const rows = Array.isArray(entries) ? entries : []
+  const rows = documentIndexRows(entries, box.width)
   let s = ""
   s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
   s += R(box.x, box.y, box.width, GRID.baseline, palette.blue.hex, palette.ink.hex, "0.8")
-  s += TX(box.x + INSET, box.y + GRID.baseline / 2, "INDICE DEL HANDOFF", PRINT.bodyFont, true, "start", palette.white.hex)
-  let y = box.y + GRID.baseline * 2 + GRID.baseline / 2
-  rows.forEach((entry) => {
-    const status = entry.status === "illustration-pending" ? "ILUSTRACION PENDIENTE" : "LISTO"
-    s += TX(box.x + INSET, y, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
-    s += TX(box.x + 52, y, entry.title || entry.purpose || entry.name, PRINT.minFont, true, "start")
-    s += TX(box.x + box.width - INSET, y, status, PRINT.minFont, false, "end", status === "LISTO" ? palette.ink.hex : palette.red.hex)
-    y += GRID.baseline
+  s += TX(box.x + INSET, box.y + GRID.baseline / 2, "INDICE DE PRODUCCION", PRINT.bodyFont, true, "start", palette.white.hex)
+  let rowTop = box.y + GRID.baseline * 2
+  rows.forEach(({ entry, lines, height }) => {
+    const purpose = String(entry.purpose || "")
+    const role = purpose.startsWith("design:") ? "APLICACION" : purpose === "lining" ? "INTERIOR" : purpose === "label" ? "ROTULADO" : "CONSTRUCCION"
+    const centerY = rowTop + height / 2
+    s += TX(box.x + INSET, centerY, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
+    lines.forEach((line, index) => {
+      s += TX(box.x + 52, rowTop + GRID.baseline * (index + 0.5), line, PRINT.minFont, true, "start")
+    })
+    s += TX(box.x + box.width - INSET, centerY, role, PRINT.minFont, true, "end", palette.ink.hex)
+    rowTop += height
   })
   return s
 }
@@ -261,10 +269,17 @@ function renderDocumentIndex(box, entries) {
 function renderDocumentFooter(box, hdr, meta) {
   const current = Number(meta && meta.pageNumber) || 1
   const total = Number(meta && meta.totalPages) || 1
-  const handoff = meta && meta.documentMode === "illustration-handoff"
+  const yearMatch = String((hdr && (hdr.season || hdr.outd)) || "").match(/20\d{2}/)
+  const version = (meta && meta.documentVersion) || (hdr && hdr.documentVersion) || "V1/" + (yearMatch ? yearMatch[0] : "2026")
+  const approvalValue = (meta && meta.approvalStatus) || (hdr && hdr.approvalStatus) || "not-approved"
+  const approved = approvalValue === true || approvalValue === "approved" || approvalValue === "production-approved"
+  const approval = approved ? "APROBADA PARA PRODUCCION" : "NO APROBADA PARA PRODUCCION"
+  const brand = String((hdr && hdr.brand) || "MARCA")
+  const left = fitText(version + " · " + approval, box.width * 0.42, box.height - 4, { maxSize: PRINT.minFont, minSize: PRINT.minFont, lineHeightRatio: 1 })
   let s = "<g id='PAGE_CHROME__FOOTER'>"
   s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
-  s += TX(box.x + INSET, box.y + box.height / 2, handoff ? "ILLUSTRATION HANDOFF - NO APROBADO PARA PRODUCCION" : "TECH PACK", PRINT.minFont, true, "start", handoff ? palette.red.hex : palette.ink.hex)
+  s += TX(box.x + INSET, box.y + box.height / 2, left.lines[0] || version + " · " + approval, PRINT.minFont, true, "start", approved ? palette.ink.hex : palette.red.hex)
+  s += TX(box.x + box.width * 0.64, box.y + box.height / 2, "TODOS LOS DERECHOS · " + brand, PRINT.minFont, false, "middle", palette.ink.hex)
   s += TX(box.x + box.width - INSET, box.y + box.height / 2, "P. " + String(current).padStart(2, "0") + " / " + String(total).padStart(2, "0"), PRINT.minFont, true, "end", palette.ink.hex, undefined)
   s += "</g>"
   return s
@@ -431,7 +446,7 @@ function buildCompositionNode(ast, page, ctx, isRoot = false) {
 
 export function interpretPagePlan(page, ctx) {
   const safeCtx = ctx || {}
-  const normalized = optimizePageComposition(normalizePlan({ pages: [page] }).pages[0], safeCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
+  const normalized = optimizePageComposition(normalizePlan({ pages: [page] }).pages[0], safeCtx, { width: CONTENT_W, height: workingHeight(safeCtx) })
   const grows = weightsToGrow(normalized.regions)
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan
   // call (tests) and the full buildPlannedPages path share one source of truth
@@ -444,7 +459,7 @@ export function interpretPagePlan(page, ctx) {
     const header = byType("header")
     const title = byType("titleBar")
     const footer = byType("disclaimer")
-    if (header) nodes.push(leafForRegion({ ...header, _sizing: { basis: FIXED_BASIS.header, grow: 0, shrink: 0 } }, normalized, pageCtx))
+    if (header) nodes.push(leafForRegion({ ...header, _sizing: { basis: headerHeight(pageCtx.hdr, CONTENT_W), grow: 0, shrink: 0 } }, normalized, pageCtx))
     if (title) nodes.push(leafForRegion({ ...title, _sizing: { basis: FIXED_BASIS.titleBar, grow: 0, shrink: 0 } }, normalized, pageCtx))
     nodes.push(buildCompositionNode(normalized._layoutAst, normalized, pageCtx, true))
     if (footer) nodes.push(leafForRegion({ ...footer, _sizing: { basis: FIXED_BASIS.disclaimer, grow: 0, shrink: 0 } }, normalized, pageCtx))
@@ -591,7 +606,7 @@ function composingStopCapacity(page, pageCtx, colors, stopSeq, continuation) {
   const slicedPage = pageForDataSlice(page, Array.isArray(colors) && colors.length > 0, true, continuation)
   for (let count = stopSeq.length; count > 0; count--) {
     const candidateCtx = withDesignSlice(slicedPage, pageCtx, colors, stopSeq.slice(0, count))
-    const optimized = optimizePageComposition(normalizePlan({ pages: [slicedPage] }).pages[0], candidateCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
+    const optimized = optimizePageComposition(normalizePlan({ pages: [slicedPage] }).pages[0], candidateCtx, { width: CONTENT_W, height: workingHeight(candidateCtx) })
     if (!optimized._compositionDecision || optimized._compositionDecision.valid) return count
   }
   return 1
@@ -757,7 +772,7 @@ export function buildPlannedPages(plan, ctx, opts) {
     const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
     regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, { type: "documentIndex", weight: 1 })
     descriptor.page = { ...descriptor.page, regions }
-    descriptor.pageCtx = { ...descriptor.pageCtx, documentIndex: indexEntries }
+    descriptor.pageCtx = { ...descriptor.pageCtx, documentIndex: indexEntries.filter((entry) => entry.purpose !== "cover") }
   }
 
   return descriptors.map((descriptor, index) => {
@@ -769,8 +784,10 @@ export function buildPlannedPages(plan, ctx, opts) {
       totalPages,
       status: indexEntries[index].status,
       documentMode,
+      documentVersion: baseCtx.documentVersion,
+      approvalStatus: baseCtx.approvalStatus,
     }
-    const composed = optimizePageComposition(normalizePlan({ pages: [descriptor.page] }).pages[0], descriptor.pageCtx, { width: CONTENT_W, height: STANDARD_WORKING_HEIGHT })
+    const composed = optimizePageComposition(normalizePlan({ pages: [descriptor.page] }).pages[0], descriptor.pageCtx, { width: CONTENT_W, height: workingHeight(descriptor.pageCtx) })
     return {
       ...meta,
       name: descriptor.name,

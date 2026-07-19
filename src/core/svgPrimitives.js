@@ -1,5 +1,5 @@
 import { palette, type } from "../design/tokens.js"
-import { BAR, CHIP, HEADER, INSET, PRINT, headerCells } from "../design/metrics.js"
+import { BAR, CHIP, CHROME, GRID, HEADER, INSET, PRINT, headerCells } from "../design/metrics.js"
 
 export const NA = "N/A"
 
@@ -45,7 +45,20 @@ export function svgSectionBar(x, y, w, title) {
 export const LBL = (x, y, w, h, txt) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.8") + TX(x + w / 2, y + h / 2, txt, PRINT.minFont, true, "middle", palette.ink.hex)
 
 // A value cell holding an actual data value -> mono face.
-export const VAL = (x, y, w, h, v) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.6") + TX(x + 5, y + h / 2, v || NA, PRINT.minFont, false, "start", palette.ink.hex, type.svgFonts.data)
+export const VAL = (x, y, w, h, v) => {
+  const fitted = fitText(v || NA, Math.max(1, w - 10), Math.max(1, h - 4), {
+    maxSize: PRINT.minFont,
+    minSize: PRINT.minFont,
+    lineHeightRatio: 1.1,
+  })
+  const blockHeight = fitted.lines.length * fitted.lineHeight
+  let out = R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.6")
+  fitted.lines.forEach((line, index) => {
+    const lineY = y + (h - blockHeight) / 2 + fitted.lineHeight * (index + 0.5)
+    out += TX(x + 5, lineY, line, fitted.size, false, "start", palette.ink.hex, type.svgFonts.data)
+  })
+  return out
+}
 
 /* ---- DIMENSION LINE SVG ---- */
 // role.index (red): a precision reference mark, same family as callouts/POM
@@ -85,25 +98,49 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
 // lands exactly on a top-row edge and both rows fill the page flush to the
 // right margin. The old version gave each row ad-hoc cell widths - the rows
 // ended at different x positions and no edges aligned.
+function headerRowHeight(cells, fields) {
+  var maxLines = 1
+  cells.forEach(function (cell, index) {
+    var valueWidth = Math.max(1, cell.w - Math.min(HEADER.label, cell.w) - 10)
+    maxLines = Math.max(maxLines, wrapLines(fields[index][1] || NA, valueWidth, PRINT.minFont).length)
+  })
+  return Math.max(CHROME.header / 2, Math.ceil((maxLines * PRINT.minFont + 8) / GRID.baseline) * GRID.baseline)
+}
+
+export function headerHeight(hdr, W) {
+  var safe = hdr || {}
+  var topFields = [["SEASON", safe.season], ["STYLE NO", safe.sno], ["CATEGORY", safe.cat], ["FABRIC", safe.fab], ["FACTORY", safe.fac]]
+  var bottomFields = [["BRAND", safe.brand], ["NAME", safe.pname], ["INPUT", safe.ind], ["OUTPUT", safe.outd]]
+  return headerRowHeight(headerCells(W, HEADER.topSpans), topFields) + headerRowHeight(headerCells(W, HEADER.bottomSpans), bottomFields)
+}
+
 export function svgHeader(hdr, logo, W, hH) {
   var s = ""
+  var safeHdr = hdr || {}
+  var topFields = [["SEASON", safeHdr.season], ["STYLE NO", safeHdr.sno], ["CATEGORY", safeHdr.cat], ["FABRIC", safeHdr.fab], ["FACTORY", safeHdr.fac]]
+  var bottomFields = [["BRAND", safeHdr.brand], ["NAME", safeHdr.pname], ["INPUT", safeHdr.ind], ["OUTPUT", safeHdr.outd]]
+  var topH = headerRowHeight(headerCells(W, HEADER.topSpans), topFields)
+  var bottomH = headerRowHeight(headerCells(W, HEADER.bottomSpans), bottomFields)
+  var naturalH = topH + bottomH
+  if (hH > naturalH) bottomH += hH - naturalH
+  var totalH = topH + bottomH
   // Logo slot: pure white (print-first), ink border. Muted placeholder text
   // when no logo was uploaded - not a brand/role color, just a chrome hint.
-  s += R(0, 0, HEADER.logo, hH, palette.white.hex, palette.ink.hex, "0.8")
-  if (logo) s += "<image href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (hH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
-  else s += TX(HEADER.logo / 2, hH / 2, "LOGO", PRINT.minFont, false, "middle", "#9AA0AB")
+  s += R(0, 0, HEADER.logo, totalH, palette.white.hex, palette.ink.hex, "0.8")
+  if (logo) s += "<image href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (totalH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
+  else s += TX(HEADER.logo / 2, totalH / 2, "LOGO", PRINT.minFont, false, "middle", "#9AA0AB")
 
-  function headerRow(cells, fields, y) {
+  function headerRow(cells, fields, y, rowH) {
     var out = ""
     cells.forEach(function (cell, i) {
       var lw = Math.min(HEADER.label, cell.w)
-      out += LBL(cell.x, y, lw, hH / 2, fields[i][0]) + VAL(cell.x + lw, y, cell.w - lw, hH / 2, fields[i][1])
+      out += LBL(cell.x, y, lw, rowH, fields[i][0]) + VAL(cell.x + lw, y, cell.w - lw, rowH, fields[i][1])
     })
     return out
   }
 
-  s += headerRow(headerCells(W, HEADER.topSpans), [["SEASON", hdr.season], ["STYLE NO", hdr.sno], ["CATEGORY", hdr.cat], ["FABRIC", hdr.fab], ["FACTORY", hdr.fac]], 0)
-  s += headerRow(headerCells(W, HEADER.bottomSpans), [["BRAND", hdr.brand], ["NAME", hdr.pname], ["INPUT", hdr.ind], ["OUTPUT", hdr.outd]], hH / 2)
+  s += headerRow(headerCells(W, HEADER.topSpans), topFields, 0, topH)
+  s += headerRow(headerCells(W, HEADER.bottomSpans), bottomFields, topH, bottomH)
   return s
 }
 

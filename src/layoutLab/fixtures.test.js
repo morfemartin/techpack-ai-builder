@@ -167,7 +167,7 @@ describe("Layout Lab closure fixtures", () => {
     expect(renderedStops).toEqual(Array.from({ length: 30 }, (_, index) => index + 1))
     pages.forEach((page) => {
       const contentTextY = [...page.svg.matchAll(/<text[^>]* y='([\d.]+)'[^>]*>([^<]*)<\/text>/g)]
-        .filter((match) => !match[2].includes("ILLUSTRATION HANDOFF") && !/^P\. /.test(match[2]))
+        .filter((match) => !/^P\. /.test(match[2]) && !/^V\d+\//.test(match[2]) && !match[2].includes("TODOS LOS DERECHOS"))
         .map((match) => Number(match[1]))
       expect(Math.max(...contentTextY)).toBeLessThanOrEqual(776)
     })

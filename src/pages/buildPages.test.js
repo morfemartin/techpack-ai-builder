@@ -171,6 +171,15 @@ describe("shared metrics adoption (P1 alignment)", () => {
     expect(Math.max(...topEdges)).toBe(1188)
     expect(Math.max(...bottomEdges)).toBe(1188)
   })
+
+  it("wraps long header values inside their cells instead of cutting them", () => {
+    const longHeader = { brand: "Test", season: "2028 FW", sno: "T-01", cat: "Outerwear", fab: "Poliester micro-plisado con membrana impermeable y acabado mate", fac: "Portugal", ind: "01/01/2028", outd: "02/02/2028", pname: "Parka" }
+    const svg = buildPage1("ES", longHeader, capGarment.defaultParts.slice(0, 2), null, null, capGarment)
+    expect(svg).toContain("Poliester micro-plisado")
+    expect(svg).toContain("membrana impermeable")
+    expect(svg).toContain("acabado mate")
+    expect(svg).not.toContain(">Poliester micro-plisado con membrana impermeable y acabado mate</text>")
+  })
 })
 
 describe("reusable page block helpers", () => {

@@ -6,6 +6,8 @@ export const alpineParkaBenchmark = {
   id: "alpine-parka-benchmark",
   label: "Benchmark completo · Parka alpina modular 3L",
   note: "Proyecto determinista de 40 piezas y tres aplicaciones para probar arquitectura documental, reticula y handoff.",
+  documentVersion: "V1/2028",
+  approvalStatus: "not-approved",
   hdr: {
     brand: "ATELIER MORFE",
     season: "2028 FW",

@@ -1,5 +1,5 @@
 import { T } from "../core/i18n.js"
-import { NA, sv, R, TX, LBL, VAL, dimLine, svgChip, svgHeader, svgDisc, svgSectionBar, wrapLines, fitText } from "../core/svgPrimitives.js"
+import { NA, sv, R, TX, LBL, VAL, dimLine, svgChip, svgHeader, svgDisc, svgSectionBar, wrapLines, fitText, headerHeight } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
@@ -210,6 +210,7 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     runningY += height + yGap
   })
   var s = ""
+  var designerCommunication = ""
 
   for (var i = 0; i < slotCount; i++) {
     var c = i % cols
@@ -232,11 +233,11 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     // Wrapping is conservative and this clip is the invariant's final guard:
     // no glyph, highlight or reference can paint outside its artwork slot.
     s += "<defs><clipPath id='" + clipId + "'><rect x='" + (x + 1) + "' y='" + (y + 1) + "' width='" + Math.max(1, cellW - 2) + "' height='" + Math.max(1, cellH - 2) + "'/></clipPath></defs>"
-    s += "<g clip-path='url(#" + clipId + ")'>"
+    designerCommunication += "<g clip-path='url(#" + clipId + ")'>"
     // Red index chip + uppercase view label, top-left (the tech-pack "FRONT
     // VIEW" / "BACK VIEW" caption). The chip stays the cell's only attention mark.
-    s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + viewNumber)
-    s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
+    designerCommunication += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + viewNumber)
+    designerCommunication += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
 
     var brief = Array.isArray(briefs) ? briefs[i] : null
     var textX = x + INSET
@@ -259,28 +260,28 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
       selectedLines = selectedLines.slice(0, maxLines)
     }
 
-    s += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
-    s += TX(textX, textY - GRID.baseline, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
+    designerCommunication += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
+    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
     selectedLines.forEach(function (line, lineIndex) {
       var ly = textY + lineIndex * GRID.baseline
-      if (line.pending) s += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
-      s += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : "#7D8490", type.svgFonts.data)
+      if (line.pending) designerCommunication += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
+      designerCommunication += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : "#7D8490", type.svgFonts.data)
     })
     if (!brief && noteText) {
       wrapLines(noteText, textW, PRINT.minFont).slice(0, maxLines).forEach(function (line, lineIndex) {
-        s += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
+        designerCommunication += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
       })
     }
     if (cellH >= 120) {
       var fullAreaLabel = "AREA EDITABLE PARA ILUSTRACION TECNICA"
       var areaLabel = wrapLines(fullAreaLabel, Math.max(1, cellW - INSET * 2), PRINT.minFont).length === 1 ? fullAreaLabel : "AREA EDITABLE"
-      s += TX(x + cellW / 2, y + cellH - 16, areaLabel, PRINT.minFont, true, "middle", "#9AA0AB")
+      designerCommunication += TX(x + cellW / 2, y + cellH - 16, areaLabel, PRINT.minFont, true, "middle", "#9AA0AB")
     }
-    s += "</g>"
-    s += "</g>"
+    designerCommunication += "</g>"
+    designerCommunication += "</g>"
   }
 
-  return s
+  return s + "<g id='DESIGNER_COMMUNICATION' data-removable='true'>" + designerCommunication + "</g>"
 }
 
 /* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
@@ -296,7 +297,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var pn = garment.partLabels[lang] || garment.partLabels.ES
   // discH: just enough for svgDisc's single centered 9px line + breathing
   // room - was 28, oversized for one line of text regardless of page content.
-  var W = PAGE.width, H = PAGE.height, hH = CHROME.header, discH = CHROME.footer
+  var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, PAGE.width), discH = CHROME.footer
   var lW = GRID.span(3)
   var ap = parts.filter(function (p) { return p.on })
   var txP = txData && txData.parts ? txData.parts : null
@@ -378,7 +379,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 /* ---- DESIGN PAGE: garment-independent, only needs the base translations ---- */
 export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   var t = T[lang] || T.ES
-  var W = PAGE.width, H = PAGE.height, hH = CHROME.header, discH = CHROME.footer, bodyH = H - hH - discH
+  var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, PAGE.width), discH = CHROME.footer, bodyH = H - hH - discH
   var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
   var LW = GRID.span(3)
   var RX = LW, RW = W - LW, RH = bodyH

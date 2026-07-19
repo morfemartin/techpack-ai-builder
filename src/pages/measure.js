@@ -19,8 +19,8 @@
 // measure.test.js contract; reviewed and integrated here.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { CHROME, GRID, ROW, snapBaseline } from "../design/metrics.js"
-import { wrapLines } from "../core/svgPrimitives.js"
+import { CHROME, GRID, PRINT, ROW, snapBaseline } from "../design/metrics.js"
+import { headerHeight, wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { effectiveParts, partsTableMetrics } from "./tableMetrics.js"
 
@@ -48,13 +48,25 @@ export function selectedDesign(page, ctx) {
   return designs.find((d) => d && typeof d.name === "string" && d.name.toLowerCase() === needle) || designs[0]
 }
 
+export function documentIndexRows(entries, width) {
+  const titleWidth = Math.max(80, Number(width || 0) - 260)
+  return (Array.isArray(entries) ? entries : []).map((entry) => {
+    const title = entry && (entry.title || entry.purpose || entry.name) || "Pagina"
+    const lines = wrapLines(title, titleWidth, PRINT.minFont)
+    return { entry, lines, height: Math.max(GRID.baseline, lines.length * GRID.baseline) }
+  })
+}
+
 export function measureRegion(region, page, ctx, width) {
   const fallback = { natural: 0, min: 0, canAbsorb: false }
   if (!region || typeof region.type !== "string") return fallback
   const type = region.type
 
   // Fixed chrome strips (same values as interpretPlan's FIXED_BASIS).
-  if (type === "header") return { natural: CHROME.header, min: CHROME.header, canAbsorb: false }
+  if (type === "header") {
+    const natural = headerHeight(ctx && ctx.hdr, width || 1188)
+    return { natural, min: natural, canAbsorb: false }
+  }
   if (type === "titleBar") return { natural: CHROME.titleBar, min: CHROME.titleBar, canAbsorb: false }
   if (type === "disclaimer") return { natural: CHROME.footer, min: CHROME.footer, canAbsorb: false }
 
@@ -118,7 +130,7 @@ export function measureRegion(region, page, ctx, width) {
 
   if (type === "documentIndex") {
     const entries = ctx && Array.isArray(ctx.documentIndex) ? ctx.documentIndex : []
-    const natural = 32 + entries.length * GRID.baseline
+    const natural = GRID.baseline * 2 + documentIndexRows(entries, width).reduce((total, row) => total + row.height, 0)
     return { natural, min: natural, canAbsorb: false }
   }
 
