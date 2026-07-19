@@ -1,16 +1,14 @@
 import { GRID } from "../design/metrics.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { layoutPolicyFor, normalizePriority } from "./pageContracts.js"
-import { normalizeSlotBriefs } from "./briefs.js"
 
-const COMPOSABLE = new Set(["illustration", "partsList", "colorSpecs", "embSpecs", "artworkInstructions", "references", "documentIndex", "note"])
+const COMPOSABLE = new Set(["illustration", "partsList", "colorSpecs", "embSpecs", "references", "documentIndex", "note"])
 const CHROME_TYPES = new Set(["header", "titleBar", "disclaimer", "spacer"])
 
 export const REGION_WIDTH_BANDS = {
   partsList: { min: GRID.span(3), max: GRID.span(4) },
   colorSpecs: { min: GRID.span(2), max: GRID.span(3) },
   embSpecs: { min: GRID.span(3), max: GRID.span(3) },
-  artworkInstructions: { min: GRID.span(3), max: GRID.span(3) },
   references: { min: GRID.span(3), max: GRID.span(3) },
   note: { min: GRID.span(3), max: GRID.span(3) },
   documentIndex: { min: GRID.span(3), max: GRID.span(3) },
@@ -46,14 +44,7 @@ function collectRegions(page, ctx) {
   const unique = new Map()
   leaves.forEach((region) => { if (!unique.has(region.type)) unique.set(region.type, region) })
   const illustration = unique.get("illustration")
-  if (illustration && page.purpose !== "cover" && (ctx && ctx.documentMode) === "illustration-handoff" && !unique.has("artworkInstructions")) {
-    unique.set("artworkInstructions", {
-      type: "artworkInstructions",
-      weight: 1,
-      briefs: normalizeSlotBriefs(illustration, page, ctx),
-      slots: illustration.slots,
-      refs: illustration.refs,
-    })
+  if (illustration && page.purpose !== "cover" && (ctx && ctx.documentMode) === "illustration-handoff") {
     const design = selectedDesign(page, ctx)
     if (design && design.imageData) unique.set("references", { type: "references", weight: 1 })
   }

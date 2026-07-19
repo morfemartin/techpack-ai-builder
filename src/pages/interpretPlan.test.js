@@ -461,15 +461,32 @@ describe("Layout Engine v3 document assembly", () => {
     expect(pages[1].svg).toContain("ILLUSTRATION HANDOFF - NO APROBADO PARA PRODUCCION")
   })
 
-  it("emits editable semantic groups, references and textile instructions outside artwork", () => {
+  it("emits editable references and per-slot instructions nested inside artwork", () => {
     const page = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })[1]
-    for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS", "REFERENCES", "PAGE_CHROME__HEADER"]) {
+    for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS__V1", "REFERENCES", "PAGE_CHROME__HEADER"]) {
       expect(page.svg).toContain("id='" + id + "'")
     }
+    const artworkStart = page.svg.indexOf("id='ARTWORK'")
+    const instructionsStart = page.svg.indexOf("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
+    const artworkEnd = page.svg.indexOf("</g>", instructionsStart)
+    expect(instructionsStart).toBeGreaterThan(artworkStart)
+    expect(artworkEnd).toBeGreaterThan(instructionsStart)
     expect(page.svg).toContain("V1.1 neck seam")
     expect(page.svg).toContain("REFERENCIA - NO A ESCALA")
     const fontSizes = [...page.svg.matchAll(/font-size='([\d.]+)'/g)].map((match) => Number(match[1]))
     expect(Math.min(...fontSizes)).toBeGreaterThanOrEqual(10)
+  })
+
+  it("migrates a legacy instruction region into its illustration without retaining a layout block", () => {
+    const normalized = normalizePlan({ pages: [{
+      id: "legacy",
+      regions: [
+        { type: "illustration", slots: 1 },
+        { type: "artworkInstructions", briefs: [{ view: "Front", mustMark: ["zipper"] }] },
+      ],
+    }] })
+    expect(normalized.pages[0].regions.map((region) => region.type)).toEqual(["illustration"])
+    expect(normalized.pages[0].regions[0].briefs[0].mustMark).toEqual(["zipper"])
   })
 
   it("inserts a cover-index when a fallback plan omitted the cover", () => {

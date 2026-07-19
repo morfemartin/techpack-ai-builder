@@ -42,14 +42,14 @@ describe("Layout Engine v3 candidate composition", () => {
     expect(result.ast.children[1].children.map((node) => node.region.type)).toEqual(["embSpecs", "colorSpecs"])
   })
 
-  it("adds textile instructions to the handoff rail while leaving artwork clean", () => {
+  it("keeps textile instructions inside artwork and out of the technical rail", () => {
     const input = page("design:Artwork", [{ type: "colorSpecs" }, { type: "embSpecs" }])
     input.regions[2].briefs = [{ view: "Front", mustMark: ["neck seam"], measurements: [{ label: "Width 70mm" }] }]
     const ctx = { documentMode: "illustration-handoff", designs: [{ name: "Artwork", colors: [{ hex: "#111111" }], emb: { machine: "Tajima", stopSeq: [] } }] }
     const result = evaluatePageCompositions(input, ctx)
     const railTypes = result.ast.children[1].children.map((node) => node.region.type)
     expect(result.decision.mode).toBe("hero-rail")
-    expect(railTypes).toEqual(["embSpecs", "colorSpecs", "artworkInstructions"])
+    expect(railTypes).toEqual(["embSpecs", "colorSpecs"])
     expect(result.decision.slotWidth).toBeGreaterThanOrEqual(240)
     expect(result.decision.slotHeight).toBeGreaterThanOrEqual(240)
   })

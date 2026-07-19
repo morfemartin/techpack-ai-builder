@@ -159,10 +159,12 @@ creates every design with an `EMPTY_EMB` object, and that empty form must not
 create an embroidery page, consume layout height, or appear as an unplaced
 review finding.
 
-In `illustration-handoff` mode, briefs leave the art board and become a separate
-technical rail with deterministic view, design, callout and dimension IDs.
+In `illustration-handoff` mode, every brief stays inside its corresponding art
+board as provisional content with deterministic view, design, callout and
+dimension IDs. It consumes no macro-grid rows or columns and is replaced by
+the final technical artwork without reflowing the page.
 Uploaded graphics render under `REFERENCES` as `NO A ESCALA`. The final SVG uses
-named groups (`ARTWORK`, `TECH_DATA`, `ILLUSTRATOR_INSTRUCTIONS`, `REFERENCES`,
+named groups (`ARTWORK`, `TECH_DATA`, `ILLUSTRATOR_INSTRUCTIONS__V1`, `REFERENCES`,
 `PAGE_CHROME`) and a visible not-approved-for-production status. Document
 assembly paginates first, then creates the cover index and `P. XX / NN` footer.
 

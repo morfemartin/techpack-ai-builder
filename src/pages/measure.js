@@ -23,7 +23,6 @@
 import { ROW } from "../design/metrics.js"
 import { wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
-import { briefLines, normalizeSlotBriefs } from "./briefs.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
 // wins, then the page's first `covers` entry, then the first design. Moved
@@ -103,22 +102,6 @@ export function measureRegion(region, page, ctx, width) {
     const lines = wrapLines(text, Math.max(1, (width || 100) - 20), 10)
     const natural = 16 + lines.length * 14
     return { natural, min: natural, canAbsorb: false } // text never compresses
-  }
-
-  if (type === "artworkInstructions") {
-    const briefs = Array.isArray(region.briefs) && region.briefs.length
-      ? region.briefs
-      : normalizeSlotBriefs(region, page, ctx)
-    const usableWidth = Math.max(80, (width || 300) - 24)
-    let lines = 1
-    briefs.forEach((brief) => {
-      briefLines(brief, "full").forEach((line) => {
-        lines += wrapLines(line, usableWidth, 10).length
-      })
-      lines += 1
-    })
-    const natural = 32 + lines * 14
-    return { natural, min: natural, canAbsorb: false }
   }
 
   if (type === "references") {

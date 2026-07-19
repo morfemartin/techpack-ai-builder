@@ -169,28 +169,6 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   return s
 }
 
-export function renderArtworkInstructions(box, { briefs } = {}) {
-  var list = Array.isArray(briefs) ? briefs : []
-  var s = ""
-  s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
-  s += svgSectionBar(box.x, box.y, box.width, "INSTRUCCIONES DE ILUSTRACION")
-  var y = box.y + 20 + INSET
-  list.forEach(function (brief) {
-    var lines = briefLines(brief, "full")
-    lines.forEach(function (line, index) {
-      var pending = line.indexOf("PENDIENTE DE CONFIRMAR") === 0
-      var wrapped = wrapLines(line, Math.max(40, box.width - INSET * 2), PRINT.minFont)
-      wrapped.forEach(function (wrappedLine, wrappedIndex) {
-        if (pending) s += R(box.x + INSET - 4, y - 7, box.width - INSET * 2 + 8, 14, palette.yellow.hex, palette.ink.hex, "0.5")
-        s += TX(box.x + INSET, y, wrappedLine, PRINT.minFont, (index === 0 && wrappedIndex === 0) || pending, "start", palette.ink.hex, index === 0 ? type.svgFonts.ui : type.svgFonts.data)
-        y += 14
-      })
-    })
-    y += 6
-  })
-  return s
-}
-
 export function renderReferenceAsset(box, { design } = {}) {
   if (!design || !design.imageData) return ""
   var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
@@ -236,11 +214,41 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs } = {}) 
     s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + (i + 1))
     s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
 
-    var innerW = Math.max(40, cellW - 44)
-    var innerH = cellH * 0.6
+    var brief = Array.isArray(briefs) ? briefs[i] : null
+    var textX = x + INSET
+    var textY = y + 48
+    var textW = Math.max(40, cellW - INSET * 2)
+    var maxLines = Math.max(2, Math.floor((cellH - 76) / 14))
+    var modes = ["full", "checklist", "title"]
+    var selectedLines = []
+    if (brief) {
+      for (var modeIndex = 0; modeIndex < modes.length; modeIndex++) {
+        var candidateLines = []
+        briefLines(brief, modes[modeIndex]).forEach(function (line) {
+          wrapLines(line, textW, PRINT.minFont).forEach(function (wrapped) {
+            candidateLines.push({ text: wrapped, pending: line.indexOf("PENDIENTE DE CONFIRMAR") === 0 })
+          })
+        })
+        selectedLines = candidateLines
+        if (candidateLines.length <= maxLines) break
+      }
+      selectedLines = selectedLines.slice(0, maxLines)
+    }
 
-    s += TX(x + cellW / 2, y + cellH / 2, "AREA EDITABLE PARA ILUSTRACION TECNICA", PRINT.minFont, true, "middle", "#9AA0AB")
-    if (i === 0 && noteText) s += TX(x + cellW / 2, y + cellH / 2 + 18, "Ver instrucciones textiles en el rail tecnico", PRINT.minFont, false, "middle", "#9AA0AB")
+    s += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + (i + 1) + "'>"
+    s += TX(textX, textY - 18, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + (i + 1)), PRINT.minFont, true, "start", "#7D8490")
+    selectedLines.forEach(function (line, lineIndex) {
+      var ly = textY + lineIndex * 14
+      if (line.pending) s += R(textX - 4, ly - 7, textW + 8, 14, palette.yellow.hex, palette.ink.hex, "0.5")
+      s += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : "#7D8490", type.svgFonts.data)
+    })
+    if (!brief && noteText) {
+      wrapLines(noteText, textW, PRINT.minFont).slice(0, maxLines).forEach(function (line, lineIndex) {
+        s += TX(textX, textY + lineIndex * 14, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
+      })
+    }
+    if (cellH >= 120) s += TX(x + cellW / 2, y + cellH - 16, "AREA EDITABLE PARA ILUSTRACION TECNICA", PRINT.minFont, true, "middle", "#9AA0AB")
+    s += "</g>"
   }
 
   return s

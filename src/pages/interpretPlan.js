@@ -17,13 +17,13 @@ import { CHROME, GRID, INSET, PAGE, PRINT, ROW } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { measureRegion, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
-import { renderArtworkInstructions, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
+import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
 // page. `split` (below) is a COMPOSITE, handled separately: it is not a leaf.
-export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "artworkInstructions", "references", "documentIndex", "note", "spacer", "disclaimer"]
+export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "references", "documentIndex", "note", "spacer", "disclaimer"]
 
 // Shared A4 print canvas, so a page reads the same regardless of which builder
 // made it. Hoisted here (not just local to buildPlannedPages) because the
@@ -177,6 +177,32 @@ function normalizeRegion(r) {
   return null
 }
 
+function instructionBriefs(regions) {
+  for (const region of Array.isArray(regions) ? regions : []) {
+    if (region && region.type === "artworkInstructions" && Array.isArray(region.briefs)) return region.briefs
+    if (region && region.type === "split") {
+      const nested = instructionBriefs(region.regions)
+      if (nested) return nested
+    }
+  }
+  return null
+}
+
+function attachBriefsToIllustration(regions, briefs) {
+  if (!Array.isArray(briefs) || briefs.length === 0) return regions
+  let attached = false
+  function visit(region) {
+    if (!region || attached) return region
+    if (region.type === "illustration") {
+      attached = true
+      return Array.isArray(region.briefs) && region.briefs.length > 0 ? region : { ...region, briefs }
+    }
+    if (region.type === "split") return { ...region, regions: region.regions.map(visit) }
+    return region
+  }
+  return regions.map(visit)
+}
+
 // Turns whatever the model returned into an always-valid plan, without
 // mutating the input. Unknown region types are dropped; a page emptied by that
 // filtering falls back to a minimal header+disclaimer so it still renders;
@@ -191,7 +217,9 @@ export function normalizePlan(raw) {
     const purpose = typeof p.purpose === "string" ? p.purpose : "overview"
 
     let regions = Array.isArray(p.regions) ? p.regions : []
+    const migratedBriefs = instructionBriefs(regions)
     regions = regions.map(normalizeRegion).filter(Boolean)
+    regions = attachBriefsToIllustration(regions, migratedBriefs)
     if (regions.length === 0) regions = FALLBACK_REGIONS.map((r) => ({ ...r }))
 
     const pieces = Array.isArray(p.pieces) ? p.pieces.filter((x) => typeof x === "string" && x.trim()) : undefined
@@ -255,7 +283,6 @@ function semanticGroup(type, markup) {
     partsList: "TECH_DATA__BOM",
     colorSpecs: "TECH_DATA__COLORS",
     embSpecs: "TECH_DATA__EMBROIDERY",
-    artworkInstructions: "ILLUSTRATOR_INSTRUCTIONS",
     references: "REFERENCES",
     documentIndex: "DOCUMENT_INDEX",
     note: "TECH_DATA__NOTES",
@@ -331,7 +358,6 @@ function leafForRegion(region, page, ctx) {
       }
       if (region.type === "colorSpecs") return semanticGroup(region.type, renderColorSpecs(box, { colors: design && design.colors }))
       if (region.type === "embSpecs") return semanticGroup(region.type, renderEmbSpecs(box, { emb: design && design.emb, title: t.embTitle }))
-      if (region.type === "artworkInstructions") return semanticGroup(region.type, renderArtworkInstructions(box, { briefs: region.briefs || normalizeSlotBriefs(region, page, ctx) }))
       if (region.type === "references") return semanticGroup(region.type, renderReferenceAsset(box, { design }))
       if (region.type === "documentIndex") return semanticGroup(region.type, renderDocumentIndex(box, ctx && ctx.documentIndex))
       if (region.type === "note") return semanticGroup(region.type, renderNote(box, region.note || page.purpose || ""))
