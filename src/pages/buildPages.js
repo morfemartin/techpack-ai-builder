@@ -146,7 +146,9 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   s += svgSectionBar(box.x, ty, W, title || "Embroidery Tech Sheet")
   ty += BAR.h + SECTION_AFTER_BAR_GAP
   var valueX = Math.round(box.x + W * COL.value) + TEXT_PAD
-  var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
+  var stops = ef.stops !== undefined && ef.stops !== null && ef.stops !== "" ? ef.stops : NA
+  var trims = ef.trims !== undefined && ef.trims !== null && ef.trims !== "" ? ef.trims : NA
+  var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", stops + "/" + trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
   var seq = ef.stopSeq && ef.stopSeq.length > 0 ? ef.stopSeq : []
   // Same "never drop a row, shrink instead" rule as colorSpecs: count every
   // row this block WILL draw (fields + optional sequence header/rows) and fit

@@ -171,7 +171,7 @@ describe("repairPage", () => {
 })
 
 describe("outline contract", () => {
-  it("validateOutline flags a missing cover, missing full-BOM page, and uncovered designs", () => {
+  it("validateOutline flags missing cover, missing BOM coverage, and uncovered designs", () => {
     const outline = { pages: [{ id: "d1", title: "Chest Logo", purpose: "design:Chest Logo" }] }
     const codes = validateOutline(outline, ctx).map((v) => v.code)
     expect(codes).toContain("missing-cover")
@@ -188,7 +188,7 @@ describe("outline contract", () => {
     }
     const { outline: fixed, repairs } = repairOutline(outline, ctx)
     expect(fixed.pages[0].purpose).toBe("cover")
-    expect(fixed.pages.some((p) => p.purpose === "overview" || p.purpose === "structure")).toBe(true)
+    expect(fixed.pages.some((p) => p.purpose === "overview" || p.purpose === "structure" || p.purpose.startsWith("structure:"))).toBe(true)
     const chestPages = fixed.pages.filter((p) => p.purpose === "design:Chest Logo")
     expect(chestPages).toHaveLength(1)
     expect(fixed.pages.some((p) => p.purpose === "design:Woven Label")).toBe(true)
@@ -208,6 +208,40 @@ describe("outline contract", () => {
     const { outline: fixed, repairs } = repairOutline(outline, ctx)
     expect(repairs).toEqual([])
     expect(fixed.pages.map((p) => p.id)).toEqual(["cover", "overview", "d1", "d2"])
+  })
+
+  it("accepts a distributed BOM only when every active part is covered exactly once", () => {
+    const distributed = {
+      pages: [
+        { id: "cover", title: "Hoodie", purpose: "cover" },
+        { id: "body-system", title: "Body", purpose: "structure:body", pieces: ["body"] },
+        { id: "hood-system", title: "Hood", purpose: "structure:hood", pieces: ["hood"] },
+        { id: "d1", title: "Chest Logo", purpose: "design:Chest Logo" },
+        { id: "d2", title: "Woven Label", purpose: "design:Woven Label" },
+      ],
+    }
+    expect(validateOutline(distributed, ctx)).toEqual([])
+    distributed.pages[2].pieces = ["body"]
+    const errors = validateOutline(distributed, ctx)
+    expect(errors).toEqual(expect.arrayContaining([
+      { code: "part-duplicated", detail: "body" },
+      { code: "part-uncovered", detail: "hood" },
+    ]))
+  })
+
+  it("splits an overloaded distributed page instead of shrinking its artboards", () => {
+    const manyParts = Array.from({ length: 17 }, (_, index) => ({ id: "p" + (index + 1), on: true }))
+    const outline = {
+      pages: [
+        { id: "cover", purpose: "cover" },
+        { id: "all-parts", title: "All parts", purpose: "structure:body", pieces: manyParts.map((part) => part.id) },
+      ],
+    }
+    expect(validateOutline(outline, { parts: manyParts }).map((error) => error.code)).toContain("part-page-overloaded")
+    const repaired = repairOutline(outline, { parts: manyParts }).outline
+    const structure = repaired.pages.filter((page) => page.purpose === "structure:body")
+    expect(structure.map((page) => page.pieces.length)).toEqual([8, 8, 1])
+    expect(validateOutline(repaired, { parts: manyParts })).toEqual([])
   })
 })
 

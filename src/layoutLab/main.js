@@ -18,6 +18,7 @@ import { buildPlannedPages } from "../pages/interpretPlan.js"
 import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
 import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings, summarizeConfirmed } from "../core/reviewDiff.js"
+import { auditSemanticCoverage } from "../core/semanticOutline.js"
 import { renderGridOverlay } from "./gridOverlay.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
@@ -83,7 +84,14 @@ function renderFixture(fx) {
         .filter((finding) => finding.kind !== "confirmed")
         .forEach((finding) => diagnostics.push(`${finding.kind}: ${finding.topic}:${finding.field}`))
     }
-    const pages = buildPlannedPages(plan, ctx, { mono: state.mono, documentMode: "illustration-handoff" })
+    if (fx.semanticAudit) {
+      const coverage = auditSemanticCoverage(plan, ctx.parts)
+      diagnostics.push(`semantic coverage: ${coverage.covered.length}/${ctx.parts.filter((part) => part.on !== false).length} exactly once · missing ${coverage.missing.length} · duplicated ${coverage.duplicated.length}`)
+      plan.pages.filter((page) => Array.isArray(page.pieces)).forEach((page) => {
+        diagnostics.push(`${page.id}: ${page.pieces.length} pieces · ${page.objective || "no objective"}`)
+      })
+    }
+    const pages = buildPlannedPages(plan, ctx, { mono: state.mono, documentMode: "illustration-handoff", includeIndex: !!fx.includeIndex })
     pages.forEach((renderedPage, index) => {
       const decision = renderedPage.compositionDecision
       if (!decision) return
@@ -108,7 +116,7 @@ function renderFixture(fx) {
         <div><dt>Tests</dt><dd>${fx.tests}</dd></div>
         <div><dt>Expected</dt><dd>${fx.expected}</dd></div>
       </dl>
-      ${diagnostics.length ? `<div class="diagnostics">${diagnostics.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</div>` : ""}
+      ${diagnostics.length ? `<details class="diagnostics"><summary>Diagnostico matematico · ${diagnostics.length} decisiones</summary>${diagnostics.map((item) => `<div>${escapeHtml(item)}</div>`).join("")}</details>` : ""}
       ${error}
       <div class="pages">${pagesHtml}</div>
     </section>`

@@ -53,17 +53,14 @@ function purposeOf(page) {
   return typeof page.purpose === "string" ? page.purpose.trim() : ""
 }
 
-// The page that carries the FULL bill of materials: an overview/structure/
-// lining page with a partsList region and no pieces restriction.
-function fullBomPage(pages) {
-  return (
-    pages.find((p) => {
-      const fam = purposeOf(p)
-      const isBomFamily = fam === "overview" || fam === "structure" || fam === "lining"
-      const restricted = Array.isArray(p.pieces) && p.pieces.length > 0
-      return isBomFamily && !restricted && pageTypes(p).has("partsList")
-    }) || null
-  )
+function partPage(pages, partId) {
+  return pages.find((page) => {
+    const purpose = purposeOf(page)
+    const isBomFamily = purpose === "overview" || purpose === "structure" || purpose === "lining" || purpose.startsWith("structure:")
+    if (!isBomFamily || !pageTypes(page).has("partsList")) return false
+    if (!Array.isArray(page.pieces) || page.pieces.length === 0) return true
+    return page.pieces.map(String).includes(String(partId))
+  }) || null
 }
 
 function designPageFor(pages, name) {
@@ -88,12 +85,12 @@ export function buildReviewFindings(intake, document) {
     }
   }
 
-  // ── Active parts vs the full BOM page ─────────────────────────────────────
-  const bomPage = fullBomPage(pages)
+  // ── Active parts vs their semantic BOM page ───────────────────────────────
   for (const part of Array.isArray(safe.parts) ? safe.parts : []) {
     if (!part || part.on === false) continue
-    if (bomPage) {
-      findings.push({ kind: "confirmed", topic: "part", field: String(part.id), expected: String(part.val || ""), foundOn: bomPage.id })
+    const page = partPage(pages, part.id)
+    if (page) {
+      findings.push({ kind: "confirmed", topic: "part", field: String(part.id), expected: String(part.val || ""), foundOn: page.id })
     } else {
       findings.push({ kind: "unplaced", topic: "part", field: String(part.id), expected: String(part.val || ""), foundOn: null })
     }

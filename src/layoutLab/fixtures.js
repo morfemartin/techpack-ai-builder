@@ -1,5 +1,13 @@
 // ─────────────────────────────────────────────────────────────────────────
 
+import { buildSemanticDocumentPlan } from "../core/semanticOutline.js"
+import { alpineParkaBenchmark } from "./benchmarkProject.js"
+
+const alpineBenchmarkPlan = buildSemanticDocumentPlan({
+  ...alpineParkaBenchmark,
+  garmentType: alpineParkaBenchmark.label,
+})
+
 function overviewDensityFixture(count) {
   return {
     id: `M-bom-${count}`,
@@ -540,6 +548,16 @@ export const FIXTURES = [
         },
       ],
     },
+  },
+  {
+    id: "O-complete-semantic-project",
+    dataset: "alpineParkaBenchmark",
+    title: "O · Proyecto completo · Parka alpina modular 3L",
+    tests: "40 piezas unicas, seis sistemas constructivos, tres aplicaciones, portada-indice, paginacion fisica y briefs por vista.",
+    expected: "El indice refleja todas las paginas; cada pieza aparece exactamente una vez en una pagina con objetivo propio; ningun sistema supera 8 piezas; los briefs viven dentro del artboard y solo muestran cotas confirmadas.",
+    includeIndex: true,
+    semanticAudit: true,
+    plan: alpineBenchmarkPlan,
   },
   ...[1, 6, 16, 24].map(overviewDensityFixture),
   ...[1, 3, 10].map((count) => designDensityFixture("colors", count)),

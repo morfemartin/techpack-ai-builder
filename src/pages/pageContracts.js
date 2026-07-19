@@ -3,8 +3,8 @@
 //
 // This module encodes how a tech-pack designer thinks, as code: which regions
 // MUST be visually present on a page of a given purpose, which are forbidden
-// there (nothing repeats that shouldn't - the full BOM lives on the overview,
-// never on a design page), which data blocks earn their place only when they
+// there (nothing repeats that shouldn't - every active part has exactly one
+// structural home, never a design page), which data blocks earn their place only when they
 // actually carry data, and the canonical chrome order (header → title →
 // content → disclaimer).
 //
@@ -23,6 +23,7 @@
 
 import { selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
+import { partitionPartsBySystem } from "../core/semanticOutline.js"
 
 export const CONTRACTS = {
   cover: {
@@ -287,10 +288,29 @@ export function repairPage(page, ctx) {
 
 // ── Document-level contract ──────────────────────────────────────────────────
 
+const MAX_PARTS_PER_STRUCTURAL_PAGE = 8
+
 function isFullBomPage(p) {
   const fam = purposeFamily(p && p.purpose)
   const restricted = Array.isArray(p && p.pieces) && p.pieces.length > 0
   return (fam === "overview" || fam === "structure" || fam === "lining") && !restricted
+}
+
+function isBomFamilyPage(page) {
+  const family = purposeFamily(page && page.purpose)
+  return family === "overview" || family === "structure" || family === "lining"
+}
+
+function activePartIds(ctx) {
+  return ((ctx && ctx.parts) || []).filter((part) => part && part.on !== false && part.id != null).map((part) => String(part.id))
+}
+
+function partCoverage(pages, partId) {
+  return pages.filter((page) => {
+    if (!isBomFamilyPage(page)) return false
+    if (!Array.isArray(page.pieces) || page.pieces.length === 0) return true
+    return page.pieces.map(String).includes(partId)
+  })
 }
 
 function designPagesByName(outline) {
@@ -309,7 +329,20 @@ export function validateOutline(outline, ctx) {
   const errors = []
   const pages = (outline && outline.pages) || []
   if (!pages.some((p) => p && p.purpose === "cover")) errors.push({ code: "missing-cover" })
-  if (!pages.some(isFullBomPage)) errors.push({ code: "missing-bom-page" })
+  const partIds = activePartIds(ctx)
+  if (partIds.length > 0 && !pages.some(isBomFamilyPage)) errors.push({ code: "missing-bom-page" })
+  for (const page of pages) {
+    if (isBomFamilyPage(page) && Array.isArray(page.pieces) && page.pieces.length > MAX_PARTS_PER_STRUCTURAL_PAGE) {
+      errors.push({ code: "part-page-overloaded", detail: page.id })
+    }
+  }
+  for (const partId of partIds) {
+    const coverage = partCoverage(pages, partId)
+    if (coverage.length === 0) errors.push({ code: "part-uncovered", detail: partId })
+    // A legacy unrestricted overview deliberately represents the complete
+    // BOM. Exact-once validation applies to the new distributed model.
+    if (!pages.some(isFullBomPage) && coverage.length > 1) errors.push({ code: "part-duplicated", detail: partId })
+  }
 
   const byName = designPagesByName(outline)
   for (const d of (ctx && ctx.designs) || []) {
@@ -331,10 +364,49 @@ export function repairOutline(outline, ctx) {
     repairs.push("inserted cover page")
   }
 
-  if (!pages.some(isFullBomPage)) {
+  const partIds = activePartIds(ctx)
+  const structuralPages = pages.filter(isBomFamilyPage)
+  if (partIds.length > 0 && structuralPages.length === 0) {
     const coverIdx = pages.findIndex((p) => p.purpose === "cover")
-    pages.splice(coverIdx + 1, 0, { id: "overview", title: "Estructura general", purpose: "overview" })
-    repairs.push("inserted overview page")
+    const inserted = partitionPartsBySystem(ctx && ctx.parts, { maxPartsPerPage: 8 })
+    pages.splice(coverIdx + 1, 0, ...inserted)
+    repairs.push("inserted " + inserted.length + " semantic BOM pages")
+  } else if (partIds.length > 0 && !structuralPages.some(isFullBomPage)) {
+    pages = pages.flatMap((page) => {
+      if (!isBomFamilyPage(page) || !Array.isArray(page.pieces) || page.pieces.length <= MAX_PARTS_PER_STRUCTURAL_PAGE) return [page]
+      const split = []
+      for (let index = 0; index < page.pieces.length; index += MAX_PARTS_PER_STRUCTURAL_PAGE) {
+        const number = split.length + 1
+        split.push({
+          ...page,
+          id: page.id + "-" + number,
+          title: page.title + " · " + number,
+          pieces: page.pieces.slice(index, index + MAX_PARTS_PER_STRUCTURAL_PAGE),
+        })
+      }
+      repairs.push("split overloaded structural page " + page.id + " into " + split.length)
+      return split
+    })
+    const seen = new Set()
+    pages = pages.filter((page) => {
+      if (!isBomFamilyPage(page) || !Array.isArray(page.pieces)) return true
+      const unique = page.pieces.map(String).filter((id) => partIds.includes(id) && !seen.has(id))
+      unique.forEach((id) => seen.add(id))
+      if (unique.length === 0) {
+        repairs.push("dropped empty or duplicate structural page " + page.id)
+        return false
+      }
+      if (unique.length !== page.pieces.length) repairs.push("deduplicated pieces on " + page.id)
+      page.pieces = unique
+      return true
+    })
+    const uncovered = ((ctx && ctx.parts) || []).filter((part) => part && part.on !== false && !seen.has(String(part.id)))
+    if (uncovered.length > 0) {
+      const inserted = partitionPartsBySystem(uncovered, { maxPartsPerPage: 8 })
+      const firstDesign = pages.findIndex((page) => String(page.purpose || "").startsWith("design:"))
+      pages.splice(firstDesign >= 0 ? firstDesign : pages.length, 0, ...inserted)
+      repairs.push("inserted " + inserted.length + " pages for uncovered parts")
+    }
   }
 
   const seenDesign = new Set()

@@ -3,12 +3,14 @@
 //
 // Cada dataset es una PRENDA COMPLEJA con diseños únicos: define el `ctx`
 // (garment/parts/designs/hdr) que alimenta al motor de layout. NO define el
-// plan de página - en Fase 1 los planes son fixtures a mano (fixtures.js)
-// para aislar el renderizador; en Fase 2 el plan lo generará la IA a partir
-// de este mismo ctx.
+// plan de página. Los fixtures pequeños fijan planes para aislar el renderer;
+// el benchmark completo usa el particionador semántico real para probar la
+// arquitectura documental sin depender de red.
 //
 // Todo es data pura: ni una llamada a la API, ni al cuestionario, ni al chat.
 // ─────────────────────────────────────────────────────────────────────────
+
+import { alpineParkaBenchmark } from "./benchmarkProject.js"
 
 function hdr(over) {
   return {
@@ -457,7 +459,7 @@ const bikini = {
   ],
 }
 
-export const DATASETS = { parka, hoodie, skirt, varsity, bikini }
+export const DATASETS = { parka, hoodie, skirt, varsity, bikini, alpineParkaBenchmark }
 
 // Construye el ctx que buildPlannedPages espera, a partir de un dataset.
 export function ctxFor(dataset, lang = "ES") {

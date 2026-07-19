@@ -3,6 +3,7 @@ import { buildPlannedPages, interpretPagePlan } from "../pages/interpretPlan.js"
 import { evaluatePageCompositions } from "../pages/composition.js"
 import { repairPage, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings } from "../core/reviewDiff.js"
+import { auditSemanticCoverage } from "../core/semanticOutline.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { FIXTURES } from "./fixtures.js"
 import { ctxForFixture } from "./fixtureContext.js"
@@ -15,7 +16,7 @@ describe("Layout Lab closure fixtures", () => {
   it("renders every deterministic fixture without invalid SVG geometry", () => {
     const clipIds = []
     for (const item of FIXTURES) {
-      const pages = buildPlannedPages(item.plan, ctxForFixture(item))
+      const pages = buildPlannedPages(item.plan, ctxForFixture(item), { includeIndex: !!item.includeIndex, documentMode: "illustration-handoff" })
       expect(pages.length, item.id).toBeGreaterThan(0)
       for (const page of pages) {
         expect(page.svg, item.id).toContain("<svg")
@@ -78,6 +79,35 @@ describe("Layout Lab closure fixtures", () => {
     const findings = buildReviewFindings(ctx, item.plan)
     const unplacedDesigns = findings.filter((finding) => finding.kind === "unplaced" && finding.topic === "design")
     expect(unplacedDesigns.map((finding) => finding.field)).toEqual(ctx.designs.map((design) => design.name))
+  })
+
+  it("renders the complete semantic benchmark with index, exact coverage and structured handoff", () => {
+    const item = fixture("O-complete-semantic-project")
+    const ctx = ctxForFixture(item)
+    const audit = auditSemanticCoverage(item.plan, ctx.parts)
+    expect(audit.missing).toEqual([])
+    expect(audit.duplicated).toEqual([])
+    expect(audit.covered).toHaveLength(40)
+
+    const pages = buildPlannedPages(item.plan, ctx, { includeIndex: true, documentMode: "illustration-handoff" })
+    expect(pages).toHaveLength(10)
+    expect(pages.map((page) => page.pageNumber)).toEqual(Array.from({ length: 10 }, (_, index) => index + 1))
+    expect(pages.every((page) => page.totalPages === 10)).toBe(true)
+    expect(pages[0].svg).toContain("INDICE")
+    expect(pages[0].svg).toContain("Sistema 01")
+    expect(pages[0].svg).toContain("D1")
+
+    const structurePages = pages.filter((page) => page.purpose.startsWith("structure:"))
+    expect(structurePages).toHaveLength(6)
+    structurePages.forEach((page) => {
+      expect(page.svg).toContain("id='TECH_DATA__BOM'")
+      expect(page.svg).toContain("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
+      expect(page.svg).toContain("id='ILLUSTRATOR_INSTRUCTIONS__V2'")
+      expect(page.svg).not.toMatch(/NaN|undefined/)
+    })
+    const logoSvg = pages.find((page) => page.purpose === "design:Logo pecho reflectivo").svg
+    expect(logoSvg).toContain("DIM-1 Ancho 68 x")
+    expect(logoSvg).toContain("alto 22")
   })
 
   it("changes composition from measured density while preserving complete candidates", () => {

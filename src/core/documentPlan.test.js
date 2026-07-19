@@ -54,6 +54,22 @@ describe("document plan AI wrappers", () => {
     expect(deepseekChat).toHaveBeenCalledOnce()
   })
 
+  it("preserves semantic objectives and views proposed for distributed construction pages", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{
+      id: "hood-system",
+      title: "Capucha",
+      purpose: "structure:hood-neck",
+      objective: "Documentar montaje de capucha",
+      pieces: ["hood"],
+      views: ["Exterior", "Interior"],
+    }] }))
+    const outline = await planDocumentOutline({ garmentType: "Hoodie", parts: [{ id: "hood", on: true }], designs: [] })
+    const page = outline.pages.find((item) => item.id === "hood-system")
+    expect(page.objective).toBe("Documentar montaje de capucha")
+    expect(page.views).toEqual(["Exterior", "Interior"])
+    expect(page.pieces).toEqual(["hood"])
+  })
+
   it("falls back to cover + overview plus design pages when the outline is empty", async () => {
     deepseekChat.mockResolvedValueOnce('{"pages":[]}')
     const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })

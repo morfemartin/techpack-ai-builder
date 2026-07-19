@@ -2,6 +2,7 @@ import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
 import { parseJSONOrRepair } from "./techpackRequirements.js"
 import { normalizePlan } from "../pages/interpretPlan.js"
 import { repairOutline, repairPage } from "../pages/pageContracts.js"
+import { buildSemanticOutline } from "./semanticOutline.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
 const PLANNING_TIMEOUT_MS = 10000
@@ -28,30 +29,8 @@ function slug(value, fallback) {
   return safeString(value, fallback).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || fallback
 }
 
-function designOutlinePages(designs) {
-  const safeDesigns = Array.isArray(designs) ? designs : []
-  return safeDesigns.map((d, i) => {
-    const name = safeString(d && d.name, "Design " + (i + 1))
-    return {
-      id: "design-" + slug(name, String(i + 1)),
-      title: name,
-      purpose: "design:" + name,
-      covers: [name],
-    }
-  })
-}
-
-function fallbackOutline({ garmentType, designs }) {
-  return {
-    pages: [
-      {
-        id: "overview",
-        title: safeString(garmentType, "Garment") + " Overview",
-        purpose: "overview",
-      },
-      ...designOutlinePages(designs),
-    ],
-  }
+function fallbackOutline({ garmentType, parts, designs }) {
+  return buildSemanticOutline({ garmentType, parts, designs })
 }
 
 export function fallbackDocumentOutline(context = {}) {
@@ -75,6 +54,10 @@ function normalizeOutline(raw, context) {
         // page shows hood pieces, not the whole BOM) - consumed by
         // interpretPlan.js's effectivePartsForPage. Omitted/empty means "all".
         pieces: Array.isArray(page.pieces) ? page.pieces.filter((p) => typeof p === "string" && p.trim()) : undefined,
+        system: safeString(page.system, "") || undefined,
+        objective: safeString(page.objective, "") || undefined,
+        views: Array.isArray(page.views) ? page.views.filter((view) => typeof view === "string" && view.trim()) : undefined,
+        briefs: Array.isArray(page.briefs) ? page.briefs.filter((brief) => brief && typeof brief === "object") : undefined,
       }
     })
   return pages.length > 0 ? { pages } : fallback
@@ -92,17 +75,17 @@ export async function planDocumentOutline({ garmentType, parts, designs, lang = 
   const context = { garmentType, parts, designs, lang }
   const instructions =
     "Sos director de arte de fichas tecnicas textiles, pensando como un disenador tecnico real. Decidi que paginas necesita este documento respondiendo, en orden, las preguntas que un disenador se hace:\n" +
-    "1. ¿Que merece pagina propia? La portada (cover) identifica el estilo de un vistazo; una pagina de estructura muestra la prenda completa con su BOM; cada diseno discreto (bordado, parche, etiqueta, print) tiene SU pagina; forros/vistas abiertas o la etiqueta solo si aplican de verdad.\n" +
-    "2. ¿Que no se repite nunca? El BOM completo aparece UNA sola vez (overview/structure). Una pagina de detalle lista solo sus 'pieces'. Los datos de un diseno viven solo en su pagina.\n" +
-    "3. ¿Que agrupo? Piezas relacionadas que un ilustrador necesita ver juntas (ej. capucha+cordon+ojales) comparten pagina - no una pagina generica por pieza.\n\n" +
+    "1. ¿Que merece pagina propia? La portada identifica el estilo; las piezas se dividen por sistemas constructivos con objetivos distintos; cada diseno discreto tiene SU pagina.\n" +
+    "2. ¿Que no se repite nunca? Cada id de pieza activa debe aparecer exactamente una vez entre las paginas estructurales. NO concentres un BOM grande en una pagina general si puede dividirse con sentido. Los datos de un diseno viven solo en su pagina.\n" +
+    "3. ¿Que agrupo? Piezas que la fabrica monta juntas y que el ilustrador necesita ver juntas (cuerpo, capucha/cuello, mangas/punos, cierres/bolsillos, interior, accesorios). Maximo 8 ids por pagina; si un sistema excede el limite, dividilo en subobjetivos coherentes.\n\n" +
     "Prenda: " + safeString(garmentType, "custom") + "\n" +
     "Piezas conocidas (cada una con su id): " + JSON.stringify(parts || []) + "\n" +
     "Disenos conocidos: " + JSON.stringify(designs || []) + "\n" +
     "Idioma: " + lang + "\n\n" +
-    "Para cada pagina indicá \"pieces\": los ids (de 'Piezas conocidas') que esa pagina cubre - la estructura general puede listar todas; una pagina de detalle solo las suyas.\n" +
+    "Para cada pagina estructural indica \"pieces\": los ids que cubre, \"objective\": la mision tecnica y \"views\": las vistas necesarias. Cada id debe aparecer exactamente una vez.\n" +
     "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
-    '{"pages":[{"id":"overview","title":"Overview","purpose":"overview","pieces":["id1","id2"],"covers":["opcional"]}]}\n' +
-    "Usa purpose como cover, overview, structure, lining, label, o design:<nombre exacto del diseno>. La primera pagina deberia ser la cover."
+    '{"pages":[{"id":"shell-body","title":"Cuerpo exterior","purpose":"structure:shell-body","objective":"Documentar paneles y uniones","pieces":["id1","id2"],"views":["Frente","Espalda"],"covers":["opcional"]}]}\n' +
+    "Usa purpose como cover, structure:<sistema>, lining, label, o design:<nombre exacto del diseno>. La primera pagina debe ser la cover."
 
   const raw = await deepseekChat({
     messages: [{ role: "user", content: instructions }],

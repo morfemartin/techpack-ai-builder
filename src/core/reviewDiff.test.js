@@ -62,12 +62,24 @@ describe("buildReviewFindings", () => {
     expect(sno.kind).toBe("missing")
   })
 
-  it("confirms every ACTIVE part against the page that carries the full BOM", () => {
+  it("confirms every ACTIVE part against a legacy unrestricted BOM page", () => {
     const body = findings.find((f) => f.topic === "part" && f.field === "body")
     expect(body.kind).toBe("confirmed")
     expect(body.foundOn).toBe("overview")
     // parts switched off are not reviewed
     expect(findings.find((f) => f.topic === "part" && f.field === "old")).toBeUndefined()
+  })
+
+  it("confirms parts against separate semantic BOM pages", () => {
+    const distributed = JSON.parse(JSON.stringify(document))
+    distributed.pages = distributed.pages.filter((page) => page.id !== "overview")
+    distributed.pages.splice(1, 0,
+      { id: "body-system", purpose: "structure:body", pieces: ["body"], regions: [{ type: "partsList" }] },
+      { id: "hood-system", purpose: "structure:hood", pieces: ["hood"], regions: [{ type: "partsList" }] }
+    )
+    const findings = buildReviewFindings(intake, distributed)
+    expect(findings.find((finding) => finding.field === "body").foundOn).toBe("body-system")
+    expect(findings.find((finding) => finding.field === "hood").foundOn).toBe("hood-system")
   })
 
   it("confirms a design with its own page and flags an uncovered design as unplaced", () => {
