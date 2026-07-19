@@ -5,6 +5,9 @@ import { normalizeSlotBriefs } from "./briefs.js"
 
 const COMPOSABLE = new Set(["illustration", "partsList", "colorSpecs", "embSpecs", "references", "documentIndex", "note"])
 const CHROME_TYPES = new Set(["header", "titleBar", "disclaimer", "spacer"])
+const MIN_ARTBOARD_WIDTH = 320 // 80mm: enough horizontal room for construction callouts
+const MIN_ARTBOARD_HEIGHT = 240 // 60mm: compact details may be shorter than full views
+const FILL_TABLE_OCCUPANCY = 0.68
 
 export const REGION_WIDTH_BANDS = {
   partsList: { min: GRID.span(2), max: GRID.span(4) },
@@ -72,10 +75,16 @@ function candidate(mode, ast, illustration, dataBoxes, dimensions, pageCount = 1
       : [{ width: 0, height: 0, slots: 0 }]
   const overflow = dataBoxes.reduce((sum, item) => sum + Math.max(0, item.measure.min - item.height), 0) + Math.max(0, Number(dimensions.groupOverflow) || 0)
   const complete = overflow === 0
-  const slotValid = slotBoxes.every((slot) => slot.width >= 240 && slot.height >= 240)
-  const smallestIllustrationArea = Math.min(...slotBoxes.map((slot) => slot.width * slot.height))
+  const slotAreas = slotBoxes.map((slot) => slot.width * slot.height)
+  const slotValid = slotBoxes.every((slot) => slot.width >= MIN_ARTBOARD_WIDTH && slot.height >= MIN_ARTBOARD_HEIGHT)
+  const smallestIllustrationArea = Math.min(...slotAreas)
+  const largestIllustrationArea = Math.max(...slotAreas)
+  const illustrationBalance = largestIllustrationArea > 0 ? smallestIllustrationArea / largestIllustrationArea : 0
+  const balancedIllustrationArea = smallestIllustrationArea * (0.7 + 0.3 * illustrationBalance)
+  const unusedPageArea = Math.max(0, Number(dimensions.unusedPageArea) || 0)
+  const productiveIllustrationScore = balancedIllustrationArea - unusedPageArea * 0.25
   const illustrationArea = slotBoxes.reduce((sum, slot) => sum + slot.width * slot.height * (slot.slots || 1), 0)
-  const wastedDataArea = dataBoxes.reduce((sum, item) => sum + item.width * Math.max(0, item.height - item.measure.natural), 0)
+  const wastedDataArea = dataBoxes.reduce((sum, item) => sum + (item.fillsRows ? 0 : item.width * Math.max(0, item.height - item.measure.natural)), 0)
   return {
     mode,
     ast,
@@ -85,6 +94,10 @@ function candidate(mode, ast, illustration, dataBoxes, dimensions, pageCount = 1
     slotWidth: Math.min(...slotBoxes.map((slot) => slot.width)),
     slotHeight: Math.min(...slotBoxes.map((slot) => slot.height)),
     smallestIllustrationArea,
+    illustrationBalance,
+    balancedIllustrationArea,
+    unusedPageArea,
+    productiveIllustrationScore,
     illustrationArea,
     wastedDataArea,
     overflow,
@@ -122,7 +135,14 @@ function heroRailCandidate(page, ctx, illustration, data, width, height, dataLef
   const railWidth = GRID.span(railSpan)
   const measuredBoxes = data.map((region) => {
     const measure = measured(region, page, ctx, railWidth)
-    return { region, measure, width: railWidth, height: measure.natural }
+    const fillsRows = region.type === "partsList" && measure.natural <= height && measure.natural / height >= FILL_TABLE_OCCUPANCY
+    return {
+      region: fillsRows ? { ...region, _fillRows: true } : region,
+      measure,
+      width: railWidth,
+      height: fillsRows ? height : measure.natural,
+      fillsRows,
+    }
   })
   const boxes = fitColumnBoxes(measuredBoxes, height)
   const railHeight = boxes.reduce((sum, item) => sum + item.height, 0) + GRID.verticalGap * Math.max(0, boxes.length - 1)
@@ -130,7 +150,12 @@ function heroRailCandidate(page, ctx, illustration, data, width, height, dataLef
   const rail = groupNode("column", boxes.map((item) => regionNode(item.region, item.width, item.height)), { width: railWidth, height: Math.min(height, railHeight), align: "start" })
   const hero = regionNode(illustration, heroWidth, height)
   const children = dataLeft ? [rail, hero] : [hero, rail]
-  return candidate(data.some((r) => r.type === "partsList") ? "bom-hero" : "hero-rail", groupNode("row", children, { width, height }), illustration, boxes, { widths: children.map((item) => item.width), railHeight, groupOverflow: Math.max(0, railMinHeight - height) })
+  return candidate(data.some((r) => r.type === "partsList") ? "bom-hero" : "hero-rail", groupNode("row", children, { width, height }), illustration, boxes, {
+    widths: children.map((item) => item.width),
+    railHeight,
+    unusedPageArea: railWidth * Math.max(0, height - railHeight),
+    groupOverflow: Math.max(0, railMinHeight - height),
+  })
 }
 
 function singleSlotRegion(illustration, briefs, index) {
@@ -215,7 +240,10 @@ function multiColumnCandidate(page, ctx, illustration, data, width, height, data
   const hero = regionNode(illustration, heroWidth, height)
   const dataNodes = boxes.map((item) => regionNode(item.region, item.width, item.height))
   const children = dataLeft ? [...dataNodes, hero] : [hero, ...dataNodes]
-  return candidate("hero-data-columns", groupNode("row", children, { width, height, align: "start" }), illustration, boxes, { widths: children.map((item) => item.width) })
+  return candidate("hero-data-columns", groupNode("row", children, { width, height, align: "start" }), illustration, boxes, {
+    widths: children.map((item) => item.width),
+    unusedPageArea: boxes.reduce((sum, item) => sum + item.width * Math.max(0, height - item.height), 0),
+  })
 }
 
 function bottomBandCandidate(page, ctx, illustration, data, width, height) {
@@ -234,9 +262,12 @@ function bottomBandCandidate(page, ctx, illustration, data, width, height) {
 }
 
 function compareCandidates(a, b) {
-  if (a.complete !== b.complete) return a.complete ? -1 : 1
+  if (a.valid !== b.valid) return a.valid ? -1 : 1
   if (a.slotValid !== b.slotValid) return a.slotValid ? -1 : 1
+  if (a.complete !== b.complete) return a.complete ? -1 : 1
   if (a.overflow !== b.overflow) return a.overflow - b.overflow
+  if (a.productiveIllustrationScore !== b.productiveIllustrationScore) return b.productiveIllustrationScore - a.productiveIllustrationScore
+  if (a.balancedIllustrationArea !== b.balancedIllustrationArea) return b.balancedIllustrationArea - a.balancedIllustrationArea
   if (a.smallestIllustrationArea !== b.smallestIllustrationArea) return b.smallestIllustrationArea - a.smallestIllustrationArea
   if (a.illustrationArea !== b.illustrationArea) return b.illustrationArea - a.illustrationArea
   if (a.wastedDataArea !== b.wastedDataArea) return a.wastedDataArea - b.wastedDataArea
@@ -252,6 +283,10 @@ function summarize(candidate) {
     slotWidth: Math.round(candidate.slotWidth),
     slotHeight: Math.round(candidate.slotHeight),
     smallestIllustrationArea: Math.round(candidate.smallestIllustrationArea),
+    illustrationBalance: Number(candidate.illustrationBalance.toFixed(3)),
+    balancedIllustrationArea: Math.round(candidate.balancedIllustrationArea),
+    unusedPageArea: Math.round(candidate.unusedPageArea),
+    productiveIllustrationScore: Math.round(candidate.productiveIllustrationScore),
     illustrationArea: Math.round(candidate.illustrationArea),
     wastedDataArea: Math.round(candidate.wastedDataArea),
     overflow: Math.round(candidate.overflow),

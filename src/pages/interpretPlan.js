@@ -353,6 +353,7 @@ function leafForRegion(region, page, ctx) {
           txParts: txData && txData.parts,
           labels: { spec: t.sp, detail: t.dt },
           compact: true,
+          fill: !!region._fillRows,
           startIndex: (ctx && ctx.partsStartIndex) || 0,
         }))
       }
@@ -459,12 +460,12 @@ export function interpretPagePlan(page, ctx) {
   // absorbers, not arbitrary heights for data blocks - a two-row table can no
   // longer be stretched into a half-page band of white.
   const measures = normalized.regions.map((r) => measureNode(r, normalized, pageCtx, CONTENT_W))
-  const hasAbsorber = measures.some((m) => m.canAbsorb)
+  const hasAbsorber = measures.some((m, index) => m.canAbsorb || normalized.regions[index]._fillRows)
   const regions = normalized.regions.map((region, i) => {
     const m = measures[i]
     let _sizing
     if (FIXED_BASIS[region.type]) _sizing = { basis: FIXED_BASIS[region.type], grow: 0, shrink: 0 }
-    else if (m.canAbsorb) _sizing = { grow: grows[i], min: m.min }
+    else if (m.canAbsorb || region._fillRows) _sizing = { grow: Math.max(1, grows[i]), min: m.min }
     else _sizing = { basis: m.natural || 0, grow: 0, shrink: 0, min: m.min }
     return { ...region, grow: grows[i], _sizing }
   })
@@ -529,6 +530,20 @@ function measuredPartsCapacity(parts, pageCtx, width, height) {
   const partLabels = garment && garment.partLabels ? garment.partLabels[lang] || garment.partLabels.ES || {} : {}
   const txParts = pageCtx && pageCtx.txData && pageCtx.txData.parts
   return partsCapacityForHeight({ parts, partLabels, txParts, width: width || GRID.span(3) }, height)
+}
+
+function partsContinuationPage(page, continuation) {
+  return {
+    id: page.id + "-cont-" + continuation,
+    title: (page.title || "") + " (cont.)",
+    purpose: page.purpose,
+    regions: [
+      { type: "header", weight: 8 },
+      { type: "titleBar", weight: 5 },
+      { type: "partsList", weight: 79, _fillRows: true },
+      { type: "disclaimer", weight: 8 },
+    ],
+  }
 }
 
 function colorCapacity(height) {
@@ -671,31 +686,42 @@ export function buildPlannedPages(plan, ctx, opts) {
     // row height); the parts list is the one place row height is fixed for
     // readability, so it's the one that paginates instead.
     const cap = Math.max(1, firstPartsCapacity)
-    const cappedCtx = { ...baseCtx, parts: effective.slice(0, cap), partsStartIndex: 0 }
+    const continuationProbePage = partsContinuationPage(page, 1)
+    const continuationProbe = resolvedTreeFor(continuationProbePage, { ...baseCtx, parts: effective, partsStartIndex: 0 })
+    const continuationLeaf = findPartsListLeaf(continuationProbe)
+    const continuationCapacity = Math.max(1, measuredPartsCapacity(
+      effective,
+      baseCtx,
+      continuationLeaf && continuationLeaf.width,
+      continuationLeaf ? availableTableHeight(continuationLeaf) : H
+    ))
+
+    // Capacity is a ceiling, not a target. Choose the smallest page count that
+    // can hold every row, then distribute rows as evenly as those ceilings
+    // allow. A 40-row BOM therefore reads 20/20 instead of a cramped 29/11.
+    let pageCount = 2
+    let firstChunkSize = 1
+    while (true) {
+      firstChunkSize = Math.min(cap, Math.ceil(effective.length / pageCount))
+      const remaining = effective.length - firstChunkSize
+      if (remaining <= (pageCount - 1) * continuationCapacity) break
+      pageCount++
+    }
+
+    const cappedCtx = { ...baseCtx, parts: effective.slice(0, firstChunkSize), partsStartIndex: 0 }
     addDescriptor({ ...page, pieces: undefined }, cappedCtx, i)
 
-    let rest = effective.slice(cap)
-    let startIndex = cap
+    let rest = effective.slice(firstChunkSize)
+    let startIndex = firstChunkSize
     let contN = 1
     while (rest.length > 0) {
-      const contPage = {
-        id: page.id + "-cont-" + contN,
-        title: (page.title || "") + " (cont.)",
-        purpose: page.purpose,
-        regions: [
-          { type: "header", weight: 8 },
-          { type: "titleBar", weight: 5 },
-          { type: "partsList", weight: 79 },
-          { type: "disclaimer", weight: 8 },
-        ],
-      }
-      const probe = resolvedTreeFor(contPage, { ...baseCtx, parts: rest, partsStartIndex: startIndex })
-      const contLeaf = findPartsListLeaf(probe)
-      const contCap = Math.max(1, measuredPartsCapacity(rest, baseCtx, contLeaf && contLeaf.width, contLeaf ? availableTableHeight(contLeaf) : H))
-      const chunk = rest.slice(0, contCap)
+      const contPage = partsContinuationPage(page, contN)
+      const remainingPages = pageCount - contN
+      const chunkSize = Math.min(continuationCapacity, Math.ceil(rest.length / remainingPages))
+      const chunk = rest.slice(0, chunkSize)
       addDescriptor(contPage, { ...baseCtx, parts: chunk, partsStartIndex: startIndex }, i)
-      rest = rest.slice(contCap)
-      startIndex += contCap
+      rest = rest.slice(chunkSize)
+      startIndex += chunkSize
       contN++
     }
   })

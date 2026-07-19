@@ -90,11 +90,11 @@ function renderFixture(fx) {
       if (decision.mode === "unchanged") return
       const widths = Array.isArray(decision.widths) ? " · widths " + decision.widths.map((value) => Math.round(value)).join("/") + "px" : ""
       diagnostics.push(
-        `composition physical page ${index + 1}: ${decision.mode} · complete ${decision.complete ? "yes" : "NO"} · overflow ${Math.round(decision.overflow || 0)}px · smallest artboard ${Math.round(decision.smallestIllustrationArea || 0)}px² · illustration total ${Math.round(decision.illustrationArea || 0)}px²${widths}`
+        `composition physical page ${index + 1}: ${decision.mode} · complete ${decision.complete ? "yes" : "NO"} · overflow ${Math.round(decision.overflow || 0)}px · smallest artboard ${Math.round(decision.smallestIllustrationArea || 0)}px² · unused page ${Math.round(decision.unusedPageArea || 0)}px² · illustration total ${Math.round(decision.illustrationArea || 0)}px²${widths}`
       )
       diagnostics.push("reason: " + decision.reason)
       ;(decision.candidates || []).forEach((candidate) => {
-        diagnostics.push(`candidate ${candidate.mode}: ${candidate.valid ? "VALID" : "rejected"} · complete ${candidate.complete ? "yes" : "NO"} · slots ${candidate.slotValid ? "yes" : "NO"} · overflow ${candidate.overflow || 0}px · smallest artboard ${candidate.smallestIllustrationArea || 0}px² · art total ${candidate.illustrationArea || 0}px² · data waste ${candidate.wastedDataArea || 0}px²`)
+        diagnostics.push(`candidate ${candidate.mode}: ${candidate.valid ? "VALID" : "rejected"} · complete ${candidate.complete ? "yes" : "NO"} · slots ${candidate.slotValid ? "yes" : "NO"} · overflow ${candidate.overflow || 0}px · smallest artboard ${candidate.smallestIllustrationArea || 0}px² · unused page ${candidate.unusedPageArea || 0}px² · art total ${candidate.illustrationArea || 0}px² · data waste ${candidate.wastedDataArea || 0}px²`)
       })
     })
     pagesHtml = pages.map(pageFigure).join("")

@@ -38,6 +38,17 @@ describe("Layout Lab closure fixtures", () => {
     const pages = buildPlannedPages(item.plan, ctxForFixture(item), { documentMode: "illustration-handoff" })
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[1].name).toContain("cont")
+    expect(pages[0].compositionDecision.valid).toBe(true)
+    expect(pages[0].compositionDecision.slotWidth).toBeGreaterThanOrEqual(320)
+    const rowCounts = []
+    pages.forEach((page) => {
+      const bom = page.svg.match(/<g id='TECH_DATA__BOM'>(.*?)<\/g>/s)[1]
+      const rows = [...bom.matchAll(/<rect x='[\d.]+' y='([\d.]+)' width='[\d.]+' height='([\d.]+)' fill='#(?:FFFFFF|F7F7F8)'/g)]
+      rowCounts.push(rows.length)
+      const last = rows[rows.length - 1]
+      expect(Number(last[1]) + Number(last[2])).toBe(768)
+    })
+    expect(rowCounts).toEqual([20, 20])
   })
 
   it("contract-repair fixture becomes clean and records repairs", () => {
@@ -74,20 +85,30 @@ describe("Layout Lab closure fixtures", () => {
       const item = fixture("M-bom-" + count)
       return buildPlannedPages(item.plan, ctxForFixture(item), { documentMode: "illustration-handoff" })
     })
-    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["data-slot-mosaic", "data-slot-mosaic", "bom-hero", "bom-hero"])
+    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["hero-bottom-band", "hero-bottom-band", "bom-hero", "bom-hero"])
     expect(results.every((pages) => pages[0].compositionDecision.complete)).toBe(true)
     expect(results[3]).toHaveLength(1)
     expect(results[2][0].compositionDecision.slotWidth).toBe(414)
     expect(results[2][0].compositionDecision.slotHeight).toBe(608)
     expect(results[2][0].compositionDecision.widths).toEqual([272, 840])
     expect(results[2][0].compositionDecision.smallestIllustrationArea).toBe(414 * 608)
+    const bomMarkup = results[2][0].svg.match(/<g id='TECH_DATA__BOM'>(.*?)<\/g>/s)[1]
+    const bomRows = [...bomMarkup.matchAll(/<rect x='[\d.]+' y='([\d.]+)' width='[\d.]+' height='([\d.]+)' fill='#(?:FFFFFF|F7F7F8)'/g)]
+    const lastBomRow = bomRows[bomRows.length - 1]
+    expect(Number(lastBomRow[1]) + Number(lastBomRow[2])).toBe(768)
     expect(results[3][0].compositionDecision.slotWidth).toBeGreaterThanOrEqual(240)
     expect(results[3][0].compositionDecision.slotHeight).toBeGreaterThanOrEqual(240)
     expect(results[3][0].compositionDecision.widths).toEqual([414, 698])
 
+    const fullDocument = fixture("H-full-document")
+    const overview = buildPlannedPages(fullDocument.plan, ctxForFixture(fullDocument), { documentMode: "illustration-handoff" })[0]
+    expect(overview.compositionDecision.mode).toBe("hero-bottom-band")
+    expect(overview.compositionDecision.unusedPageArea).toBe(0)
+
     const short = fixture("B-split-stack")
     const shortPage = buildPlannedPages(short.plan, ctxForFixture(short), { documentMode: "illustration-handoff" })[0]
-    expect(shortPage.compositionDecision.mode).toBe("data-slot-mosaic")
+    expect(shortPage.compositionDecision.mode).toBe("hero-bottom-band")
+    expect(shortPage.compositionDecision.unusedPageArea).toBe(0)
     expect(shortPage.compositionDecision.illustrationArea).toBeGreaterThan(600000)
 
     const fourViews = fixture("E-illustration-grid")

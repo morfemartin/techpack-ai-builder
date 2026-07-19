@@ -60,7 +60,7 @@ describe("Layout Engine v3 candidate composition", () => {
     const railTypes = result.ast.children[1].children.map((node) => node.region.type)
     expect(result.decision.mode).toBe("hero-rail")
     expect(railTypes).toEqual(["embSpecs", "colorSpecs"])
-    expect(result.decision.slotWidth).toBeGreaterThanOrEqual(240)
+    expect(result.decision.slotWidth).toBeGreaterThanOrEqual(320)
     expect(result.decision.slotHeight).toBeGreaterThanOrEqual(240)
   })
 

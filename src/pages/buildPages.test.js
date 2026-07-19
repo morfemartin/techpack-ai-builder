@@ -143,6 +143,19 @@ describe("shared metrics adoption (P1 alignment)", () => {
     expect(svg).toContain(">10</text>")
   })
 
+  it("distributes remaining rail height across rows when the compositor requests a filled table", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 272, height: 100 },
+      {
+        parts: [{ id: "a", val: "One", on: true }, { id: "b", val: "Two", on: true }],
+        compact: true,
+        fill: true,
+      }
+    )
+    expect(svg).toContain("y='16' width='272' height='42'")
+    expect(svg).toContain("y='58' width='272' height='42'")
+  })
+
   it("svgHeader lays both rows on one grid: every bottom-row edge lands on a top-row edge, both rows fill the page", () => {
     const hdr2 = { brand: "B", season: "S", sno: "1", cat: "C", fab: "F", fac: "X", ind: "I", outd: "O", pname: "P" }
     const svg = buildPage1("ES", hdr2, capGarment.defaultParts.slice(0, 2), null, null, capGarment)

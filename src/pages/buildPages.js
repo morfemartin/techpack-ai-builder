@@ -9,7 +9,7 @@ import { briefLines } from "./briefs.js"
 import { partsTableLayout } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, startIndex } = {}) {
+export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, fill, startIndex } = {}) {
   var safeParts = Array.isArray(parts) ? parts.filter(function (p) { return p && p.on !== false }) : []
   var pn = partLabels || {}
   var txP = Array.isArray(txParts) ? txParts : null
@@ -25,6 +25,9 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   var tableLayout = compact ? partsTableLayout({ parts: safeParts, partLabels: pn, txParts: txP, width: box.width }) : null
   var measuredRows = tableLayout ? tableLayout.rows : null
   var columns = tableLayout ? tableLayout.columns : PARTS_COL
+  var rowExtra = fill && tableLayout && measuredRows.length > 0
+    ? Math.max(0, box.height - tableLayout.height) / measuredRows.length
+    : 0
 
   // Header and data rows share the SAME content-aware column template. The
   // chosen value stop minimizes wrapped height for this table; dividers and
@@ -48,7 +51,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
 
   var partRows = safeParts.map((p, i) =>
     leaf({
-      ...(compact ? { basis: measuredRows[i].height, grow: 0, min: measuredRows[i].height } : { grow: 1, min: 16 }),
+      ...(compact ? { basis: measuredRows[i].height + rowExtra, grow: 0, min: measuredRows[i].height } : { grow: 1, min: 16 }),
       render: (b) => {
         var bg = i % 2 === 0 ? palette.white.hex : "#F7F7F8"
         var metric = compact ? measuredRows[i] : null

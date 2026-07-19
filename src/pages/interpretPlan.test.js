@@ -370,6 +370,7 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[0].name).toBe("overview")
     expect(pages[1].name).toContain("cont")
+    expect(pages.map((page) => (page.svg.match(/>Valor \d+</g) || []).length)).toEqual([20, 20])
   })
 
   it("numbers continuation rows continuing from where the first page left off (no restart, no gap)", () => {
