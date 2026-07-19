@@ -553,7 +553,7 @@ export const FIXTURES = [
     id: "O-complete-semantic-project",
     dataset: "alpineParkaBenchmark",
     title: "O · Proyecto completo · Parka alpina modular 3L",
-    tests: "40 piezas unicas, seis sistemas constructivos, tres aplicaciones, portada-indice, paginacion fisica y briefs por vista.",
+    tests: "40 piezas unicas, seis sistemas constructivos, tres aplicaciones, portada e indice separados, paginacion fisica y briefs por vista.",
     expected: "El indice refleja todas las paginas; cada pieza aparece exactamente una vez en una pagina con objetivo propio; ningun sistema supera 8 piezas; los briefs viven dentro del artboard y solo muestran cotas confirmadas.",
     includeIndex: true,
     semanticAudit: true,

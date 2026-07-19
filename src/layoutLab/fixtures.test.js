@@ -49,7 +49,8 @@ describe("Layout Lab closure fixtures", () => {
       const last = rows[rows.length - 1]
       expect(Number(last[1]) + Number(last[2])).toBe(768)
     })
-    expect(rowCounts).toEqual([20, 20])
+    expect(rowCounts.reduce((sum, count) => sum + count, 0)).toBe(40)
+    pages.forEach((page) => expect(page.svg).toContain("id='ARTWORK'"))
   })
 
   it("contract-repair fixture becomes clean and records repairs", () => {
@@ -90,12 +91,15 @@ describe("Layout Lab closure fixtures", () => {
     expect(audit.covered).toHaveLength(40)
 
     const pages = buildPlannedPages(item.plan, ctx, { includeIndex: true, documentMode: "illustration-handoff" })
-    expect(pages).toHaveLength(10)
-    expect(pages.map((page) => page.pageNumber)).toEqual(Array.from({ length: 10 }, (_, index) => index + 1))
-    expect(pages.every((page) => page.totalPages === 10)).toBe(true)
-    expect(pages[0].svg).toContain("INDICE")
-    expect(pages[0].svg).toContain("Sistema 01")
-    expect(pages[0].svg).toContain("D1")
+    expect(pages).toHaveLength(11)
+    expect(pages.map((page) => page.pageNumber)).toEqual(Array.from({ length: 11 }, (_, index) => index + 1))
+    expect(pages.every((page) => page.totalPages === 11)).toBe(true)
+    expect(pages[0].svg).not.toContain("INDICE DE PRODUCCION")
+    expect(pages[1].purpose).toBe("index")
+    expect(pages[1].svg).toContain("INDICE")
+    expect(pages[1].svg).toContain("Sistema 01")
+    expect(pages[1].svg).toContain("D1")
+    expect(pages[1].svg).toContain("QUE CONTIENE / PARA QUE SIRVE")
 
     const structurePages = pages.filter((page) => page.purpose.startsWith("structure:"))
     expect(structurePages).toHaveLength(6)
@@ -162,9 +166,12 @@ describe("Layout Lab closure fixtures", () => {
     expect(decision.valid).toBe(false)
     expect(decision.candidates.every((candidate) => !candidate.valid)).toBe(true)
     const pages = buildPlannedPages(denseStops.plan, ctxForFixture(denseStops), { documentMode: "illustration-handoff" })
-    expect(pages).toHaveLength(2)
+    expect(pages).toHaveLength(3)
     const renderedStops = pages.flatMap((page) => [...page.svg.matchAll(/Stop (\d+):/g)].map((match) => Number(match[1])))
     expect(renderedStops).toEqual(Array.from({ length: 30 }, (_, index) => index + 1))
+    expect(pages[0].svg).toContain("id='TECH_DATA__COLORS'")
+    expect(pages[0].svg).not.toContain("id='TECH_DATA__EMBROIDERY'")
+    pages.slice(1).forEach((page) => expect(page.svg).toContain("id='ARTWORK'"))
     pages.forEach((page) => {
       const contentTextY = [...page.svg.matchAll(/<text[^>]* y='([\d.]+)'[^>]*>([^<]*)<\/text>/g)]
         .filter((match) => !/^P\. /.test(match[2]) && !/^V\d+\//.test(match[2]) && !match[2].includes("TODOS LOS DERECHOS"))

@@ -370,7 +370,8 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[0].name).toBe("overview")
     expect(pages[1].name).toContain("cont")
-    expect(pages.map((page) => (page.svg.match(/>Valor \d+</g) || []).length)).toEqual([20, 20])
+    expect(pages.reduce((total, page) => total + (page.svg.match(/>Valor \d+</g) || []).length, 0)).toBe(40)
+    pages.forEach((page) => expect(page.svg).toContain("id='ARTWORK'"))
   })
 
   it("numbers continuation rows continuing from where the first page left off (no restart, no gap)", () => {
@@ -424,7 +425,15 @@ describe("buildPlannedPages design-table pagination", () => {
     const pages = buildPlannedPages(plan, ctx)
     const allSvg = pages.map((item) => item.svg).join("\n")
     expect(pages.length).toBeGreaterThan(1)
-    expect(pages[1].name).toContain("data_cont")
+    expect(pages[0].name).toContain("color_placement")
+    expect(pages.slice(1).every((page) => page.name.includes("embroidery_execution"))).toBe(true)
+    expect(pages[0].svg).toContain("id='TECH_DATA__COLORS'")
+    expect(pages[0].svg).not.toContain("id='TECH_DATA__EMBROIDERY'")
+    pages.slice(1).forEach((page) => {
+      expect(page.svg).toContain("id='TECH_DATA__EMBROIDERY'")
+      expect(page.svg).not.toContain("id='TECH_DATA__COLORS'")
+      expect(page.svg).toContain("id='ARTWORK'")
+    })
     colors.forEach((color) => {
       const compact = allSvg.split(">" + color.name + "  " + color.hex + "<").length - 1
       const expanded = allSvg.split(">" + color.name + "<").length - 1
@@ -454,17 +463,21 @@ describe("Layout Engine v3 document assembly", () => {
 
   it("renders A4 handoff pages in two passes with index and stable numbering", () => {
     const pages = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })
-    expect(pages).toHaveLength(2)
-    expect(pages.map((page) => [page.pageNumber, page.totalPages])).toEqual([[1, 2], [2, 2]])
-    expect(pages[0].svg).toContain("INDICE DE PRODUCCION")
-    expect(pages[0].svg).toContain("P. 01 / 02")
-    expect(pages[1].svg).toContain("P. 02 / 02")
-    expect(pages[1].svg).toContain("V1/2026 · NO APROBADA PARA PRODUCCION")
-    expect(pages[1].svg).toContain("TODOS LOS DERECHOS · Morfe")
+    expect(pages).toHaveLength(3)
+    expect(pages.map((page) => [page.pageNumber, page.totalPages])).toEqual([[1, 3], [2, 3], [3, 3]])
+    expect(pages[0].svg).not.toContain("INDICE DE PRODUCCION")
+    expect(pages[1].purpose).toBe("index")
+    expect(pages[1].svg).toContain("INDICE DE PRODUCCION")
+    expect(pages[1].svg).toContain("QUE CONTIENE / PARA QUE SIRVE")
+    expect(pages[1].svg).toContain("P. 02 / 03")
+    expect(pages[2].svg).toContain("P. 03 / 03")
+    expect(pages[2].svg).toContain("V1/2026 · NO APROBADA PARA PRODUCCION")
+    expect(pages[2].svg).toContain("TODOS LOS DERECHOS · Morfe")
+    pages.forEach((page, index) => expect(page.svg).toContain(">" + String(index + 1).padStart(2, "0") + "</text>"))
   })
 
   it("emits editable references and per-slot instructions nested inside artwork", () => {
-    const page = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })[1]
+    const page = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })[2]
     for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS__V1", "REFERENCES", "PAGE_CHROME__HEADER"]) {
       expect(page.svg).toContain("id='" + id + "'")
     }
@@ -492,11 +505,12 @@ describe("Layout Engine v3 document assembly", () => {
     expect(normalized.pages[0].regions[0].briefs[0].mustMark).toEqual(["zipper"])
   })
 
-  it("inserts a cover-index when a fallback plan omitted the cover", () => {
+  it("inserts separate cover and index pages when the plan omitted the cover", () => {
     const pages = buildPlannedPages({ pages: [plan.pages[1]] }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
     expect(pages[0].purpose).toBe("cover")
-    expect(pages[0].svg).toContain("INDICE DE PRODUCCION")
-    expect(pages[1].pageNumber).toBe(2)
-    expect(pages[1].totalPages).toBe(2)
+    expect(pages[1].purpose).toBe("index")
+    expect(pages[1].svg).toContain("INDICE DE PRODUCCION")
+    expect(pages[2].pageNumber).toBe(3)
+    expect(pages[2].totalPages).toBe(3)
   })
 })

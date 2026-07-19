@@ -26,6 +26,14 @@ import { hasEmbSpecs } from "../core/helpers.js"
 import { partitionPartsBySystem } from "../core/semanticOutline.js"
 
 export const CONTRACTS = {
+  index: {
+    mandatory: ["header", "titleBar", "documentIndex", "disclaimer"],
+    forbidden: ["illustration", "partsList", "colorSpecs", "embSpecs"],
+    priorityRank: { documentIndex: 3 },
+    illustrationShare: { min: 0, max: 0 },
+    minIllustrationHeight: 0,
+    dataSide: "left",
+  },
   cover: {
     mandatory: ["header", "titleBar", "illustration", "disclaimer"],
     forbidden: ["partsList", "colorSpecs", "embSpecs"],
@@ -76,7 +84,7 @@ export const CONTRACTS = {
   },
 }
 
-const SINGLETONS = new Set(["header", "titleBar", "disclaimer", "partsList", "colorSpecs", "embSpecs"])
+const SINGLETONS = new Set(["header", "titleBar", "disclaimer", "partsList", "colorSpecs", "embSpecs", "documentIndex"])
 
 export function purposeFamily(purpose) {
   if (!purpose || typeof purpose !== "string") return "structure"
@@ -245,6 +253,7 @@ export function repairPage(page, ctx) {
     partsList: { type: "partsList", weight: 30 },
     colorSpecs: { type: "colorSpecs", weight: 25 },
     embSpecs: { type: "embSpecs", weight: 25 },
+    documentIndex: { type: "documentIndex", weight: 80 },
     illustration: {
       type: "illustration",
       weight: 60,

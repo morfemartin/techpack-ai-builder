@@ -49,11 +49,15 @@ export function selectedDesign(page, ctx) {
 }
 
 export function documentIndexRows(entries, width) {
-  const titleWidth = Math.max(80, Number(width || 0) - 260)
+  const safeWidth = Math.max(320, Number(width || 0))
+  const titleWidth = safeWidth * 0.24
+  const descriptionWidth = safeWidth * 0.48
   return (Array.isArray(entries) ? entries : []).map((entry) => {
     const title = entry && (entry.title || entry.purpose || entry.name) || "Pagina"
     const lines = wrapLines(title, titleWidth, PRINT.minFont)
-    return { entry, lines, height: Math.max(GRID.baseline, lines.length * GRID.baseline) }
+    const descriptionLines = wrapLines(entry && entry.description || "Contenido tecnico de la seccion", descriptionWidth, PRINT.minFont)
+    const lineCount = Math.max(lines.length, descriptionLines.length)
+    return { entry, lines, descriptionLines, height: Math.max(GRID.baseline * 2, lineCount * GRID.baseline) }
   })
 }
 
@@ -130,7 +134,7 @@ export function measureRegion(region, page, ctx, width) {
 
   if (type === "documentIndex") {
     const entries = ctx && Array.isArray(ctx.documentIndex) ? ctx.documentIndex : []
-    const natural = GRID.baseline * 2 + documentIndexRows(entries, width).reduce((total, row) => total + row.height, 0)
+    const natural = GRID.baseline * 3 + documentIndexRows(entries, width).reduce((total, row) => total + row.height, 0)
     return { natural, min: natural, canAbsorb: false }
   }
 

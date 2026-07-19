@@ -31,6 +31,7 @@ describe("purposeFamily", () => {
     expect(purposeFamily("design:Chest Logo")).toBe("design")
     expect(purposeFamily("overview")).toBe("overview")
     expect(purposeFamily("cover")).toBe("cover")
+    expect(purposeFamily("index")).toBe("index")
     expect(purposeFamily("whatever")).toBe("structure")
   })
 })
@@ -247,7 +248,7 @@ describe("outline contract", () => {
 
 describe("CONTRACTS shape", () => {
   it("exposes a contract for every purpose family", () => {
-    for (const fam of ["cover", "overview", "structure", "lining", "label", "design"]) {
+    for (const fam of ["cover", "index", "overview", "structure", "lining", "label", "design"]) {
       expect(CONTRACTS[fam]).toBeTruthy()
       expect(Array.isArray(CONTRACTS[fam].mandatory)).toBe(true)
     }

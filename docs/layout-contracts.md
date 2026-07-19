@@ -172,7 +172,12 @@ the final technical artwork without reflowing the page.
 Uploaded graphics render under `REFERENCES` as `NO A ESCALA`. The final SVG uses
 named groups (`ARTWORK`, `TECH_DATA`, `ILLUSTRATOR_INSTRUCTIONS__V1`, `REFERENCES`,
 `PAGE_CHROME`) and a visible not-approved-for-production status. Document
-assembly paginates first, then creates the cover index and `P. XX / NN` footer.
+assembly paginates first, inserts a dedicated factory-facing index after the
+cover, then assigns the physical `P. XX / NN` numbering in a second pass. Every
+index row includes its page, purpose, receiving area and an empty control box.
+Dense embroidery separates color/placement from stitch execution, and every
+BOM continuation retains an artwork field; a page of enumerated rows without
+visual production context is never emitted.
 
 ---
 

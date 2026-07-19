@@ -247,20 +247,39 @@ function renderNote(box, text) {
 
 function renderDocumentIndex(box, entries) {
   const rows = documentIndexRows(entries, box.width)
+  const pageX = box.x + INSET
+  const titleX = box.x + 52
+  const descriptionX = box.x + box.width * 0.31
+  const roleX = box.x + box.width * 0.86
+  const checkX = box.x + box.width - 28
   let s = ""
   s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
   s += R(box.x, box.y, box.width, GRID.baseline, palette.blue.hex, palette.ink.hex, "0.8")
-  s += TX(box.x + INSET, box.y + GRID.baseline / 2, "INDICE DE PRODUCCION", PRINT.bodyFont, true, "start", palette.white.hex)
-  let rowTop = box.y + GRID.baseline * 2
-  rows.forEach(({ entry, lines, height }) => {
+  s += TX(pageX, box.y + GRID.baseline / 2, "INDICE DE PRODUCCION", PRINT.bodyFont, true, "start", palette.white.hex)
+  const headerY = box.y + GRID.baseline
+  s += R(box.x, headerY, box.width, GRID.baseline * 2, "#F0F1F3", palette.ink.hex, "0.5")
+  s += TX(pageX, headerY + GRID.baseline, "P.", PRINT.minFont, true, "start")
+  s += TX(titleX, headerY + GRID.baseline, "SECCION", PRINT.minFont, true, "start")
+  s += TX(descriptionX, headerY + GRID.baseline, "QUE CONTIENE / PARA QUE SIRVE", PRINT.minFont, true, "start")
+  s += TX(roleX, headerY + GRID.baseline, "AREA", PRINT.minFont, true, "start")
+  s += TX(checkX, headerY + GRID.baseline, "OK", PRINT.minFont, true, "middle")
+  let rowTop = box.y + GRID.baseline * 3
+  rows.forEach(({ entry, lines, descriptionLines, height }, rowIndex) => {
     const purpose = String(entry.purpose || "")
     const role = purpose.startsWith("design:") ? "APLICACION" : purpose === "lining" ? "INTERIOR" : purpose === "label" ? "ROTULADO" : "CONSTRUCCION"
     const centerY = rowTop + height / 2
-    s += TX(box.x + INSET, centerY, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
+    s += R(box.x, rowTop, box.width, height, rowIndex % 2 ? "#F7F7F8" : palette.white.hex, palette.ink.hex, "0.35")
+    s += TX(pageX, centerY, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
     lines.forEach((line, index) => {
-      s += TX(box.x + 52, rowTop + GRID.baseline * (index + 0.5), line, PRINT.minFont, true, "start")
+      const startY = centerY - (lines.length - 1) * GRID.baseline / 2
+      s += TX(titleX, startY + index * GRID.baseline, line, PRINT.minFont, true, "start")
     })
-    s += TX(box.x + box.width - INSET, centerY, role, PRINT.minFont, true, "end", palette.ink.hex)
+    descriptionLines.forEach((line, index) => {
+      const startY = centerY - (descriptionLines.length - 1) * GRID.baseline / 2
+      s += TX(descriptionX, startY + index * GRID.baseline, line, PRINT.minFont, false, "start")
+    })
+    s += TX(roleX, centerY, role, PRINT.minFont, true, "start", palette.ink.hex)
+    s += R(checkX - 8, centerY - 8, 16, 16, palette.white.hex, palette.ink.hex, "0.8")
     rowTop += height
   })
   return s
@@ -334,9 +353,11 @@ function leafForRegion(region, page, ctx) {
         // Bill/Bayer, not a centered <h1>. Left-alignment + the red anchor are
         // what read as "designed" versus the old centered bar.
         var title = page.title || page.purpose || ""
-        var sq = Math.min(box.height, 30)
+        var sq = box.height
+        var pageNumber = String((ctx && ctx.pageMeta && ctx.pageMeta.pageNumber) || "-").padStart(2, "0")
         var s = R(box.x, box.y, box.width, box.height, palette.blue.hex, palette.ink.hex, "0.8")
         s += R(box.x, box.y, sq, box.height, palette.red.hex, palette.red.hex, "0")
+        s += TX(box.x + sq / 2, box.y + box.height / 2, pageNumber, PRINT.minFont, true, "middle", palette.white.hex)
         s += TX(box.x + sq + INSET, box.y + box.height / 2, title, 12, true, "start", palette.white.hex, undefined, 0.6)
         return semanticGroup(region.type, s)
       }
@@ -548,14 +569,25 @@ function measuredPartsCapacity(parts, pageCtx, width, height) {
 }
 
 function partsContinuationPage(page, continuation) {
+  function keepVisualContext(regions) {
+    return (regions || []).flatMap((region) => {
+      if (region.type === "illustration") return [{ ...region }]
+      if (region.type !== "split") return []
+      return keepVisualContext(region.regions)
+    })
+  }
+  const artwork = keepVisualContext(page.regions)
+  if (artwork.length === 0) artwork.push({ type: "illustration", weight: 60, slots: 2, refs: ["Frente", "Espalda"] })
   return {
+    ...page,
     id: page.id + "-cont-" + continuation,
     title: (page.title || "") + " (cont.)",
     purpose: page.purpose,
     regions: [
       { type: "header", weight: 8 },
       { type: "titleBar", weight: 5 },
-      { type: "partsList", weight: 79, _fillRows: true },
+      ...artwork,
+      { type: "partsList", weight: 30, _fillRows: true },
       { type: "disclaimer", weight: 8 },
     ],
   }
@@ -612,6 +644,24 @@ function composingStopCapacity(page, pageCtx, colors, stopSeq, continuation) {
   return 1
 }
 
+function pageDescription(page) {
+  if (page && page.objective) return page.objective
+  const purpose = String(page && page.purpose || "")
+  if (purpose === "cover") return "Identificacion general del producto y estado del documento."
+  if (purpose === "index") return "Mapa de lectura, control y recepcion de las secciones de fabrica."
+  if (purpose.startsWith("design:")) return "Ubicacion, color, tecnica y ejecucion del aplique " + purpose.slice(7) + "."
+  if (purpose === "lining") return "Materiales, construccion y vistas del interior de la prenda."
+  if (purpose === "label") return "Ubicacion, contenido y especificacion de etiquetas y rotulos."
+  return "Piezas, construccion y vistas necesarias para fabricar esta seccion."
+}
+
+function pageHasRegion(page, type) {
+  function has(regions) {
+    return (regions || []).some((region) => region.type === type || (region.type === "split" && has(region.regions)))
+  }
+  return has(page && page.regions)
+}
+
 export function buildPlannedPages(plan, ctx, opts) {
   const mono = !!(opts && opts.mono)
   const documentMode = (opts && opts.documentMode) || (ctx && ctx.documentMode) || "fixture"
@@ -643,6 +693,17 @@ export function buildPlannedPages(plan, ctx, opts) {
   }
 
   normalized.pages.forEach((page, i) => {
+    // A BOM without a visual target is not a useful production page. Plans
+    // from fixtures, fallbacks or a weak model are repaired here as a final
+    // document-level invariant before measurement and pagination.
+    if (pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
+      const regions = page.regions.slice()
+      const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
+      regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, {
+        type: "illustration", weight: 60, slots: 2, refs: ["Frente", "Espalda"],
+      })
+      page = { ...page, regions }
+    }
     const firstPass = resolvedTreeFor(page, baseCtx)
     const partsLeaf = findPartsListLeaf(firstPass)
     const effective = effectivePartsForPage(allParts, page)
@@ -666,6 +727,34 @@ export function buildPlannedPages(plan, ctx, opts) {
       : tableEmbCap
     const colorOverflow = !!colorLeaf && colors.length > colorCap
     const embOverflow = !!embLeaf && stopSeq.length > firstEmbCap
+
+    if (embOverflow && colorLeaf && colors.length > 0) {
+      // Color/placement and a long stitch program are separate factory jobs.
+      // Keeping them on one sheet sacrifices the artwork to two competing
+      // tables, so the engine gives each objective its own visual page.
+      const colorPage = {
+        ...pageForDataSlice(page, true, false, 0),
+        id: page.id + "-color-placement",
+        title: (page.title || "") + " · Color y colocacion",
+      }
+      addDescriptor(colorPage, withDesignSlice(colorPage, baseCtx, colors, []), i)
+
+      let stopOffset = 0
+      let executionPage = 1
+      const stopCap = Math.max(1, continuationEmbCap)
+      while (stopOffset < stopSeq.length) {
+        const stopChunk = stopSeq.slice(stopOffset, stopOffset + stopCap)
+        const execution = {
+          ...pageForDataSlice(page, false, true, executionPage),
+          id: page.id + "-embroidery-execution-" + executionPage,
+          title: (page.title || "") + " · Ejecucion de bordado " + executionPage,
+        }
+        addDescriptor(execution, withDesignSlice(execution, baseCtx, [], stopChunk), i)
+        stopOffset += stopChunk.length
+        executionPage++
+      }
+      return
+    }
 
     if (colorOverflow || embOverflow) {
       let colorOffset = 0
@@ -743,7 +832,7 @@ export function buildPlannedPages(plan, ctx, opts) {
 
   if (includeIndex && !descriptors.some((descriptor) => descriptor.page.purpose === "cover")) {
     const coverPage = {
-      id: "cover-index",
+      id: "cover",
       title: (baseCtx.hdr && baseCtx.hdr.pname) || "Illustration Handoff",
       purpose: "cover",
       regions: [
@@ -753,7 +842,25 @@ export function buildPlannedPages(plan, ctx, opts) {
         { type: "disclaimer", weight: 1 },
       ],
     }
-    descriptors.unshift({ page: coverPage, pageCtx: baseCtx, sourceIndex: -1, name: "cover_index" })
+    descriptors.unshift({ page: coverPage, pageCtx: baseCtx, sourceIndex: -1, name: "cover" })
+  }
+
+  if (includeIndex) {
+    const coverIndex = descriptors.findIndex((descriptor) => descriptor.page.purpose === "cover")
+    const insertAt = coverIndex >= 0 ? coverIndex + 1 : 0
+    const indexPage = {
+      id: "document-index",
+      title: "Indice de produccion",
+      purpose: "index",
+      objective: "Mapa de navegacion y control de recepcion para fabrica.",
+      regions: [
+        { type: "header", weight: 1 },
+        { type: "titleBar", weight: 1 },
+        { type: "documentIndex", weight: 1 },
+        { type: "disclaimer", weight: 1 },
+      ],
+    }
+    descriptors.splice(insertAt, 0, { page: indexPage, pageCtx: baseCtx, sourceIndex: -1, name: "document_index" })
   }
 
   const totalPages = descriptors.length
@@ -762,17 +869,16 @@ export function buildPlannedPages(plan, ctx, opts) {
     name: descriptor.name,
     title: descriptor.page.title,
     purpose: descriptor.page.purpose,
-    status: descriptor.page.regions.some((region) => region.type === "illustration" || (region.type === "split" && (region.regions || []).some((inner) => inner.type === "illustration"))) ? "illustration-pending" : "ready",
+    description: pageDescription(descriptor.page),
+    status: pageHasRegion(descriptor.page, "illustration") ? "illustration-pending" : "ready",
   }))
 
-  if (includeIndex && descriptors.length > 0) {
-    const coverIndex = descriptors.findIndex((descriptor) => descriptor.page.purpose === "cover")
-    const descriptor = descriptors[coverIndex]
-    const regions = descriptor.page.regions.slice()
-    const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
-    regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, { type: "documentIndex", weight: 1 })
-    descriptor.page = { ...descriptor.page, regions }
-    descriptor.pageCtx = { ...descriptor.pageCtx, documentIndex: indexEntries.filter((entry) => entry.purpose !== "cover") }
+  if (includeIndex) {
+    const descriptor = descriptors.find((item) => item.page.purpose === "index")
+    descriptor.pageCtx = {
+      ...descriptor.pageCtx,
+      documentIndex: indexEntries.filter((entry) => entry.purpose !== "cover" && entry.purpose !== "index"),
+    }
   }
 
   return descriptors.map((descriptor, index) => {
