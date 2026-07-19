@@ -157,7 +157,7 @@ Ver [CONTRIBUTING.md](CONTRIBUTING.md) — agregar un tipo de prenda nuevo es la
 
 - React 18 + Vite 5
 - SVG generado 100% en cliente (sin dependencias de canvas/render externo)
-- Qwen3-8B mediante MLX para IA textual privada del estudio; DeepSeek/NVIDIA continúa disponible para la versión remota
+- Orquestación híbrida DeepSeek V4-Pro → Qwen3-8B mediante MLX → contratos deterministas, con límites por tarea y circuit breaker
 - NVIDIA Vision para análisis de imágenes, a través de un proxy backend y nunca directo desde el navegador
 - Serverless en Vercel (`api/deepseek.js`) para custodiar la API key del lado servidor
 

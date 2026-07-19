@@ -43,6 +43,7 @@ const RETRYABLE_BASE_DELAY_MS = 1500
 // time instead of an infinite spinner.
 const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_DEEPSEEK_FETCH_TIMEOUT_MS) || 30000
 const LOCAL_FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_LOCAL_AI_FETCH_TIMEOUT_MS) || 180000
+const ESTIMATED_COMPAT_EVENTS = 60
 
 function queryStudioProvider() {
   if (typeof window === "undefined") return null
@@ -81,10 +82,10 @@ function containsImage(messages) {
   )
 }
 
-export function resolveAITransport({ messages, model } = {}) {
+export function resolveAITransport({ messages, model, provider: requestedProvider } = {}) {
   const vision = containsImage(messages)
   if (vision) return { provider: "nvidia", url: NVIDIA_PROXY_URL, timeoutMs: FETCH_TIMEOUT_MS }
-  const provider = getTextAIProvider()
+  const provider = requestedProvider || getTextAIProvider()
   return provider === "local"
     ? { provider, url: LOCAL_STUDIO_URL, timeoutMs: LOCAL_FETCH_TIMEOUT_MS }
     : { provider, url: NVIDIA_PROXY_URL, timeoutMs: FETCH_TIMEOUT_MS }
@@ -104,11 +105,18 @@ function sleep(ms) {
 
 async function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController()
+  const externalSignal = options && options.signal
+  const abortFromExternal = () => controller.abort(externalSignal.reason)
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort(externalSignal.reason)
+    else externalSignal.addEventListener("abort", abortFromExternal, { once: true })
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     return await fetch(url, { ...options, signal: controller.signal })
   } finally {
     clearTimeout(timer)
+    if (externalSignal) externalSignal.removeEventListener("abort", abortFromExternal)
   }
 }
 
@@ -163,15 +171,16 @@ function isRetryable(err) {
   return !!err.networkError || err.status === 503 || err.status === 504 || /ResourceExhausted/i.test(err.detail || "") || /Failed to generate completions/i.test(err.detail || "")
 }
 
-async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
-  const transport = resolveAITransport({ messages, model })
+async function callOnce({ messages, maxTokens, temperature, model, thinking, provider, signal, timeoutMs }) {
+  const transport = resolveAITransport({ messages, model, provider })
   let res
   try {
     res = await fetchWithTimeout(transport.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, chat_template_kwargs: { thinking } }),
-    }, transport.timeoutMs)
+      signal,
+    }, timeoutMs || transport.timeoutMs)
   } catch (e) {
     throw wrapFetchFailure(e, transport)
   }
@@ -200,18 +209,39 @@ async function callOnce({ messages, maxTokens, temperature, model, thinking }) {
   }
   const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content
   if (!content) throw new DeepSeekError("El asistente de IA devolvio una respuesta vacia.", data)
-  return content
+  return { content, provider: transport.provider, model: data.model || model || (transport.provider === "local" ? "qwen-local" : "deepseek-ai/deepseek-v4-pro") }
+}
+
+// Low-level, cancelable single attempt. Retry policy belongs to hybridAI.js,
+// where it can share one task budget instead of multiplying hidden retries.
+export async function requestAIOnce({
+  messages,
+  maxTokens = 1000,
+  temperature = 0.2,
+  model,
+  thinking = false,
+  provider,
+  signal,
+  timeoutMs,
+} = {}) {
+  return callOnce({ messages, maxTokens, temperature, model, thinking, provider, signal, timeoutMs })
 }
 
 // Returns the assistant message content (string). Throws on transport/HTTP
 // failure so callers can decide how to degrade. `thinking` defaults off:
 // structured-output callers (JSON extraction) want a fast, deterministic
 // answer, not a reasoning trace competing for the token budget.
-export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false } = {}) {
+export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, task, validator, fallback, onStatus, signal, onResult, providers, operationId } = {}) {
+  if (task) {
+    const { runHybridAI } = await import("./hybridAI.js")
+    const result = await runHybridAI({ task, messages, maxTokens, temperature, validator, fallback, onStatus, signal, providers, operationId })
+    if (onResult) onResult(result)
+    return result.content
+  }
   let lastErr
   for (let attempt = 1; attempt <= RETRYABLE_MAX_ATTEMPTS; attempt++) {
     try {
-      return await callOnce({ messages, maxTokens, temperature, model, thinking })
+      return (await callOnce({ messages, maxTokens, temperature, model, thinking })).content
     } catch (e) {
       lastErr = e
       const retryable = e instanceof DeepSeekError && isRetryable(e)
@@ -222,15 +252,16 @@ export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0
   throw lastErr
 }
 
-async function openStream({ messages, maxTokens, temperature, model, thinking }) {
-  const transport = resolveAITransport({ messages, model })
+async function openStream({ messages, maxTokens, temperature, model, thinking, provider, signal, timeoutMs }) {
+  const transport = resolveAITransport({ messages, model, provider })
   let res
   try {
     res = await fetchWithTimeout(transport.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, max_tokens: maxTokens, temperature, model, stream: true, chat_template_kwargs: { thinking } }),
-    }, transport.timeoutMs)
+      signal,
+    }, timeoutMs || transport.timeoutMs)
   } catch (e) {
     throw wrapFetchFailure(e, transport)
   }
@@ -256,8 +287,8 @@ async function openStream({ messages, maxTokens, temperature, model, thinking })
 // getting cut off mid-generation, are observed-live just as transient as a
 // 503 or a dropped connection (see isRetryable) and deserve the same
 // backed-off retry treatment, not a one-shot give-up.
-async function attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent }) {
-  const res = await openStream({ messages, maxTokens, temperature, model, thinking })
+async function attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent, provider, signal, timeoutMs }) {
+  const res = await openStream({ messages, maxTokens, temperature, model, thinking, provider, signal, timeoutMs })
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -275,7 +306,7 @@ async function attemptChatStream({ messages, maxTokens, temperature, model, thin
       // otherwise wait on this read() forever with no timeout of its own.
       ;({ done: readerDone, value } = await Promise.race([
         reader.read(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("stream_stall_timeout")), FETCH_TIMEOUT_MS)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("stream_stall_timeout")), timeoutMs || FETCH_TIMEOUT_MS)),
       ]))
     } catch {
       // Connection dropped OR stalled mid-stream (e.g. a serverless
@@ -334,7 +365,7 @@ async function attemptChatStream({ messages, maxTokens, temperature, model, thin
     // callOnce (not deepseekChat) deliberately, so this doesn't spawn its own
     // nested 3x retry loop on top of the outer one in deepseekChatStream().
     try {
-      return await callOnce({ messages, maxTokens, temperature, model, thinking })
+      return (await callOnce({ messages, maxTokens, temperature, model, thinking, provider, signal, timeoutMs })).content
     } catch {}
     const err = new DeepSeekError(
       cleanEnd
@@ -366,15 +397,20 @@ async function attemptChatStream({ messages, maxTokens, temperature, model, thin
 // a dropped connection or a 503 (observed live: three distinct failure
 // messages from the same simple prompt, none of which the old code retried
 // past the open phase).
-export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent } = {}) {
+export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent, task, validator, fallback, onStatus, signal, onResult, providers, operationId, provider, timeoutMs, maxAttempts = RETRYABLE_MAX_ATTEMPTS, retryCapacityOnly = false } = {}) {
+  if (task) {
+    const content = await deepseekChat({ messages, maxTokens, temperature, model, thinking, task, validator, fallback, onStatus, signal, onResult, providers, operationId })
+    if (onEvent) onEvent({ contentSoFar: content, deltaText: content, tokensSoFar: ESTIMATED_COMPAT_EVENTS })
+    return content
+  }
   let lastErr
-  for (let attempt = 1; attempt <= RETRYABLE_MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      return await attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent })
+      return await attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent, provider, signal, timeoutMs })
     } catch (e) {
       lastErr = e
-      const retryable = e instanceof DeepSeekError && isRetryable(e)
-      if (!retryable || attempt === RETRYABLE_MAX_ATTEMPTS) throw e
+      const retryable = e instanceof DeepSeekError && (retryCapacityOnly ? e.status === 503 || e.status === 504 : isRetryable(e))
+      if (!retryable || attempt === maxAttempts) throw e
       await sleep(RETRYABLE_BASE_DELAY_MS * attempt)
     }
   }

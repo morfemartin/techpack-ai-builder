@@ -29,6 +29,7 @@ import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
 import { GRID, PAGE } from "./design/metrics.js"
+import { deterministicPageLayout } from "./core/semanticOutline.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
 const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
@@ -427,16 +428,7 @@ export default function App() {
   }
 
   function fallbackPageLayout(page) {
-    return {
-      ...page,
-      regions: [
-        { type: "header", weight: 10 },
-        { type: "titleBar", weight: 6 },
-        { type: "illustration", weight: 48, slots: 2, note: "Preparar ilustracion tecnica de esta pagina." },
-        { type: "partsList", weight: 26 },
-        { type: "disclaimer", weight: 10 },
-      ],
-    }
+    return deterministicPageLayout(page, { parts, designs })
   }
 
   async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan } = {}) {
@@ -448,31 +440,37 @@ export default function App() {
     setDocumentPlanning(true)
     setDocumentPlanStatus("Estructurando el documento...")
     try {
+      var baseContext = { garmentType, parts, designs, lang }
+      var provisionalOutline = fallbackDocumentOutline(baseContext)
+      var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
+      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment }
+      publishPages(buildPlannedPages(provisionalPlan, ctx, { documentMode: "illustration-handoff", includeIndex: true }))
+      if (onPlan) onPlan(provisionalPlan)
+      setDocumentPlanStatus("Usando plan base mientras la IA refina")
+
       var outline
       try {
-        outline = await withPlanningTimeout(planDocumentOutline({ garmentType, parts, designs, lang }))
+        outline = await planDocumentOutline(baseContext, { onStatus: setDocumentPlanStatus })
       } catch {
-        outline = fallbackDocumentOutline({ garmentType, parts, designs, lang })
+        outline = provisionalOutline
       }
       var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, outline.pages.length) }))
       publishPages(placeholders)
       var plannedPages = []
-      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment }
       for (var i = 0; i < outline.pages.length; i++) {
         var page = outline.pages[i]
         setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
         try {
-          var planned = await withPlanningTimeout(
-            planPageLayout(
+          var planned = await planPageLayout(
               page,
-              { garmentType, parts, designs, lang },
+              baseContext,
               {
+                onStatus: setDocumentPlanStatus,
                 onProgress: (progress) => {
                   setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
                 },
               },
-            ),
-          )
+            )
           plannedPages.push(planned)
         } catch {
           plannedPages.push(fallbackPageLayout(page))

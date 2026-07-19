@@ -82,6 +82,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
   const [progress, setProgress] = useState(null) // { percent, lastLabel } | null - only set while streaming the analysis
+  const [aiStatus, setAIStatus] = useState("")
   const [error, setError] = useState(null)
   // Stack of {key, phase} pushed right before each askNext() advance - lets
   // "Volver" undo the most recent answer/skip. Scoped to the CURRENT walk on
@@ -166,17 +167,16 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setError(null)
     setProgress({ percent: 0, lastLabel: null })
     try {
-      const analysis = await withIntakeTimeout(
-        analyzeRequirements({
+      const analysis = await analyzeRequirements({
           garmentType,
           seed: seed || {},
           tecs,
           lang: "ES",
+          onStatus: setAIStatus,
           onProgress: (p) => {
             if (analysisRun.current === runId) setProgress(p)
           },
-        }),
-      )
+        })
       if (analysisRun.current !== runId) return
       setReqs(analysis)
       const assumed = analysis.fields.filter((f) => f.status === FIELD_STATUS.ASSUMED && String(f.value || "").trim())
@@ -209,15 +209,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setError(null)
     setProgress({ percent: 0, lastLabel: null })
     try {
-      const designAnalysis = await withIntakeTimeout(
-        analyzeDesignExpression({
+      const designAnalysis = await analyzeDesignExpression({
           garmentType: garmentLabel || generalReqs.garmentType,
           generalFields: reqsToParts(generalReqs),
           tecs,
           lang: "ES",
+          onStatus: setAIStatus,
           onProgress: (p) => setProgress(p),
-        }),
-      )
+        })
       const merged = mergeDesignFields(generalReqs, designAnalysis.fields)
       setReqs(merged)
       setPhase("designing")
@@ -245,14 +244,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setProgress({ percent: 0, lastLabel: null })
     try {
       const designs = reqsToDesigns(finalReqs)
-      const { briefs: authored } = await withIntakeTimeout(
-        authorIllustrationBriefs({
+      const { briefs: authored } = await authorIllustrationBriefs({
           garmentType: garmentLabel || finalReqs.garmentType,
           designs,
           lang: "ES",
+          onStatus: setAIStatus,
           onProgress: (p) => setProgress(p),
-        }),
-      )
+        })
       setBriefs(authored)
       post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha, con instrucciones de ilustración incluidas. Podés continuar.")
       finishIntake(finalReqs)
@@ -314,7 +312,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setSending(true)
     setError(null)
     try {
-      const answer = await answerFieldQuestion({ field: currentField, garmentType: garmentLabel || (reqs && reqs.garmentType), question: value })
+      const answer = await answerFieldQuestion({ field: currentField, garmentType: garmentLabel || (reqs && reqs.garmentType), question: value, onStatus: setAIStatus })
       post("assistant", answer)
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : "No pude responder eso. Podés seguir con la pregunta igual.")
@@ -332,7 +330,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setSending(true)
     setError(null)
     try {
-      const newFields = await analyzeAdditionalNotes({ garmentType: garmentLabel || (reqs && reqs.garmentType), existingFields: reqs.fields, notes: value })
+      const newFields = await analyzeAdditionalNotes({ garmentType: garmentLabel || (reqs && reqs.garmentType), existingFields: reqs.fields, notes: value, onStatus: setAIStatus })
       if (newFields.length > 0) {
         setReqs((r) => mergeDesignFields(r, newFields))
         post("assistant", "Sumado: " + newFields.map((f) => f.label + " (" + f.value + ")").join(", ") + ". ¿Algo más? Si no, tocá \"Nada más\".")
@@ -511,7 +509,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
                 <div style={{ height: "100%", width: (progress ? progress.percent : 0) + "%", background: role.priority.fill, transition: "width 160ms linear" }} />
               </div>
               <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6, fontFamily: type.fonts.data }}>
-                {progress && progress.lastLabel ? "Analizando: " + progress.lastLabel + "…" : "Analizando la prenda…"}
+                {aiStatus || (progress && progress.lastLabel ? "Analizando: " + progress.lastLabel + "…" : "Analizando la prenda…")}
               </span>
             </div>
           )}
@@ -519,6 +517,11 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         {error && (
           <div style={{ padding: `${space(2)}px ${space(3)}px`, borderTop: hair, display: "flex", alignItems: "center", gap: space(2), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>
             <Icon name="error" size={16} color={role.index.fill} /> {error}
+          </div>
+        )}
+        {!sending && aiStatus && (
+          <div style={{ padding: `${space(1)}px ${space(3)}px`, borderTop: hair, fontSize: type.size.xs, color: C.ink.hex, fontFamily: type.fonts.data, opacity: 0.7 }}>
+            {aiStatus}
           </div>
         )}
         {backAvailable && (

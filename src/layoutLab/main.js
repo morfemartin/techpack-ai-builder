@@ -25,7 +25,7 @@ import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { ctxForFixture } from "./fixtureContext.js"
 
-const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false, outlineRunning: false, outlineResult: null, outlineError: "", aiHealth: getTextAIProvider() === "local" ? "starting" : "nvidia" }
+const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false, outlineRunning: false, outlineProvider: "nvidia", outlineBenchmarks: {}, outlineResult: null, outlineError: "", aiHealth: getTextAIProvider() === "local" ? "starting" : "nvidia" }
 const AI_OUTLINE_TIMEOUT_MS = getTextAIProvider() === "local" ? 180000 : 45000
 const AI_PAGE_TIMEOUT_MS = getTextAIProvider() === "local" ? 180000 : 45000
 const BENCHMARK_OUTLINE_TIMEOUT_MS = 300000
@@ -152,7 +152,12 @@ function benchmarkBriefTab() {
     "lower-leg": "S05 - Piernas inferiores, rodillas y bajos",
   }
   const humanRows = dataset.humanPagePlan.map((page) => [String(page.page).padStart(2, "0"), page.title, page.objective, page.pieces.join(", ") || "-", page.views.join(", ") || "-"])
-  let modelHtml = `<p class="comparison-empty">Todavia no ejecutado. Esta prueba llamara solo a planDocumentOutline; no genera layouts ni SVG.</p>`
+  const benchmarkRows = ["nvidia", "local"].map((provider) => {
+    const item = state.outlineBenchmarks[provider]
+    return [provider === "nvidia" ? "DeepSeek V4-Pro" : "Qwen local", item ? item.pages : "-", item ? item.coverage + "/44" : "-", item ? item.latency : "-", item ? item.repairs : "-"]
+  })
+  benchmarkRows.push(["Plan humano", "18", "44/44", "referencia", "0"])
+  let modelHtml = `${dataTable(["Fuente", "Paginas", "Cobertura", "Tiempo", "Reparaciones"], benchmarkRows)}<p class="comparison-empty">Ejecuta DeepSeek y Qwen sobre el mismo dataset para comparar sus contratos.</p>`
   if (state.outlineError) modelHtml = `<div class="err">${escapeHtml(state.outlineError)}</div>`
   if (state.outlineResult) {
     const result = state.outlineResult
@@ -171,7 +176,7 @@ function benchmarkBriefTab() {
           return `<div><strong>${escapeHtml(item.pageId)} - ${outcome}${attempts}</strong>${pageSummary ? `<br>${escapeHtml(pageSummary)}` : ""}</div>`
         }).join("")
       : "<div>No hubo sistemas de mas de 8 piezas.</div>"
-    modelHtml = `<div class="score-strip"><strong>${result.outline.pages.length} paginas propuestas</strong><strong>${coverage.covered.length}/44 piezas exactas</strong><strong>${coverage.missing.length} omitidas</strong><strong>${coverage.duplicated.length} duplicadas</strong><strong>${invented.length} inventadas</strong><strong>carga maxima ${maxLoad}</strong></div>
+    modelHtml = `${dataTable(["Fuente", "Paginas", "Cobertura", "Tiempo", "Reparaciones"], benchmarkRows)}<div class="score-strip"><strong>${result.outline.pages.length} paginas propuestas</strong><strong>${coverage.covered.length}/44 piezas exactas</strong><strong>${coverage.missing.length} omitidas</strong><strong>${coverage.duplicated.length} duplicadas</strong><strong>${invented.length} inventadas</strong><strong>carga maxima ${maxLoad}</strong></div>
       ${dataTable(["P.", "Pagina", "Objetivo", "Piezas", "Vistas"], modelRows)}
       <details class="diagnostics" ${refinements.length ? "open" : ""}><summary>Refinamiento textil de sistemas - ${refinements.length}</summary>${refinementHtml}</details>
       <details class="diagnostics" ${result.repairs.length ? "open" : ""}><summary>Reparaciones del contrato - ${result.repairs.length}</summary>${result.repairs.length ? result.repairs.map((item) => `<div>${escapeHtml(item)}</div>`).join("") : "<div>Ninguna</div>"}</details>
@@ -184,9 +189,9 @@ function benchmarkBriefTab() {
       <div class="brief-metrics"><strong>${dataset.parts.length} piezas</strong><strong>${brief.materials.length} materiales</strong><strong>${brief.trims.length} avios</strong><strong>${dataset.designs.length} aplicaciones</strong><strong>${brief.measurements.poms.length} POM</strong></div>
     </section>
     <section class="brief-section comparison-section">
-      <div class="comparison-head"><div><h2>Comparacion textual previa al layout</h2><p>Misma fuente de verdad. La geometria todavia no participa.</p></div><button id="outline-run" ${state.outlineRunning ? "disabled" : ""}>${state.outlineRunning ? "Consultando modelo..." : "Ejecutar modelo - solo texto"}</button></div>
+      <div class="comparison-head"><div><h2>Comparacion textual previa al layout</h2><p>Misma fuente de verdad. La geometria todavia no participa.</p></div><div class="ai-controls"><select id="outline-provider"><option value="nvidia" ${state.outlineProvider === "nvidia" ? "selected" : ""}>DeepSeek V4-Pro</option><option value="local" ${state.outlineProvider === "local" ? "selected" : ""}>Qwen local</option></select><button id="outline-run" ${state.outlineRunning ? "disabled" : ""}>${state.outlineRunning ? "Consultando modelo..." : "Ejecutar proveedor"}</button></div></div>
       <div class="comparison-columns">
-        <article><h3>Propuesta real del sistema / ${getTextAIProvider() === "local" ? "Qwen local" : "NVIDIA"}</h3>${modelHtml}</article>
+        <article><h3>Propuesta real / ${state.outlineProvider === "local" ? "Qwen local" : "DeepSeek V4-Pro"}</h3>${modelHtml}</article>
         <article><h3>Propuesta humana - 18 paginas fisicas</h3>${dataTable(["P.", "Pagina", "Objetivo", "Piezas", "Vistas"], humanRows)}</article>
       </div>
     </section>
@@ -291,11 +296,18 @@ async function runOutlineComparison() {
   let telemetry = null
   try {
     const outline = await withTimeout(
-      planDocumentOutline(planCtx, { onProposal: (value) => { telemetry = value } }),
+      planDocumentOutline(planCtx, { providers: [state.outlineProvider], onProposal: (value) => { telemetry = value } }),
       BENCHMARK_OUTLINE_TIMEOUT_MS,
       "Model text outline"
     )
     state.outlineResult = { ...telemetry, outline }
+    const coverage = auditSemanticCoverage(outline, dataset.parts)
+    state.outlineBenchmarks[state.outlineProvider] = {
+      pages: outline.pages.length,
+      coverage: coverage.covered.length,
+      latency: telemetry && telemetry.aiResult ? Math.round(telemetry.aiResult.latencyMs / 1000) + " s" : "contrato",
+      repairs: telemetry && telemetry.repairs ? telemetry.repairs.length : 0,
+    }
   } catch (error) {
     state.outlineError = String((error && error.message) || error)
   } finally {
@@ -336,6 +348,8 @@ function render() {
   if (run) run.addEventListener("click", runAiPlan)
   const outlineRun = document.getElementById("outline-run")
   if (outlineRun) outlineRun.addEventListener("click", runOutlineComparison)
+  const outlineProvider = document.getElementById("outline-provider")
+  if (outlineProvider) outlineProvider.addEventListener("change", (e) => { state.outlineProvider = e.target.value; state.outlineResult = null; state.outlineError = ""; render() })
 }
 
 render()

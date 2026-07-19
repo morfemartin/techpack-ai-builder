@@ -14,6 +14,7 @@ const DEFAULT_VISION_MODEL = import.meta.env.VITE_NVIDIA_VISION_MODEL || "meta/l
 // Keeps a multi-photo request well under Vercel's ~4.5MB body cap.
 const MAX_DOWNSCALE_DIM = 1024
 const MAX_VISION_CONCURRENCY = 3
+let currentVisionConcurrency = MAX_VISION_CONCURRENCY
 
 // Pure: the largest {width, height} that fits within maxDim on its longest
 // side while keeping the original aspect ratio. Never upscales.
@@ -220,6 +221,10 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
       model: model || DEFAULT_VISION_MODEL,
       maxTokens: 1200,
       temperature: 0.2,
+      provider: "nvidia",
+      timeoutMs: 30000,
+      maxAttempts: 2,
+      retryCapacityOnly: true,
       onEvent: onProgress
         ? ({ contentSoFar, deltaText, tokensSoFar }) => {
             onProgress({
@@ -237,12 +242,19 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
             })
           }
         : undefined,
-    }).then(parseVisionSeed)
+    }).then(parseVisionSeed).catch((error) => {
+      if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
+      throw error
+    })
   }
 
   const hasPhotoGroups = images.some((img) => img && img.photoIndex !== undefined)
   if (!hasPhotoGroups) {
-    const results = await mapWithConcurrency(images, MAX_VISION_CONCURRENCY, (img, i) => callFor(img, i))
+    const settled = await mapWithConcurrency(images, currentVisionConcurrency, async (img, i) => {
+      try { return { ok: true, value: await callFor(img, i) } } catch (error) { return { ok: false, error } }
+    })
+    const results = settled.filter((item) => item.ok).map((item) => item.value)
+    if (results.length === 0) throw settled[0].error
     return mergeVisionSeeds(results)
   }
 
@@ -254,8 +266,14 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
   })
   const results = []
   for (const key of [...groups.keys()].sort((a, b) => a - b)) {
-    const batchResults = await mapWithConcurrency(groups.get(key), MAX_VISION_CONCURRENCY, ([img, i]) => callFor(img, i))
-    results.push(...batchResults)
+    const entries = groups.get(key)
+    const full = entries.find(([img]) => (img.kind || "full") === "full")
+    if (full) results.push(await callFor(full[0], full[1]))
+    const details = entries.filter((entry) => entry !== full)
+    const settled = await mapWithConcurrency(details, currentVisionConcurrency, async ([img, i]) => {
+      try { return await callFor(img, i) } catch { return null }
+    })
+    results.push(...settled.filter(Boolean))
   }
   return mergeVisionSeeds(results)
 }
@@ -289,6 +307,10 @@ export async function answerFieldFromImage({ field, garmentType, imageBase64, la
     model: DEFAULT_VISION_MODEL,
     maxTokens: 200,
     temperature: 0.2,
+    provider: "nvidia",
+    timeoutMs: 30000,
+    maxAttempts: 2,
+    retryCapacityOnly: true,
     onEvent: onProgress
       ? ({ contentSoFar, tokensSoFar }) => onProgress({ partialText: summarizeVisionProgress(contentSoFar), tokensSoFar })
       : undefined,

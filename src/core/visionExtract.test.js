@@ -247,6 +247,20 @@ describe("extractGarmentFromImages", () => {
 
       expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Pespunte visible" } })
     })
+
+    it("keeps the full-image result when one quadrant fails", async () => {
+      deepseekChatStream
+        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}')
+        .mockRejectedValueOnce(Object.assign(new Error("capacity"), { status: 503 }))
+        .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble"}}')
+      const result = await extractGarmentFromImages([
+        { fileName: "a.jpg", base64: "full", photoIndex: 0, photoTotal: 1, kind: "full" },
+        { fileName: "a.jpg", base64: "q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
+        { fileName: "a.jpg", base64: "q2", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior derecho" },
+      ])
+      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble" } })
+      expect(deepseekChatStream.mock.calls.every(([options]) => options.provider === "nvidia" && options.timeoutMs === 30000)).toBe(true)
+    })
   })
 })
 

@@ -1,11 +1,14 @@
 # Private Studio AI
 
-The studio build uses a local text model while keeping image analysis on the
-existing NVIDIA server-side proxy.
+The studio build uses a task-aware hybrid text pipeline while keeping image
+analysis on the existing NVIDIA server-side proxy.
 
 ## Architecture
 
-- Text, intake, document planning and review: `mlx-community/Qwen3-8B-4bit`.
+- Text, intake, document planning and review: DeepSeek V4-Pro starts first;
+  `mlx-community/Qwen3-8B-4bit` joins after a task-specific grace period.
+- The first response that passes the JSON and domain contract wins. If neither
+  provider returns a valid answer, deterministic application code continues.
 - Image analysis: NVIDIA Vision through `/api/deepseek`; the key remains on the
   server and never reaches the browser.
 - Geometry, pagination and contract repair: deterministic application code.
@@ -42,8 +45,9 @@ http://localhost:3000/layout-lab.html?studio=local
 ```
 
 The same query parameter works from the published GitHub Pages UI when the
-bridge is running on this Mac. It persists the local provider choice in that
-browser. Use `?studio=nvidia` to switch text back to the remote provider.
+bridge is running on this Mac. It also exposes local health in that browser.
+Normal product flows use the automatic hybrid policy; Layout Lab can force
+either provider for A/B tests.
 
 ## Security boundaries
 
@@ -57,8 +61,24 @@ browser. Use `?studio=nvidia` to switch text back to the remote provider.
 - Image payloads are rejected by the local bridge. Vision remains on NVIDIA.
 - The bridge has no API key, shell endpoint, filesystem endpoint or arbitrary
   upstream URL.
-- There is no silent cloud fallback in studio text mode. If Qwen is offline,
-  the UI reports it instead of sending private text to NVIDIA.
+- Studio text is allowed to use DeepSeek automatically. This is an explicit
+  studio policy: do not enter client-confidential text unless cloud processing
+  is permitted for that project.
+- There is no silent substitution to Llama for structured requests. DeepSeek
+  failure returns to the client, which races Qwen or uses the contract.
+- Local telemetry stores only task, provider, model, latency, validation and
+  fallback reason. Prompts and client data are never written to telemetry.
+
+## Runtime policy
+
+- Conversation tasks start Qwen after 3-10 seconds and have a strict 12-45
+  second total budget.
+- Outline and page planning publish a deterministic provisional document
+  immediately; background refinement may use a longer local budget.
+- Two recent NVIDIA failures open a 60-second circuit breaker.
+- Qwen is health-checked and runs through a concurrency-one queue.
+- Vision is NVIDIA-only, limited to 30 seconds per attempt. Quadrant failures
+  preserve valid full-image and sibling-quadrant results.
 
 Override the allowlist only when needed:
 

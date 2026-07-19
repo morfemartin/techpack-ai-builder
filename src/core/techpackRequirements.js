@@ -12,6 +12,7 @@
 // matter how long the conversation gets.
 
 import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
+import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
@@ -69,7 +70,7 @@ export const FIELD_STATUS = { KNOWN: "known", ASSUMED: "assumed", ASK: "ask" }
  *   status: "known"|"assumed"|"ask", value?: string,
  *   options?: string[], why?: string }>}}
  */
-export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES", onProgress }) {
+export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES", onProgress, onStatus, signal }) {
   const seedText = seed && Object.keys(seed).length > 0 ? JSON.stringify(seed) : "(sin datos previos)"
   const instructions =
     "Sos un tecnico textil experto armando la ficha tecnica de una prenda tipo '" + garmentType + "'. " +
@@ -92,11 +93,23 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
     '{"key": "identificadorEnIngles", "label": "Etiqueta en espanol", "category": "general", ' +
     '"status": "ask", "value": "", "options": ["Opcion A", "Opcion B"], "why": "por que importa (breve)"}]}'
 
+  const hybrid = {
+    task: HYBRID_TASKS.INTAKE,
+    validator: (content) => {
+      const value = ensureMinimumGeneralQuestions(normalizeRequirements(parseJSONOrRepair(content, "invalid intake"), garmentType), seed)
+      const asked = value.fields.filter((field) => field.category === "general" && field.status === FIELD_STATUS.ASK)
+      return asked.length >= 6 && asked.length <= 10 && new Set(value.fields.map((field) => field.key)).size === value.fields.length && asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
+    },
+    fallback: () => JSON.stringify(fallbackRequirements(garmentType, seed)),
+    onStatus,
+    signal,
+  }
   const raw = onProgress
     ? await deepseekChatStream({
         messages: [{ role: "user", content: instructions }],
         maxTokens: 3800,
         temperature: 0.2,
+        ...hybrid,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
             percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
@@ -108,6 +121,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         messages: [{ role: "user", content: instructions }],
         maxTokens: 3800,
         temperature: 0.2,
+        ...hybrid,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de requisitos valido.")
   return ensureMinimumGeneralQuestions(normalizeRequirements(parsed, garmentType), seed)
@@ -431,7 +445,7 @@ export function reqsToParts(reqs) {
  * them into real design objects. Reuses normalizeRequirements() - same field
  * shape as analyzeRequirements(), just with the two extra design-only keys.
  */
-export async function analyzeDesignExpression({ garmentType, generalFields, tecs, lang = "ES", onProgress }) {
+export async function analyzeDesignExpression({ garmentType, generalFields, tecs, lang = "ES", onProgress, onStatus, signal }) {
   const generalText = generalFields && generalFields.length > 0 ? JSON.stringify(generalFields) : "(sin datos de construccion)"
   const instructions =
     "Sos un disenador tecnico textil experto definiendo las paginas de diseno de una ficha tecnica para una prenda tipo '" + garmentType + "'. " +
@@ -465,6 +479,14 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
         messages: [{ role: "user", content: instructions }],
         maxTokens: 3800,
         temperature: 0.2,
+        task: HYBRID_TASKS.DESIGNS,
+        validator: (content) => {
+          const value = normalizeRequirements(parseJSONOrRepair(content, "invalid designs"), garmentType)
+          return value.fields.every((field) => field.category === "design" && field.designSlot && DESIGN_FIELD_KINDS.has(field.designField))
+        },
+        fallback: JSON.stringify({ garmentType, fields: [] }),
+        onStatus,
+        signal,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
             percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
@@ -476,6 +498,14 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
         messages: [{ role: "user", content: instructions }],
         maxTokens: 3800,
         temperature: 0.2,
+        task: HYBRID_TASKS.DESIGNS,
+        validator: (content) => {
+          const value = normalizeRequirements(parseJSONOrRepair(content, "invalid designs"), garmentType)
+          return value.fields.every((field) => field.category === "design" && field.designSlot && DESIGN_FIELD_KINDS.has(field.designField))
+        },
+        fallback: JSON.stringify({ garmentType, fields: [] }),
+        onStatus,
+        signal,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de disenos valido.")
   return normalizeRequirements(parsed, garmentType)
@@ -542,7 +572,7 @@ export function reqsToDesigns(reqs) {
 // generic placeholder). This is authored text for a human illustrator, never
 // a question - no options/status/ask semantics, so it doesn't reuse the
 // fields/normalizeRequirements shape at all.
-export async function authorIllustrationBriefs({ garmentType, designs, lang = "ES", onProgress }) {
+export async function authorIllustrationBriefs({ garmentType, designs, lang = "ES", onProgress, onStatus, signal }) {
   if (!Array.isArray(designs) || designs.length === 0) return { briefs: [] }
 
   const designsList = designs
@@ -573,6 +603,15 @@ export async function authorIllustrationBriefs({ garmentType, designs, lang = "E
         messages: [{ role: "user", content: instructions }],
         maxTokens: 3800,
         temperature: 0.2,
+        task: HYBRID_TASKS.BRIEFS,
+        validator: (content) => {
+          const value = parseJSONOrRepair(content, "invalid briefs")
+          const names = new Set((value.briefs || []).map((brief) => brief && brief.name))
+          return value.briefs.length === designs.length && designs.every((design) => names.has(design.name))
+        },
+        fallback: () => JSON.stringify({ briefs: designs.map((design) => ({ name: design.name, illustrationBrief: `Dibujar ${design.name} en ${design.pos || "la ubicacion confirmada"}. Marcar tecnica ${design.tec || "PENDIENTE DE CONFIRMAR"} y no inferir medidas.` })) }),
+        onStatus,
+        signal,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
             percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
@@ -584,6 +623,15 @@ export async function authorIllustrationBriefs({ garmentType, designs, lang = "E
         messages: [{ role: "user", content: instructions }],
         maxTokens: 3800,
         temperature: 0.2,
+        task: HYBRID_TASKS.BRIEFS,
+        validator: (content) => {
+          const value = parseJSONOrRepair(content, "invalid briefs")
+          const names = new Set((value.briefs || []).map((brief) => brief && brief.name))
+          return value.briefs.length === designs.length && designs.every((design) => names.has(design.name))
+        },
+        fallback: () => JSON.stringify({ briefs: designs.map((design) => ({ name: design.name, illustrationBrief: `Dibujar ${design.name} en ${design.pos || "la ubicacion confirmada"}. Marcar tecnica ${design.tec || "PENDIENTE DE CONFIRMAR"} y no inferir medidas.` })) }),
+        onStatus,
+        signal,
       })
 
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio briefs de ilustracion validos.")
@@ -617,7 +665,7 @@ export function attachIllustrationBriefs(designs, briefs) {
 // current field/options without advancing the walk (see looksLikeQuestion) -
 // plain text, no JSON, no options/status semantics, same spirit as
 // authorIllustrationBriefs' "this is prose for a human, not a question shape."
-export async function answerFieldQuestion({ field, garmentType, question, lang = "ES" }) {
+export async function answerFieldQuestion({ field, garmentType, question, lang = "ES", onStatus, signal }) {
   const f = field || {}
   const optionsText = Array.isArray(f.options) && f.options.length > 0 ? "Opciones sugeridas: " + f.options.join(", ") + ". " : ""
   const instructions =
@@ -632,6 +680,11 @@ export async function answerFieldQuestion({ field, garmentType, question, lang =
     messages: [{ role: "user", content: instructions }],
     maxTokens: 300,
     temperature: 0.3,
+    task: HYBRID_TASKS.EXPLAIN,
+    validator: (content) => typeof content === "string" && content.trim().length >= 10,
+    fallback: `${f.label || "Este campo"} define una decision tecnica de la prenda. ${f.why || "Afecta como la fabrica interpreta y construye el producto."} ${optionsText}`.trim(),
+    onStatus,
+    signal,
   })
   return raw.replace(/```/g, "").trim()
 }
@@ -642,7 +695,7 @@ export async function answerFieldQuestion({ field, garmentType, question, lang =
 // new plumbing - reqsToParts/reqsToDesigns pick these up exactly like any
 // other answered field. Forced to "known" status since this is the user
 // directly stating a fact, not something left to ask about.
-export async function analyzeAdditionalNotes({ garmentType, existingFields, notes, lang = "ES" }) {
+export async function analyzeAdditionalNotes({ garmentType, existingFields, notes, lang = "ES", onStatus, signal }) {
   const existingText = Array.isArray(existingFields) && existingFields.length > 0
     ? JSON.stringify(existingFields.map((f) => ({ label: f.label, value: f.value })))
     : "(ninguno)"
@@ -662,6 +715,11 @@ export async function analyzeAdditionalNotes({ garmentType, existingFields, note
     messages: [{ role: "user", content: instructions }],
     maxTokens: 1200,
     temperature: 0.2,
+    task: HYBRID_TASKS.NOTES,
+    validator: (content) => Array.isArray(parseJSONOrRepair(content, "invalid notes").fields),
+    fallback: JSON.stringify({ fields: [] }),
+    onStatus,
+    signal,
   })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no pudo interpretar esas notas.")
   return normalizeRequirements(parsed, garmentType).fields

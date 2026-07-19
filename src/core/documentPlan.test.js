@@ -91,23 +91,19 @@ describe("document plan AI wrappers", () => {
     expect(deepseekChat).toHaveBeenCalledTimes(2)
   })
 
-  it("retries one invalid structural subdivision before using the deterministic fallback", async () => {
+  it("uses the deterministic subdivision after one invalid model attempt", async () => {
     const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + (index + 1), on: true }))
     const overloaded = { pages: [{ id: "body", title: "Body", purpose: "structure:body", pieces: parts.map((part) => part.id) }] }
     deepseekChat
       .mockResolvedValueOnce(JSON.stringify(overloaded))
       .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "bad", title: "Bad", purpose: "structure:body", pieces: ["P1", "P1"] }] }))
-      .mockResolvedValueOnce(JSON.stringify({ pages: [
-        { id: "body-shell", title: "Shell", purpose: "structure:body", pieces: ["P1", "P2", "P3", "P4", "P5", "P6"] },
-        { id: "body-reinforcement", title: "Reinforcement", purpose: "structure:body", pieces: ["P7", "P8", "P9"] },
-      ] }))
 
     let telemetry
     const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
 
-    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.id)).toEqual(["body-shell", "body-reinforcement"])
-    expect(telemetry.refinements[0].attempts.map((attempt) => attempt.accepted)).toEqual([false, true])
-    expect(deepseekChat).toHaveBeenCalledTimes(3)
+    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.id)).toEqual(["body-1", "body-2"])
+    expect(telemetry.refinements[0].attempts.map((attempt) => attempt.accepted)).toEqual([false])
+    expect(deepseekChat).toHaveBeenCalledTimes(2)
   })
 
   it("returns an omitted piece to its structural system before deciding pagination", async () => {

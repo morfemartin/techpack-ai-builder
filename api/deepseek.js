@@ -24,11 +24,11 @@
 // resending everything verbatim) before the public launch.
 
 const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1"
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v3.1"
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v4-pro"
 const NVIDIA_FALLBACK_MODEL = process.env.NVIDIA_FALLBACK_MODEL || ""
 const MAX_TOKENS_CAP = 4000
-const UPSTREAM_TIMEOUT_MS = Number(process.env.NVIDIA_UPSTREAM_TIMEOUT_MS) || 28000
-const UPSTREAM_STREAM_STALL_TIMEOUT_MS = Number(process.env.NVIDIA_UPSTREAM_STREAM_STALL_TIMEOUT_MS) || 30000
+const UPSTREAM_TIMEOUT_MS = Number(process.env.NVIDIA_UPSTREAM_TIMEOUT_MS) || 55000
+const UPSTREAM_STREAM_STALL_TIMEOUT_MS = Number(process.env.NVIDIA_UPSTREAM_STREAM_STALL_TIMEOUT_MS) || 55000
 
 // NVIDIA doesn't use one consistent error shape: most rejections nest under
 // {error: {message}} (OpenAI-style), but at least the vision models' vLLM
@@ -39,8 +39,8 @@ function upstreamErrorDetail(data) {
   return (data && data.error && data.error.message) || (data && data.message) || "request failed"
 }
 
-function shouldTryFallback(model, status, data) {
-  if (!NVIDIA_FALLBACK_MODEL || model === NVIDIA_FALLBACK_MODEL) return false
+function shouldTryFallback(model, status, data, allowed) {
+  if (!allowed || !NVIDIA_FALLBACK_MODEL || model === NVIDIA_FALLBACK_MODEL) return false
   const detail = upstreamErrorDetail(data)
   return status === 503 || /ResourceExhausted|Failed to generate completions/i.test(detail)
 }
@@ -119,8 +119,16 @@ export default async function handler(req, res) {
     temperature: typeof body.temperature === "number" ? body.temperature : 0.2,
     stream: wantsStream,
   }
+  if (body.chat_template_kwargs && typeof body.chat_template_kwargs === "object") {
+    payload.chat_template_kwargs = body.chat_template_kwargs
+  }
 
   const controller = new AbortController()
+  const abortUpstream = () => controller.abort()
+  if (typeof req.once === "function") req.once("aborted", abortUpstream)
+  if (typeof res.once === "function") res.once("close", () => {
+    if (!res.writableEnded) abortUpstream()
+  })
   const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
   let usedNonStreamingFallback = false
 
@@ -135,7 +143,7 @@ export default async function handler(req, res) {
 
     if (!upstream.ok) {
       upstreamErrorData = await readJSONOrEmpty(upstream)
-      if (shouldTryFallback(payload.model, upstream.status, upstreamErrorData)) {
+      if (shouldTryFallback(payload.model, upstream.status, upstreamErrorData, body.allow_model_fallback === true)) {
         console.error("NVIDIA upstream error", upstream.status, JSON.stringify(upstreamErrorData), "retrying fallback model", NVIDIA_FALLBACK_MODEL)
         usedNonStreamingFallback = wantsStream
         payload = { ...payload, model: NVIDIA_FALLBACK_MODEL, stream: wantsStream ? false : payload.stream }

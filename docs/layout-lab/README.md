@@ -117,6 +117,13 @@ dev` and the local proxy. If DeepSeek times out or reports exhausted capacity,
 the log identifies the failure and renders the deterministic contract fallback
 instead of leaving the Lab stalled.)
 
+The **Benchmark brief** tab has an explicit provider selector. Run the same
+44-piece source dataset once with DeepSeek V4-Pro and once with Qwen local;
+the A/B table retains page count, exact coverage, latency and contract repairs
+beside the human reference plan. These forced runs are diagnostic only. The
+product uses the automatic DeepSeek → delayed Qwen → deterministic contract
+policy.
+
 The **Grid** toggle overlays the eight A4 macro columns, 3mm gutters and 4mm
 vertical baseline, so alignment can be checked against the exact production
 retícula used by the compositor.

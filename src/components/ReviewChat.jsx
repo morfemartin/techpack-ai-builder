@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 import { deepseekChat } from "../core/deepseekClient.js"
+import { HYBRID_TASKS } from "../core/hybridTasks.js"
 import { findingsToWalkFields, summarizeConfirmed } from "../core/reviewDiff.js"
 
 const C = palette
@@ -35,7 +36,19 @@ async function rephraseFields(fields) {
     "Sos un asistente de fichas tecnicas textiles haciendo una revision final antes de exportar. Reformula cada pregunta para que suene conversacional y clara en espanol rioplatense, sin cambiar su significado. " +
     "Devolve SOLO JSON valido: {\"fields\":[{\"key\":\"...\",\"label\":\"...\",\"why\":\"...\"}]}\n\n" +
     JSON.stringify(compact)
-  const raw = await deepseekChat({ messages: [{ role: "user", content: prompt }], maxTokens: 1200, temperature: 0.3 })
+  const raw = await deepseekChat({
+    messages: [{ role: "user", content: prompt }],
+    maxTokens: 1200,
+    temperature: 0.3,
+    task: HYBRID_TASKS.REVIEW,
+    validator: (content) => {
+      try {
+        const value = JSON.parse(content.replace(/```json|```/g, "").trim())
+        return Array.isArray(value.fields) && fields.every((field) => value.fields.some((candidate) => candidate && candidate.key === field.key))
+      } catch { return false }
+    },
+    fallback: JSON.stringify({ fields: compact }),
+  })
   const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim())
   const byKey = new Map((parsed.fields || []).map((f) => [f.key, f]))
   return fields.map((f) => {
@@ -59,8 +72,7 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
     if (rephrased.current) return
     rephrased.current = true
     let active = true
-    // Best-effort conversational polish; 8s cap so the review never stalls.
-    Promise.race([rephraseFields(fields), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 8000))])
+    rephraseFields(fields)
       .then((polished) => {
         if (active) setFields(polished)
       })

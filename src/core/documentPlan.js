@@ -3,6 +3,8 @@ import { parseJSONOrRepair } from "./techpackRequirements.js"
 import { normalizePlan } from "../pages/interpretPlan.js"
 import { repairOutline, repairPage } from "../pages/pageContracts.js"
 import { buildSemanticOutline } from "./semanticOutline.js"
+import { deterministicPageLayout } from "./semanticOutline.js"
+import { HYBRID_TASKS } from "./hybridTasks.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
 const REMOTE_PLANNING_TIMEOUT_MS = 45000
@@ -127,14 +129,25 @@ async function refineOverloadedStructuralPages(outline, context) {
     const attempts = []
     let acceptedPages = null
     let previousRaw = ""
-    for (let attempt = 0; attempt < 2 && !acceptedPages; attempt++) {
+    for (let attempt = 0; attempt < 1 && !acceptedPages; attempt++) {
       try {
         const messages = [{ role: "user", content: prompt }]
         if (attempt > 0) messages.push(
           { role: "assistant", content: previousRaw },
           { role: "user", content: "Esa respuesta incumplio cobertura exacta o el limite de 2 a 8 piezas. Corrigela y verifica cada id antes de responder." }
         )
-        const raw = await deepseekChat({ messages, maxTokens: 1800, temperature: 0 })
+        const raw = await deepseekChat({
+          messages,
+          maxTokens: 1800,
+          temperature: 0,
+          task: HYBRID_TASKS.OUTLINE,
+          validator: (content) => {
+            const parsed = parseJSONOrRepair(content, "invalid structural refinement")
+            return validStructuralRefinement(page, normalizeOutline(parsed, context).pages)
+          },
+          fallback: JSON.stringify({ pages: [] }),
+          providers: context.providers,
+        })
         previousRaw = raw
         const parsed = parseJSONOrRepair(raw, "El modelo no devolvio una subdivision estructural valida.")
         const candidate = normalizeOutline(parsed, context).pages
@@ -162,8 +175,8 @@ export function extractLastCompletedRegionType(text) {
   return last
 }
 
-export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal } = {}) {
-  const context = { garmentType, parts, designs, brief, lang }
+export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal, onStatus, signal, providers } = {}) {
+  const context = { garmentType, parts, designs, brief, lang, providers }
   const instructions =
     "Sos director de arte de fichas tecnicas textiles, pensando como un disenador tecnico real. Decidi que paginas necesita este documento respondiendo, en orden, las preguntas que un disenador se hace:\n" +
     "1. ¿Que merece pagina propia? La portada identifica el estilo; las piezas se dividen por sistemas constructivos con objetivos distintos; cada diseno discreto tiene SU pagina.\n" +
@@ -179,10 +192,29 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
     '{"pages":[{"id":"shell-body","title":"Cuerpo exterior","purpose":"structure:shell-body","objective":"Documentar paneles y uniones","pieces":["id1","id2"],"views":["Frente","Espalda"],"covers":["opcional"]}]}\n' +
     "Usa purpose como cover, structure:<sistema>, lining, label, o design:<nombre exacto del diseno>. La primera pagina debe ser la cover."
 
+  let aiResult = null
   const raw = await deepseekChat({
     messages: [{ role: "user", content: instructions }],
     maxTokens: 4000,
     temperature: 0.2,
+    task: HYBRID_TASKS.OUTLINE,
+    validator: (content) => {
+      const candidate = normalizeOutline(parseJSONOrRepair(content, "invalid outline"), context)
+      const activeIds = new Set((parts || []).filter((part) => part && part.on !== false && part.id).map((part) => part.id))
+      const covered = candidate.pages.filter((page) => isStructuralPurpose(page.purpose)).flatMap((page) => page.pieces || [])
+      const requiredDesigns = (designs || []).filter((design) => design && design.name).map((design) => "design:" + design.name)
+      const purposes = new Set(candidate.pages.map((page) => page.purpose))
+      return candidate.pages[0] && candidate.pages[0].purpose === "cover" &&
+        covered.length === activeIds.size && covered.every((id) => activeIds.has(id)) &&
+        new Set(covered).size === covered.length &&
+        candidate.pages.every((page) => !page.pieces || page.pieces.length <= 8) &&
+        requiredDesigns.every((purpose) => purposes.has(purpose))
+    },
+    fallback: () => JSON.stringify(fallbackDocumentOutline(context)),
+    onStatus,
+    signal,
+    providers,
+    onResult: (result) => { aiResult = result },
   })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un esquema de documento valido.")
   const proposed = normalizeOutline(parsed, context)
@@ -192,11 +224,11 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
   // BOM page is inserted, uncovered designs get their page, duplicates drop.
   const repaired = repairOutline(refined.outline, context)
   const repairs = [...restored.repairs, ...repaired.repairs]
-  if (typeof onProposal === "function") onProposal({ raw, parsed, proposed, refinements: refined.refinements, outline: repaired.outline, repairs })
+  if (typeof onProposal === "function") onProposal({ raw, parsed, proposed, refinements: refined.refinements, outline: repaired.outline, repairs, aiResult })
   return repaired.outline
 }
 
-export async function planPageLayout(pageOutline, context, { onProgress } = {}) {
+export async function planPageLayout(pageOutline, context, { onProgress, onStatus, signal, providers } = {}) {
   const page = pageOutline && typeof pageOutline === "object" ? pageOutline : {}
   const instructions =
     "Sos disenador de layout para fichas tecnicas textiles. Para ESTA pagina, repartí el espacio por jerarquia visual usando solamente este vocabulario cerrado de bloques hoja: " +
@@ -219,11 +251,24 @@ export async function planPageLayout(pageOutline, context, { onProgress } = {}) 
     "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
     '{"regions":[{"type":"header","weight":10}]}'
 
+  const hybrid = {
+    task: HYBRID_TASKS.PAGE_LAYOUT,
+    validator: (content) => {
+      const value = parseJSONOrRepair(content, "invalid page layout")
+      const allowed = new Set(["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "note", "spacer", "disclaimer"])
+      return Array.isArray(value.regions) && value.regions.length > 0 && value.regions.every((region) => region && allowed.has(region.type))
+    },
+    fallback: () => JSON.stringify({ regions: deterministicPageLayout(page, context).regions }),
+    onStatus,
+    signal,
+    providers,
+  }
   const call = onProgress
     ? deepseekChatStream({
         messages: [{ role: "user", content: instructions }],
         maxTokens: 2500,
         temperature: 0.2,
+        ...hybrid,
         onEvent: ({ contentSoFar, tokensSoFar }) => {
           onProgress({
             percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_PAGE_EVENT_BUDGET) * 100)),
@@ -235,6 +280,7 @@ export async function planPageLayout(pageOutline, context, { onProgress } = {}) 
         messages: [{ role: "user", content: instructions }],
         maxTokens: 2500,
         temperature: 0.2,
+        ...hybrid,
       })
 
   const parsed = parseJSONOrRepair(await call, "El asistente de IA no devolvio un layout de pagina valido.")

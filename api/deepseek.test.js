@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 function makeReqRes(body) {
-  const req = { method: "POST", body }
+  const req = { method: "POST", body, once() {} }
   const res = {
     statusCode: 200,
     headers: {},
@@ -30,6 +30,7 @@ function makeReqRes(body) {
       this.body += value
       return true
     },
+    once() {},
   }
   return { req, res }
 }
@@ -123,6 +124,7 @@ describe("api/deepseek proxy", () => {
     const { req, res } = makeReqRes({
       messages: [{ role: "user", content: "Responde solo OK" }],
       max_tokens: 10,
+      allow_model_fallback: true,
     })
 
     await handler(req, res)
@@ -155,6 +157,7 @@ describe("api/deepseek proxy", () => {
       stream: true,
       messages: [{ role: "user", content: "Analiza hoodie" }],
       max_tokens: 100,
+      allow_model_fallback: true,
     })
 
     await handler(req, res)
@@ -168,5 +171,18 @@ describe("api/deepseek proxy", () => {
     const firstEvent = JSON.parse(res.body.split("\n\n")[0].slice("data: ".length))
     expect(firstEvent.choices[0].delta.content).toContain('"garmentType":"hoodie"')
     expect(res.body).toContain("data: [DONE]")
+  })
+
+  it("does not silently substitute Llama for a structured DeepSeek request", async () => {
+    const handler = await loadHandler({ NVIDIA_FALLBACK_MODEL: "meta/llama-3.1-70b-instruct" })
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: { message: "ResourceExhausted" } }),
+    })
+    const { req, res } = makeReqRes({ messages: [{ role: "user", content: "JSON" }] })
+    await handler(req, res)
+    expect(global.fetch).toHaveBeenCalledOnce()
+    expect(res.statusCode).toBe(503)
   })
 })
