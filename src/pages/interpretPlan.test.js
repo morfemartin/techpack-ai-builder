@@ -256,7 +256,7 @@ describe("split composition (2D layout)", () => {
     expect(splitNode.direction).toBe("row")
     expect(splitNode.children).toHaveLength(2)
     expect(splitNode.children.every((child) => child.grow === 0)).toBe(true)
-    expect(splitNode.children[0].basis).toBeGreaterThanOrEqual(320)
+    expect(splitNode.children[0].basis).toBe(272)
     expect(splitNode.children[1].basis).toBeGreaterThan(splitNode.children[0].basis)
   })
 

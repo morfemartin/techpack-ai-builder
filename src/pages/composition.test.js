@@ -25,12 +25,22 @@ describe("Layout Engine v3 candidate composition", () => {
     expect(result.ast.axis).toBe("column")
   })
 
-  it("uses the 3/5 grid for a dense BOM beside artwork", () => {
+  it("uses a narrow wrapped BOM when that protects both artwork slots", () => {
     const ctx = { parts: Array.from({ length: 16 }, (_, index) => ({ id: "p" + index, val: "Spec", on: true })) }
     const result = evaluatePageCompositions(page("overview", [{ type: "partsList" }]), ctx)
     expect(result.decision.mode).toBe("bom-hero")
-    expect(result.decision.widths).toEqual([GRID.span(3), GRID.span(5)])
+    expect(result.decision.widths).toEqual([GRID.span(2), GRID.span(6)])
     expect(result.decision.complete).toBe(true)
+    expect(result.decision.smallestIllustrationArea).toBeGreaterThan(240 * 240)
+  })
+
+  it("prefers balanced artboards over one minimum slot plus one oversized slot", () => {
+    const ctx = { parts: Array.from({ length: 16 }, (_, index) => ({ id: "long-part-" + index, val: "Technical specification with enough detail to wrap", on: true })) }
+    const result = evaluatePageCompositions(page("overview", [{ type: "partsList" }], 2), ctx)
+    expect(result.decision.mode).toBe("bom-hero")
+    expect(result.decision.widths).toEqual([GRID.span(2), GRID.span(6)])
+    expect(result.decision.slotWidth).toBe(414)
+    expect(result.decision.slotHeight).toBe(608)
   })
 
   it("groups colors and embroidery in one rail instead of two half-empty columns", () => {

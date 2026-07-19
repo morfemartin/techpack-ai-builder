@@ -7,7 +7,7 @@ const COMPOSABLE = new Set(["illustration", "partsList", "colorSpecs", "embSpecs
 const CHROME_TYPES = new Set(["header", "titleBar", "disclaimer", "spacer"])
 
 export const REGION_WIDTH_BANDS = {
-  partsList: { min: GRID.span(3), max: GRID.span(4) },
+  partsList: { min: GRID.span(2), max: GRID.span(4) },
   colorSpecs: { min: GRID.span(2), max: GRID.span(3) },
   embSpecs: { min: GRID.span(3), max: GRID.span(3) },
   references: { min: GRID.span(3), max: GRID.span(3) },
@@ -73,6 +73,7 @@ function candidate(mode, ast, illustration, dataBoxes, dimensions, pageCount = 1
   const overflow = dataBoxes.reduce((sum, item) => sum + Math.max(0, item.measure.min - item.height), 0) + Math.max(0, Number(dimensions.groupOverflow) || 0)
   const complete = overflow === 0
   const slotValid = slotBoxes.every((slot) => slot.width >= 240 && slot.height >= 240)
+  const smallestIllustrationArea = Math.min(...slotBoxes.map((slot) => slot.width * slot.height))
   const illustrationArea = slotBoxes.reduce((sum, slot) => sum + slot.width * slot.height * (slot.slots || 1), 0)
   const wastedDataArea = dataBoxes.reduce((sum, item) => sum + item.width * Math.max(0, item.height - item.measure.natural), 0)
   return {
@@ -83,6 +84,7 @@ function candidate(mode, ast, illustration, dataBoxes, dimensions, pageCount = 1
     slotValid,
     slotWidth: Math.min(...slotBoxes.map((slot) => slot.width)),
     slotHeight: Math.min(...slotBoxes.map((slot) => slot.height)),
+    smallestIllustrationArea,
     illustrationArea,
     wastedDataArea,
     overflow,
@@ -235,6 +237,7 @@ function compareCandidates(a, b) {
   if (a.complete !== b.complete) return a.complete ? -1 : 1
   if (a.slotValid !== b.slotValid) return a.slotValid ? -1 : 1
   if (a.overflow !== b.overflow) return a.overflow - b.overflow
+  if (a.smallestIllustrationArea !== b.smallestIllustrationArea) return b.smallestIllustrationArea - a.smallestIllustrationArea
   if (a.illustrationArea !== b.illustrationArea) return b.illustrationArea - a.illustrationArea
   if (a.wastedDataArea !== b.wastedDataArea) return a.wastedDataArea - b.wastedDataArea
   return a.pageCount - b.pageCount
@@ -248,6 +251,7 @@ function summarize(candidate) {
     slotValid: candidate.slotValid,
     slotWidth: Math.round(candidate.slotWidth),
     slotHeight: Math.round(candidate.slotHeight),
+    smallestIllustrationArea: Math.round(candidate.smallestIllustrationArea),
     illustrationArea: Math.round(candidate.illustrationArea),
     wastedDataArea: Math.round(candidate.wastedDataArea),
     overflow: Math.round(candidate.overflow),

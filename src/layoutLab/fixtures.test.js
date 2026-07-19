@@ -74,11 +74,13 @@ describe("Layout Lab closure fixtures", () => {
       const item = fixture("M-bom-" + count)
       return buildPlannedPages(item.plan, ctxForFixture(item), { documentMode: "illustration-handoff" })
     })
-    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["data-slot-mosaic", "data-slot-mosaic", "data-slot-mosaic", "bom-hero"])
+    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["data-slot-mosaic", "data-slot-mosaic", "bom-hero", "bom-hero"])
     expect(results.every((pages) => pages[0].compositionDecision.complete)).toBe(true)
     expect(results[3]).toHaveLength(1)
-    expect(results[2][0].compositionDecision.slotHeight).toBeGreaterThanOrEqual(240)
-    expect(results[2][0].compositionDecision.widths).toEqual([414, 698])
+    expect(results[2][0].compositionDecision.slotWidth).toBe(414)
+    expect(results[2][0].compositionDecision.slotHeight).toBe(608)
+    expect(results[2][0].compositionDecision.widths).toEqual([272, 840])
+    expect(results[2][0].compositionDecision.smallestIllustrationArea).toBe(414 * 608)
     expect(results[3][0].compositionDecision.slotWidth).toBeGreaterThanOrEqual(240)
     expect(results[3][0].compositionDecision.slotHeight).toBeGreaterThanOrEqual(240)
     expect(results[3][0].compositionDecision.widths).toEqual([414, 698])
@@ -90,9 +92,14 @@ describe("Layout Lab closure fixtures", () => {
 
     const fourViews = fixture("E-illustration-grid")
     const fourViewPage = buildPlannedPages(fourViews.plan, ctxForFixture(fourViews), { documentMode: "illustration-handoff" })[0]
-    expect(fourViewPage.compositionDecision.mode).toBe("data-slot-mosaic")
-    for (const view of [1, 2, 3, 4]) expect(fourViewPage.svg).toContain("id='ARTWORK__V" + view + "'")
-    const artboards = [...fourViewPage.svg.matchAll(/<g id='ARTWORK__V\d+'><rect x='[\d.]+' y='([\d.]+)' width='[\d.]+' height='([\d.]+)'/g)]
+    expect(fourViewPage.compositionDecision.mode).toBe("hero-bottom-band")
+    expect(fourViewPage.compositionDecision.heights).toEqual([512, 80])
+    expect(fourViewPage.compositionDecision.smallestIllustrationArea).toBe(556 * 248)
+    for (const view of [1, 2, 3, 4]) {
+      expect(fourViewPage.svg).toContain("ARTBOARD_CONTENT_CLIP__V" + view)
+      expect(fourViewPage.svg).toContain("id='ILLUSTRATOR_INSTRUCTIONS__V" + view + "'")
+    }
+    const artboards = [...fourViewPage.svg.matchAll(/<rect x='[\d.]+' y='([\d.]+)' width='[\d.]+' height='([\d.]+)' fill='none' stroke='#E4E6EA'/g)]
     expect(artboards).toHaveLength(4)
     artboards.forEach((match) => {
       expect(Number(match[1]) % 16).toBe(0)
