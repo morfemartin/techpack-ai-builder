@@ -338,6 +338,7 @@ function leafForRegion(region, page, ctx) {
           briefs: normalizeSlotBriefs(region, page, briefsCtx),
           note: region.note || (design && design.illustrationBrief) || "",
           slotOffset: region._slotOffset,
+          clipPrefix: page.id,
         })
         return region._mosaicSlot
           ? "<g id='ARTWORK__V" + (Number(region._slotOffset) + 1) + "'>" + artworkMarkup + "</g>"

@@ -13,14 +13,17 @@ function fixture(id) {
 
 describe("Layout Lab closure fixtures", () => {
   it("renders every deterministic fixture without invalid SVG geometry", () => {
+    const clipIds = []
     for (const item of FIXTURES) {
       const pages = buildPlannedPages(item.plan, ctxForFixture(item))
       expect(pages.length, item.id).toBeGreaterThan(0)
       for (const page of pages) {
         expect(page.svg, item.id).toContain("<svg")
         expect(page.svg, item.id).not.toMatch(/NaN|undefined/)
+        clipIds.push(...[...page.svg.matchAll(/<clipPath id='([^']+)'/g)].map((match) => match[1]))
       }
     }
+    expect(new Set(clipIds).size).toBe(clipIds.length)
   })
 
   it("measure-pass renders its bounded BOM and illustration together", () => {

@@ -200,16 +200,19 @@ describe("reusable page block helpers", () => {
 
   it("renders illustration placeholders without drawing garment vectors", () => {
     const svg = renderIllustrationZone(
-      { x: 10, y: 20, width: 300, height: 180 },
+      { x: 10, y: 20, width: 300, height: 360 },
       { slots: 3, refs: ["Front", "Back"], note: "Show front and back construction notes." }
     )
 
     expect(svg).toContain("FRONT")
     expect(svg).toContain("BACK")
     expect(svg).toContain("VISTA 3")
-    expect(svg).toContain("Show front and back")
-    expect(svg).toContain("construction notes.")
+    expect(svg).toContain("Show front and")
+    expect(svg).toContain("back construction")
+    expect(svg).toContain("notes.")
     expect(svg).toContain("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
+    expect(svg).toContain("id='ARTBOARD_CONTENT_CLIP__V1'")
+    expect(svg).toContain("clip-path='url(#ARTBOARD_CONTENT_CLIP__V1)'")
     expect(svg).not.toContain("<path")
   })
 })

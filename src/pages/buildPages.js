@@ -180,7 +180,7 @@ export function renderReferenceAsset(box, { design } = {}) {
   return s
 }
 
-export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset } = {}) {
+export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset, clipPrefix } = {}) {
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
   var noteText = note || ""
   // The illustration is the hero: it takes the WHOLE box (no note band carved
@@ -213,6 +213,9 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     var x = box.x + xGap + c * (cellW + xGap)
     var y = rowOffsets[r]
     var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Vista " + (i + 1)
+    var viewNumber = Math.max(0, Number(slotOffset) || 0) + i + 1
+    var safeClipPrefix = clipPrefix ? String(clipPrefix).replace(/[^a-zA-Z0-9_-]/g, "_") + "__" : ""
+    var clipId = safeClipPrefix + "ARTBOARD_CONTENT_CLIP__V" + viewNumber
     // Crop-marked art board: a hairline frame with inward corner registration
     // ticks reads as "place artwork here", not a blank box.
     s += R(x, y, cellW, cellH, "none", "#E4E6EA", "0.8")
@@ -221,9 +224,12 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
       s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + (p[0] + tk * p[2]) + "' y2='" + p[1] + "' stroke='#B7BCC6' stroke-width='1'/>"
       s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + p[0] + "' y2='" + (p[1] + tk * p[3]) + "' stroke='#B7BCC6' stroke-width='1'/>"
     })
+    // Wrapping is conservative and this clip is the invariant's final guard:
+    // no glyph, highlight or reference can paint outside its artwork slot.
+    s += "<defs><clipPath id='" + clipId + "'><rect x='" + (x + 1) + "' y='" + (y + 1) + "' width='" + Math.max(1, cellW - 2) + "' height='" + Math.max(1, cellH - 2) + "'/></clipPath></defs>"
+    s += "<g clip-path='url(#" + clipId + ")'>"
     // Red index chip + uppercase view label, top-left (the tech-pack "FRONT
     // VIEW" / "BACK VIEW" caption). The chip stays the cell's only attention mark.
-    var viewNumber = Math.max(0, Number(slotOffset) || 0) + i + 1
     s += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + viewNumber)
     s += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
 
@@ -260,7 +266,12 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
         s += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
       })
     }
-    if (cellH >= 120) s += TX(x + cellW / 2, y + cellH - 16, "AREA EDITABLE PARA ILUSTRACION TECNICA", PRINT.minFont, true, "middle", "#9AA0AB")
+    if (cellH >= 120) {
+      var fullAreaLabel = "AREA EDITABLE PARA ILUSTRACION TECNICA"
+      var areaLabel = wrapLines(fullAreaLabel, Math.max(1, cellW - INSET * 2), PRINT.minFont).length === 1 ? fullAreaLabel : "AREA EDITABLE"
+      s += TX(x + cellW / 2, y + cellH - 16, areaLabel, PRINT.minFont, true, "middle", "#9AA0AB")
+    }
+    s += "</g>"
     s += "</g>"
   }
 

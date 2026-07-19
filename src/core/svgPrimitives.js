@@ -134,15 +134,20 @@ export function fitText(text, maxWidth, maxHeight, opts) {
   return { size: minSize, lineHeight: floorLh, lines: wrapLines(raw, maxWidth, minSize).slice(0, maxLines) }
 }
 
-// Word-wraps plain text into lines that roughly fit `maxWidth` px at
-// `fontSize`. No real text measurement is available here (this builds raw
-// SVG <text> strings, in both browser and Node/vitest) - avgCharWidth is a
-// practical heuristic for this project's UI sans-serif, not exact metrics.
+// Word-wraps plain text into lines that conservatively fit `maxWidth` px at
+// `fontSize`. Raw SVG is also built in Node, where getBBox is unavailable, so
+// the ratio deliberately models a wide technical/mono glyph. Long unbroken
+// tokens are split as well: URLs, codes and measurements cannot escape.
 export const wrapLines = (text, maxWidth, fontSize) => {
   if (text == null || text === "") return []
-  const avgCharWidth = fontSize * 0.55
+  const avgCharWidth = fontSize * 0.62
   const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth))
-  const words = String(text).split(/\s+/)
+  const words = String(text).split(/\s+/).flatMap((word) => {
+    if (word.length <= maxCharsPerLine) return [word]
+    const chunks = []
+    for (let index = 0; index < word.length; index += maxCharsPerLine) chunks.push(word.slice(index, index + maxCharsPerLine))
+    return chunks
+  })
   const lines = []
   let currentLine = ""
   for (const word of words) {
