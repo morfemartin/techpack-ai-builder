@@ -18,14 +18,10 @@ import { buildPlannedPages } from "../pages/interpretPlan.js"
 import { fallbackDocumentOutline, planDocumentOutline, planPageLayout } from "../core/documentPlan.js"
 import { repairPage, validateOutline, validatePage } from "../pages/pageContracts.js"
 import { buildReviewFindings, summarizeConfirmed } from "../core/reviewDiff.js"
-import { GRID, PAGE } from "../design/metrics.js"
+import { renderGridOverlay } from "./gridOverlay.js"
 import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { ctxForFixture } from "./fixtureContext.js"
-
-const PAGE_W = PAGE.width
-const PAGE_H = PAGE.height
-const PAGE_PAD = GRID.margin
 
 const state = { mono: false, grid: false, tab: "design", aiDataset: "parka", aiPages: null, aiLog: [], aiRunning: false }
 const AI_OUTLINE_TIMEOUT_MS = 12000
@@ -41,31 +37,12 @@ function withTimeout(promise, ms, label) {
   ]).finally(() => clearTimeout(timer))
 }
 
-// Grid overlay in page coordinates: the outer margin, a whole-pixel baseline
-// every 32px (ROW.table), and the shared COL column stops (index/label/value)
-// as vertical guides - so a block's rules and text can be checked against the
-// exact template every renderer now shares.
-function gridOverlay() {
-  const inner = PAGE_W - PAGE_PAD * 2
-  let rows = ""
-  for (let y = PAGE_PAD; y <= PAGE_H - PAGE_PAD; y += GRID.baseline) {
-    rows += `<line x1="${PAGE_PAD}" y1="${y}" x2="${PAGE_W - PAGE_PAD}" y2="${y}" stroke="#E5352B" stroke-width="0.4" opacity="0.22"/>`
-  }
-  let stops = ""
-  for (let column = 1; column < GRID.columns; column++) {
-    const x = PAGE_PAD + column * GRID.column + (column - 0.5) * GRID.gutter
-    stops += `<line x1="${x.toFixed(1)}" y1="${PAGE_PAD}" x2="${x.toFixed(1)}" y2="${PAGE_H - PAGE_PAD}" stroke="#1A3FB0" stroke-width="0.5" opacity="0.3" stroke-dasharray="4,4"/>`
-  }
-  const margin = `<rect x="${PAGE_PAD}" y="${PAGE_PAD}" width="${inner}" height="${PAGE_H - PAGE_PAD * 2}" fill="none" stroke="#E5352B" stroke-width="0.8" opacity="0.5"/>`
-  return `<svg class="overlay" viewBox="0 0 ${PAGE_W} ${PAGE_H}" preserveAspectRatio="xMidYMid meet">${rows}${stops}${margin}</svg>`
-}
-
 function pageFigure(p) {
   return `
     <figure class="page">
       <div class="page-frame">
         ${p.svg}
-        ${state.grid ? gridOverlay() : ""}
+        ${state.grid ? renderGridOverlay() : ""}
       </div>
       <figcaption>${p.name}</figcaption>
     </figure>`

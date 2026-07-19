@@ -191,15 +191,15 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
   var rows = Math.ceil(slotCount / cols)
   var xGap = GRID.gutter
   var yGap = GRID.verticalGap
-  var cellW = (box.width - xGap * (cols + 1)) / cols
-  var availableUnits = Math.max(1, Math.floor((box.height - yGap * (rows + 1)) / GRID.baseline))
+  var cellW = (box.width - xGap * Math.max(0, cols - 1)) / cols
+  var availableUnits = Math.max(1, Math.floor((box.height - yGap * Math.max(0, rows - 1)) / GRID.baseline))
   var baseUnits = Math.floor(availableUnits / rows)
   var extraUnits = availableUnits % rows
   var rowHeights = Array.from({ length: rows }, function (_, rowIndex) {
     return Math.max(1, baseUnits + (rowIndex < extraUnits ? 1 : 0)) * GRID.baseline
   })
   var rowOffsets = []
-  var runningY = box.y + yGap
+  var runningY = box.y
   rowHeights.forEach(function (height) {
     rowOffsets.push(runningY)
     runningY += height + yGap
@@ -210,7 +210,7 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     var c = i % cols
     var r = Math.floor(i / cols)
     var cellH = rowHeights[r]
-    var x = box.x + xGap + c * (cellW + xGap)
+    var x = box.x + c * (cellW + xGap)
     var y = rowOffsets[r]
     var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Vista " + (i + 1)
     var viewNumber = Math.max(0, Number(slotOffset) || 0) + i + 1

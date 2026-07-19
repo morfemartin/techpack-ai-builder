@@ -55,6 +55,14 @@ export const PAGE_BODY = {
   height: PAGE.height - GRID.margin * 2 - CHROME.header - CHROME.titleBar - CHROME.footer - CHROME.gap * 3,
 }
 
+export function gridColumnBoxes() {
+  return Array.from({ length: GRID.columns }, (_, index) => ({
+    index,
+    x: GRID.margin + index * (GRID.column + GRID.gutter),
+    width: GRID.column,
+  }))
+}
+
 export function snapBaseline(value, mode = "ceil") {
   const units = Number(value) / GRID.baseline
   const snapped = mode === "floor" ? Math.floor(units) : mode === "round" ? Math.round(units) : Math.ceil(units)

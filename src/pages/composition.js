@@ -59,7 +59,7 @@ function slotGeometry(illustration, width, height) {
   return {
     slots,
     width: (width - GRID.gutter * (columns - 1)) / columns,
-    height: (height - GRID.gutter * (rows - 1)) / rows,
+    height: (height - GRID.verticalGap * (rows - 1)) / rows,
   }
 }
 
