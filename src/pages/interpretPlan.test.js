@@ -130,9 +130,9 @@ describe("interpretPagePlan", () => {
     expect(root.children[0].grow).toBe(0)
     expect(root.children[0].basis).toBe(64)
     // partsList: bounded content at its natural height (1 part = 16 header
-    // strip + 32 table row), never stretched by the plan weight anymore
+    // strip + 18 table row), never stretched by the plan weight anymore
     expect(root.children[1].grow).toBe(0)
-    expect(root.children[1].basis).toBe(48)
+    expect(root.children[1].basis).toBe(34)
     // slack spacer: the only growing node
     expect(root.children[2].grow).toBe(1)
     // disclaimer: fixed strip, pinned to the bottom
@@ -337,7 +337,7 @@ describe("effectivePartsForPage (piece-aware pages)", () => {
 })
 
 describe("buildPlannedPages parts-list pagination (F4.7)", () => {
-  const manyParts = Array.from({ length: 30 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true }))
+  const manyParts = Array.from({ length: 40 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true }))
   const ctx = {
     lang: "ES",
     hdr: { brand: "Morfe", pname: "Hoodie" },
@@ -348,7 +348,7 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     garment: { partLabels: { ES: {} } },
   }
   // A parts list given only a small split column - not nearly enough room
-  // for 30 rows at the fixed compact row height.
+  // for 40 rows at the compact row height.
   const overflowPlan = {
     pages: [
       {
@@ -375,7 +375,7 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
   it("numbers continuation rows continuing from where the first page left off (no restart, no gap)", () => {
     const pages = buildPlannedPages(overflowPlan, ctx)
     const allText = pages.map((p) => p.svg).join("\n")
-    // every one of the 30 parts' values must appear exactly once across the
+    // every one of the 40 parts' values must appear exactly once across the
     // whole paginated set - nothing lost, nothing duplicated. Matched as an
     // exact SVG text-node value (">Valor 1<") so "Valor 1" doesn't false-
     // positive against "Valor 10".."Valor 19" as a substring.

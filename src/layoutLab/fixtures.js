@@ -282,9 +282,10 @@ export const FIXTURES = [
   {
     id: "F-pagination",
     dataset: "parka",
-    title: "F · Paginación de BOM (16 piezas, columna corta)",
-    tests: "ilustración grande arriba + partsList en la banda inferior (capacidad ~8 filas).",
-    expected: "El BOM se parte en página + '(cont.)', numeración continua 1..16 sin perder filas.",
+    density: { parts: 40 },
+    title: "F · Paginación de BOM (40 piezas)",
+    tests: "Un volumen que supera la capacidad física aun con la micro-retícula compacta.",
+    expected: "El BOM se parte en página + '(cont.)', numeración continua 1..40 sin perder filas.",
     plan: {
       pages: [
         {

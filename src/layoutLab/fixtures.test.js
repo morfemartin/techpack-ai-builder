@@ -33,6 +33,13 @@ describe("Layout Lab closure fixtures", () => {
     expect(page.svg).toContain("Top triangular")
   })
 
+  it("keeps the pagination fixture above real compact-table capacity", () => {
+    const item = fixture("F-pagination")
+    const pages = buildPlannedPages(item.plan, ctxForFixture(item), { documentMode: "illustration-handoff" })
+    expect(pages.length).toBeGreaterThan(1)
+    expect(pages[1].name).toContain("cont")
+  })
+
   it("contract-repair fixture becomes clean and records repairs", () => {
     const item = fixture("J-contract-repair")
     const ctx = ctxFor(DATASETS[item.dataset])
@@ -67,9 +74,14 @@ describe("Layout Lab closure fixtures", () => {
       const item = fixture("M-bom-" + count)
       return buildPlannedPages(item.plan, ctxForFixture(item), { documentMode: "illustration-handoff" })
     })
-    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["data-slot-mosaic", "data-slot-mosaic", "bom-hero", "bom-hero"])
+    expect(results.map((pages) => pages[0].compositionDecision.mode)).toEqual(["data-slot-mosaic", "data-slot-mosaic", "data-slot-mosaic", "bom-hero"])
     expect(results.every((pages) => pages[0].compositionDecision.complete)).toBe(true)
-    expect(results[3]).toHaveLength(2)
+    expect(results[3]).toHaveLength(1)
+    expect(results[2][0].compositionDecision.slotHeight).toBeGreaterThanOrEqual(240)
+    expect(results[2][0].compositionDecision.widths).toEqual([414, 698])
+    expect(results[3][0].compositionDecision.slotWidth).toBeGreaterThanOrEqual(240)
+    expect(results[3][0].compositionDecision.slotHeight).toBeGreaterThanOrEqual(240)
+    expect(results[3][0].compositionDecision.widths).toEqual([414, 698])
 
     const short = fixture("B-split-stack")
     const shortPage = buildPlannedPages(short.plan, ctxForFixture(short), { documentMode: "illustration-handoff" })[0]

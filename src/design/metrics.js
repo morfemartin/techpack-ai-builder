@@ -96,13 +96,30 @@ export const COL = {
   value: 0.5,
 }
 
-// ── Row-height scale (multiples of space(1)=4px) ─────────────────────────────
+// Parts tables use a denser internal grid than the page-level modules. The
+// number is a cross-reference, not a data column: keeping its track narrow
+// gives the technical detail the majority of the available width.
+export const PARTS_COL = {
+  index: 0.055,
+  label: 0.12,
+  value: 0.43,
+}
+
+// ── Row-height scale ─────────────────────────────────────────────────────────
+// Page modules use the 4px token scale; the dense BOM alone may use the 2px
+// print micro-grid so it does not surrender illustration area unnecessarily.
 export const ROW = {
   tableHeader: space(4), // 16 — one baseline unit
-  table: space(8), // 32 — compact parts-table row (AI-planned pages)
+  table: 18, // 4.5mm — one 10px line with balanced print breathing room
   color: space(8), // 32 — two baseline units
   emb: space(4), // 16 — max embroidery key/value row
   kv: space(5), // 20 — generic key/value row (design page info rows)
+}
+
+export const TABLE = {
+  lineHeight: 11,
+  verticalPadding: 6,
+  chip: space(3), // 12 — enough for two digits at the 7pt print minimum
 }
 
 // One chip size for every numbered index marker (parts rows, illustration

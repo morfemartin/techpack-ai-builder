@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { effectiveParts, partsCapacityForHeight, partsRowMetrics, partsTableMetrics } from "./tableMetrics.js"
+import { effectiveParts, partsCapacityForHeight, partsRowMetrics, partsTableLayout, partsTableMetrics } from "./tableMetrics.js"
 
 describe("width-aware BOM metrics", () => {
   const parts = [
@@ -12,7 +12,26 @@ describe("width-aware BOM metrics", () => {
     const wide = partsRowMetrics({ parts, partLabels: { body: "Shell exterior tres capas" }, width: 556 })
     expect(narrow[0].valueLines.length).toBeGreaterThan(1)
     expect(narrow[0].height).toBeGreaterThanOrEqual(wide[0].height)
-    expect(narrow[0].height).toBeGreaterThanOrEqual(32)
+    expect(narrow[0].height).toBeGreaterThanOrEqual(18)
+  })
+
+  it("keeps single-line rows dense and gives details most of the width", () => {
+    const [row] = partsRowMetrics({
+      parts: [{ id: "zip", val: "YKK #5", on: true }],
+      partLabels: { zip: "Cierre" },
+      width: 414,
+    })
+    expect(row.height).toBe(18)
+    expect(row.nameLines).toEqual(["Cierre"])
+    expect(row.valueLines).toEqual(["YKK #5"])
+  })
+
+  it("chooses the column split that minimizes wrapped table height", () => {
+    const layout = partsTableLayout({ parts, partLabels: { body: "Shell exterior tres capas", zip: "Cierre" }, width: 414 })
+    expect(layout.columns.value).toBeGreaterThanOrEqual(0.3)
+    expect(layout.columns.value).toBeLessThanOrEqual(0.48)
+    expect(layout.columns.value).toBe(0.35)
+    expect(layout.height).toBe(62)
   })
 
   it("computes pagination capacity from the exact wrapped row heights", () => {

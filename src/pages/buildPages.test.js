@@ -127,6 +127,22 @@ describe("shared metrics adoption (P1 alignment)", () => {
     expect(svg).not.toContain("Archivo / Drive")
   })
 
+  it("uses a narrow number track and compact two-digit chips", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 400, height: 200 },
+      {
+        parts: [{ id: "body", val: "Cotton", on: true }],
+        partLabels: { body: "Body Panel" },
+        labels: { spec: "SPECS", detail: "DETAILS" },
+        compact: true,
+        startIndex: 9,
+      }
+    )
+    expect(svg).toContain("<rect x='16' y='19' width='12' height='12'")
+    expect(svg).toContain("width='12'")
+    expect(svg).toContain(">10</text>")
+  })
+
   it("svgHeader lays both rows on one grid: every bottom-row edge lands on a top-row edge, both rows fill the page", () => {
     const hdr2 = { brand: "B", season: "S", sno: "1", cat: "C", fab: "F", fac: "X", ind: "I", outd: "O", pname: "P" }
     const svg = buildPage1("ES", hdr2, capGarment.defaultParts.slice(0, 2), null, null, capGarment)

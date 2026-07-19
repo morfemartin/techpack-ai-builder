@@ -4,9 +4,9 @@ import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
-import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PRINT, ROW, TEXT_PAD } from "../design/metrics.js"
+import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
 import { briefLines } from "./briefs.js"
-import { partsRowMetrics } from "./tableMetrics.js"
+import { partsTableLayout } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, startIndex } = {}) {
@@ -22,15 +22,15 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   // aligned, so a short parts list reads as a clean table with breathing room
   // instead of a few rows stretched tall with tiny text floating in huge cells.
   // The registered Cap keeps the default flex-fill rows (grow:1) untouched.
-  var measuredRows = compact ? partsRowMetrics({ parts: safeParts, partLabels: pn, txParts: txP, width: box.width }) : null
+  var tableLayout = compact ? partsTableLayout({ parts: safeParts, partLabels: pn, txParts: txP, width: box.width }) : null
+  var measuredRows = tableLayout ? tableLayout.rows : null
+  var columns = tableLayout ? tableLayout.columns : PARTS_COL
 
-  // Header and data rows share the SAME column template (metrics.js COL) and
-  // the same alignment - the old header centered its captions at unrelated
-  // stops (0.32/0.62) and even claimed a 4th "Archivo / Drive" column that no
-  // data row ever drew. Dividers and the text beside them are both rounded so
-  // rule and glyph can't drift apart by sub-pixel amounts.
+  // Header and data rows share the SAME content-aware column template. The
+  // chosen value stop minimizes wrapped height for this table; dividers and
+  // glyphs are rounded together so they cannot drift by sub-pixel amounts.
   function colStops(b) {
-    return { divLabel: Math.round(b.x + b.width * COL.label), divValue: Math.round(b.x + b.width * COL.value) }
+    return { divLabel: Math.round(b.x + b.width * columns.label), divValue: Math.round(b.x + b.width * columns.value) }
   }
 
   var tableHeaderRow = leaf({
@@ -39,7 +39,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
       var st = colStops(b)
       return (
         R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
-        TX(b.x + b.width * COL.index, b.y + b.height / 2, "#", PRINT.minFont, true, "middle") +
+        TX(b.x + b.width * columns.index, b.y + b.height / 2, "#", PRINT.minFont, true, "middle") +
         TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, lx.spec || "SPECS", PRINT.minFont, true, "start") +
         TX(st.divValue + TEXT_PAD, b.y + b.height / 2, lx.detail || "DETAILS", PRINT.minFont, true, "start")
       )
@@ -57,13 +57,13 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
         var st = colStops(b)
         function textLines(lines, x) {
           var safeLines = Array.isArray(lines) && lines.length ? lines : [""]
-          var startY = b.y + b.height / 2 - ((safeLines.length - 1) * GRID.baseline) / 2
-          return safeLines.map((line, lineIndex) => TX(x, startY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", undefined, type.svgFonts.data)).join("")
+          var startY = b.y + b.height / 2 - ((safeLines.length - 1) * TABLE.lineHeight) / 2
+          return safeLines.map((line, lineIndex) => TX(x, startY + lineIndex * TABLE.lineHeight, line, PRINT.minFont, false, "start", undefined, type.svgFonts.data)).join("")
         }
         return (
           R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
           // role.index chip: shared mark via svgChip - same size everywhere.
-          svgChip(b.x + b.width * COL.index, b.y + b.height / 2, start + i + 1, Math.min(b.height - 6, CHIP)) +
+          svgChip(b.x + b.width * columns.index, b.y + b.height / 2, start + i + 1, Math.min(b.height - 4, TABLE.chip)) +
           "<line x1='" + st.divLabel + "' y1='" + b.y + "' x2='" + st.divLabel + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
           (metric ? textLines(metric.nameLines, st.divLabel + TEXT_PAD) : TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, nm, PRINT.minFont, false, "start")) +
           "<line x1='" + st.divValue + "' y1='" + b.y + "' x2='" + st.divValue + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
