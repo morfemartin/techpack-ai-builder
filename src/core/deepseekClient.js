@@ -38,7 +38,7 @@ const RETRYABLE_BASE_DELAY_MS = 1500
 // enough for a legitimately slow real generation (observed up to ~20s) while
 // still turning a genuine hang into a clear, RETRYABLE error within a bounded
 // time instead of an infinite spinner.
-const FETCH_TIMEOUT_MS = 30000
+const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_DEEPSEEK_FETCH_TIMEOUT_MS) || 30000
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))

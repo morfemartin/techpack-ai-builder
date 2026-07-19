@@ -71,7 +71,7 @@ export function extractLastCompletedRegionType(text) {
   return last
 }
 
-export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }) {
+export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal } = {}) {
   const context = { garmentType, parts, designs, brief, lang }
   const instructions =
     "Sos director de arte de fichas tecnicas textiles, pensando como un disenador tecnico real. Decidi que paginas necesita este documento respondiendo, en orden, las preguntas que un disenador se hace:\n" +
@@ -94,9 +94,12 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
     temperature: 0.2,
   })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un esquema de documento valido.")
+  const proposed = normalizeOutline(parsed, context)
   // The model proposes; the document contract disposes: a missing cover or
   // BOM page is inserted, uncovered designs get their page, duplicates drop.
-  return repairOutline(normalizeOutline(parsed, context), context).outline
+  const repaired = repairOutline(proposed, context)
+  if (typeof onProposal === "function") onProposal({ raw, parsed, proposed, outline: repaired.outline, repairs: repaired.repairs })
+  return repaired.outline
 }
 
 export async function planPageLayout(pageOutline, context, { onProgress } = {}) {

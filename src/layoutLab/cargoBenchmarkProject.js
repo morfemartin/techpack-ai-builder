@@ -122,6 +122,26 @@ export const traverseCargoBenchmark = {
       colors: [{ name: "Reflective silver", hex: "#C7CDD0" }],
     },
   ],
+  humanPagePlan: [
+    { page: 1, title: "Portada", purpose: "cover", objective: "Identificar producto, version y estado", pieces: [], views: ["Vista general"] },
+    { page: 2, title: "Indice de produccion", purpose: "index", objective: "Navegacion y control de recepcion", pieces: [], views: [] },
+    { page: 3, title: "Arquitectura del producto", purpose: "overview", objective: "Explicar modos pantalon/short, materiales y colorways", pieces: [], views: ["Frente pantalon", "Espalda pantalon", "Modo short"] },
+    { page: 4, title: "Pretina y bragueta", purpose: "structure:waist-fly", objective: "Construir cierre, ajuste y correccion de calce", pieces: ["P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08"], views: ["Exterior", "Interior abierto", "Bragueta explotada"] },
+    { page: 5, title: "Calce del cuerpo superior", purpose: "structure:upper-fit", objective: "Controlar volumen athletic, tiro y centro espalda", pieces: ["P09", "P10", "P11", "P12", "P13", "P14"], views: ["Frente", "Espalda", "Perfil"] },
+    { page: 6, title: "Movilidad y refuerzo de asiento", purpose: "structure:mobility", objective: "Explicar fuelle, elasticidad y paneles de asiento", pieces: ["P15", "P16", "P17"], views: ["Entrepierna interior", "Asiento", "Explosion de paneles"] },
+    { page: 7, title: "Bolsillos delanteros", purpose: "structure:front-pockets", objective: "Construir acceso bajo mochila y bolsas ancladas", pieces: ["P18", "P19", "P20", "P21"], views: ["Exterior", "Corte transversal", "Interior"] },
+    { page: 8, title: "Cargo izquierdo", purpose: "structure:left-cargo", objective: "Construir bolsillo expandible y tapa con snaps", pieces: ["P22", "P23", "P24", "P25"], views: ["Cerrado", "Fuelle abierto", "Tapa interior"] },
+    { page: 9, title: "Cargo derecho y bolsillo trasero", purpose: "structure:right-rear-pockets", objective: "Construir bolsillos planos con cierre y anclajes", pieces: ["P26", "P27", "P28", "P29", "P30"], views: ["Cargo derecho", "Bolsillo trasero", "Interior de bolsas"] },
+    { page: 10, title: "Sistema convertible zip-off", purpose: "structure:zip-off", objective: "Impedir error L/R y documentar conversion", pieces: ["P31", "P32", "P33", "P34"], views: ["Recorrido de cierre", "Explosion L/R", "Secuencia de conversion"] },
+    { page: 11, title: "Piernas inferiores y rodillas", purpose: "structure:lower-leg", objective: "Mantener articulacion y continuidad al montar piernas", pieces: ["P35", "P36", "P37", "P38", "P39", "P40"], views: ["Frente", "Espalda", "Seccion de rodilla"] },
+    { page: 12, title: "Bajos y compatibilidad con botas", purpose: "structure:boot-hem", objective: "Retirar pierna sin quitar bota y proteger el bajo", pieces: ["P41", "P42", "P43", "P44"], views: ["Bajo exterior", "Bajo interior", "Secuencia sobre bota"] },
+    { page: 13, title: "Medidas y gradacion", purpose: "measurements", objective: "Definir POM, tolerancias y reglas de talla", pieces: [], views: ["Frente acotado", "Espalda acotada"] },
+    { page: 14, title: "Mapa de construccion", purpose: "construction", objective: "Relacionar puntadas, margenes, presillas y orden", pieces: [], views: ["Mapa de costuras", "Secciones 301/504/516"] },
+    { page: 15, title: "D1 - Wordmark bordado", purpose: "design:Wordmark cargo izquierdo", objective: "Definir colocacion y ejecucion del bordado", pieces: [], views: ["Tapa completa", "Detalle de puntada"] },
+    { page: 16, title: "D2 - Marcador reflectivo", purpose: "design:Marcador reflectivo pantorrilla", objective: "Definir colocacion y aplicacion del transfer", pieces: [], views: ["Pierna derecha", "Detalle de transferencia"] },
+    { page: 17, title: "Etiquetado y empaque", purpose: "label", objective: "Definir rotulos, marcacion L/R, doblado y bolsa", pieces: [], views: ["Mapa interior", "Secuencia de doblado"] },
+    { page: 18, title: "Calidad y pendientes", purpose: "quality", objective: "Controlar pruebas, simetria y bloqueos de aprobacion", pieces: [], views: ["Mapa de inspeccion"] },
+  ],
   brief: {
     product: {
       use: "Trekking alpino de varias horas o varios dias, aproximaciones y scrambling ligero",
@@ -249,4 +269,3 @@ export const traverseCargoBenchmark = {
     ],
   },
 }
-

@@ -84,6 +84,19 @@ describe("document plan AI wrappers", () => {
     expect(prompt).toContain("Zipper lengths")
   })
 
+  it("exposes the model proposal separately from deterministic contract repairs", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "body", title: "Body", purpose: "overview", pieces: ["P01"] }] }))
+    let telemetry
+    const outline = await planDocumentOutline(
+      { garmentType: "Cargo", parts: [{ id: "P01", on: true }], designs: [] },
+      { onProposal: (value) => { telemetry = value } }
+    )
+    expect(telemetry.raw).toContain('"body"')
+    expect(telemetry.proposed.pages[0].purpose).toBe("overview")
+    expect(telemetry.repairs).toContain("inserted cover page")
+    expect(outline.pages[0].purpose).toBe("cover")
+  })
+
   it("falls back to cover + overview plus design pages when the outline is empty", async () => {
     deepseekChat.mockResolvedValueOnce('{"pages":[]}')
     const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })

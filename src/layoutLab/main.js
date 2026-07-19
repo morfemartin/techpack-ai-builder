@@ -24,9 +24,10 @@ import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { ctxForFixture } from "./fixtureContext.js"
 
-const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false }
+const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false, outlineRunning: false, outlineResult: null, outlineError: "" }
 const AI_OUTLINE_TIMEOUT_MS = 12000
 const AI_PAGE_TIMEOUT_MS = 10000
+const BENCHMARK_OUTLINE_TIMEOUT_MS = 300000
 
 function withTimeout(promise, ms, label) {
   let timer
@@ -149,11 +150,34 @@ function benchmarkBriefTab() {
     "zip-off": "S04 - Interfaz convertible zip-off",
     "lower-leg": "S05 - Piernas inferiores, rodillas y bajos",
   }
+  const humanRows = dataset.humanPagePlan.map((page) => [String(page.page).padStart(2, "0"), page.title, page.objective, page.pieces.join(", ") || "-", page.views.join(", ") || "-"])
+  let modelHtml = `<p class="comparison-empty">Todavia no ejecutado. Esta prueba llamara solo a planDocumentOutline; no genera layouts ni SVG.</p>`
+  if (state.outlineError) modelHtml = `<div class="err">${escapeHtml(state.outlineError)}</div>`
+  if (state.outlineResult) {
+    const result = state.outlineResult
+    const coverage = auditSemanticCoverage(result.outline, dataset.parts)
+    const known = new Set(dataset.parts.map((part) => part.id))
+    const proposedIds = result.outline.pages.flatMap((page) => Array.isArray(page.pieces) ? page.pieces : [])
+    const invented = [...new Set(proposedIds.filter((id) => !known.has(id)))]
+    const maxLoad = Math.max(0, ...result.outline.pages.map((page) => Array.isArray(page.pieces) ? page.pieces.length : 0))
+    const modelRows = result.outline.pages.map((page, index) => [String(index + 1).padStart(2, "0"), page.title, page.objective || "Sin objetivo", (page.pieces || []).join(", ") || "-", (page.views || []).join(", ") || "-"])
+    modelHtml = `<div class="score-strip"><strong>${result.outline.pages.length} paginas propuestas</strong><strong>${coverage.covered.length}/44 piezas exactas</strong><strong>${coverage.missing.length} omitidas</strong><strong>${coverage.duplicated.length} duplicadas</strong><strong>${invented.length} inventadas</strong><strong>carga maxima ${maxLoad}</strong></div>
+      ${dataTable(["P.", "Pagina", "Objetivo", "Piezas", "Vistas"], modelRows)}
+      <details class="diagnostics" ${result.repairs.length ? "open" : ""}><summary>Reparaciones del contrato - ${result.repairs.length}</summary>${result.repairs.length ? result.repairs.map((item) => `<div>${escapeHtml(item)}</div>`).join("") : "<div>Ninguna</div>"}</details>
+      <details class="diagnostics"><summary>Respuesta cruda de DeepSeek</summary><pre>${escapeHtml(result.raw)}</pre></details>`
+  }
   return `<main class="brief-main">
     <section class="fixture brief-hero">
       <div class="fx-head"><h2>${escapeHtml(dataset.hdr.pname)}</h2><span class="chip">FUENTE DE VERDAD</span></div>
       <p>${escapeHtml(dataset.note)}</p>
       <div class="brief-metrics"><strong>${dataset.parts.length} piezas</strong><strong>${brief.materials.length} materiales</strong><strong>${brief.trims.length} avios</strong><strong>${dataset.designs.length} aplicaciones</strong><strong>${brief.measurements.poms.length} POM</strong></div>
+    </section>
+    <section class="brief-section comparison-section">
+      <div class="comparison-head"><div><h2>Comparacion textual previa al layout</h2><p>Misma fuente de verdad. La geometria todavia no participa.</p></div><button id="outline-run" ${state.outlineRunning ? "disabled" : ""}>${state.outlineRunning ? "Consultando DeepSeek..." : "Ejecutar DeepSeek - solo texto"}</button></div>
+      <div class="comparison-columns">
+        <article><h3>Propuesta real del sistema / DeepSeek</h3>${modelHtml}</article>
+        <article><h3>Propuesta humana - 18 paginas fisicas</h3>${dataTable(["P.", "Pagina", "Objetivo", "Piezas", "Vistas"], humanRows)}</article>
+      </div>
     </section>
     <section class="brief-section"><h2>Producto</h2>${dataTable(["Campo", "Dato"], [
       ["Style", dataset.hdr.sno], ["Categoria", dataset.hdr.cat], ["Uso", brief.product.use], ["Usuario", brief.product.user],
@@ -246,6 +270,29 @@ async function runAiPlan() {
   }
 }
 
+async function runOutlineComparison() {
+  const dataset = DATASETS.traverseCargoBenchmark
+  const planCtx = { garmentType: dataset.label, parts: dataset.parts, designs: dataset.designs, brief: dataset.brief, lang: "ES" }
+  state.outlineRunning = true
+  state.outlineResult = null
+  state.outlineError = ""
+  render()
+  let telemetry = null
+  try {
+    const outline = await withTimeout(
+      planDocumentOutline(planCtx, { onProposal: (value) => { telemetry = value } }),
+      BENCHMARK_OUTLINE_TIMEOUT_MS,
+      "DeepSeek text outline"
+    )
+    state.outlineResult = { ...telemetry, outline }
+  } catch (error) {
+    state.outlineError = String((error && error.message) || error)
+  } finally {
+    state.outlineRunning = false
+    render()
+  }
+}
+
 function render() {
   const app = document.getElementById("app")
   const toc = state.tab === "design" ? FIXTURES.map((fx) => `<a href="#fx-${fx.id}">${fx.id}</a>`).join("") : ""
@@ -275,6 +322,8 @@ function render() {
   if (sel) sel.addEventListener("change", (e) => { state.aiDataset = e.target.value })
   const run = document.getElementById("ai-run")
   if (run) run.addEventListener("click", runAiPlan)
+  const outlineRun = document.getElementById("outline-run")
+  if (outlineRun) outlineRun.addEventListener("click", runOutlineComparison)
 }
 
 render()
