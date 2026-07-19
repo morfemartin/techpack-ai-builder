@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { alpineParkaBenchmark } from "./benchmarkProject.js"
+import { traverseCargoBenchmark } from "./cargoBenchmarkProject.js"
 
 function hdr(over) {
   return {
@@ -459,7 +460,7 @@ const bikini = {
   ],
 }
 
-export const DATASETS = { parka, hoodie, skirt, varsity, bikini, alpineParkaBenchmark }
+export const DATASETS = { parka, hoodie, skirt, varsity, bikini, alpineParkaBenchmark, traverseCargoBenchmark }
 
 // Construye el ctx que buildPlannedPages espera, a partir de un dataset.
 export function ctxFor(dataset, lang = "ES") {
@@ -473,5 +474,6 @@ export function ctxFor(dataset, lang = "ES") {
     garment: dataset.garment,
     documentVersion: dataset.documentVersion,
     approvalStatus: dataset.approvalStatus,
+    brief: dataset.brief,
   }
 }

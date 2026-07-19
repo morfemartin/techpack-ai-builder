@@ -70,6 +70,20 @@ describe("document plan AI wrappers", () => {
     expect(page.pieces).toEqual(["hood"])
   })
 
+  it("gives the model the confirmed textile brief instead of only names and parts", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] }))
+    await planDocumentOutline({
+      garmentType: "Cargo",
+      parts: [{ id: "P01", on: true }],
+      designs: [],
+      brief: { construction: { seams: ["Safety stitch 516"] }, openPoints: ["Zipper lengths"] },
+    })
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).toContain("Brief textil confirmado")
+    expect(prompt).toContain("Safety stitch 516")
+    expect(prompt).toContain("Zipper lengths")
+  })
+
   it("falls back to cover + overview plus design pages when the outline is empty", async () => {
     deepseekChat.mockResolvedValueOnce('{"pages":[]}')
     const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })

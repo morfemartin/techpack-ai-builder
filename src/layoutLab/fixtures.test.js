@@ -13,6 +13,17 @@ function fixture(id) {
 }
 
 describe("Layout Lab closure fixtures", () => {
+  it("keeps the definitive cargo benchmark complete and internally addressable", () => {
+    const dataset = DATASETS.traverseCargoBenchmark
+    expect(dataset.parts).toHaveLength(44)
+    expect(new Set(dataset.parts.map((part) => part.id)).size).toBe(44)
+    expect(dataset.brief.materials.map((item) => item.id)).toEqual(["F01", "F02", "F03", "F04", "F05"])
+    expect(dataset.brief.trims).toHaveLength(18)
+    expect(dataset.brief.measurements.poms).toHaveLength(16)
+    expect(dataset.designs.map((design) => design.id)).toEqual(["D1", "D2"])
+    expect(dataset.brief.openPoints.length).toBeGreaterThan(0)
+  })
+
   it("renders every deterministic fixture without invalid SVG geometry", () => {
     const clipIds = []
     for (const item of FIXTURES) {

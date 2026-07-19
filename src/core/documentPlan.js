@@ -71,8 +71,8 @@ export function extractLastCompletedRegionType(text) {
   return last
 }
 
-export async function planDocumentOutline({ garmentType, parts, designs, lang = "ES" }) {
-  const context = { garmentType, parts, designs, lang }
+export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }) {
+  const context = { garmentType, parts, designs, brief, lang }
   const instructions =
     "Sos director de arte de fichas tecnicas textiles, pensando como un disenador tecnico real. Decidi que paginas necesita este documento respondiendo, en orden, las preguntas que un disenador se hace:\n" +
     "1. ¿Que merece pagina propia? La portada identifica el estilo; las piezas se dividen por sistemas constructivos con objetivos distintos; cada diseno discreto tiene SU pagina.\n" +
@@ -81,6 +81,7 @@ export async function planDocumentOutline({ garmentType, parts, designs, lang = 
     "Prenda: " + safeString(garmentType, "custom") + "\n" +
     "Piezas conocidas (cada una con su id): " + JSON.stringify(parts || []) + "\n" +
     "Disenos conocidos: " + JSON.stringify(designs || []) + "\n" +
+    "Brief textil confirmado (no inventes ni contradigas estos datos): " + JSON.stringify(brief || {}) + "\n" +
     "Idioma: " + lang + "\n\n" +
     "Para cada pagina estructural indica \"pieces\": los ids que cubre, \"objective\": la mision tecnica y \"views\": las vistas necesarias. Cada id debe aparecer exactamente una vez.\n" +
     "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
@@ -108,6 +109,7 @@ export async function planPageLayout(pageOutline, context, { onProgress } = {}) 
       garmentType: context && context.garmentType,
       parts: context && context.parts,
       designs: context && context.designs,
+      brief: context && context.brief,
       lang: context && context.lang,
     }) + "\n\n" +
     "Pensá como un disenador de fichas tecnicas REAL. Antes de componer, respondé mentalmente: ¿como represento ESTA pagina de la manera mas ordenada? ¿que elementos tienen que estar si o si presentes visualmente? ¿que NO repito porque ya vive en otra pagina? Reglas de oro:\n" +

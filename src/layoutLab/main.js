@@ -24,7 +24,7 @@ import { FIXTURES } from "./fixtures.js"
 import { DATASETS, ctxFor } from "./datasets.js"
 import { ctxForFixture } from "./fixtureContext.js"
 
-const state = { mono: false, grid: false, tab: "design", aiDataset: "parka", aiPages: null, aiLog: [], aiRunning: false }
+const state = { mono: false, grid: false, tab: "design", aiDataset: "traverseCargoBenchmark", aiPages: null, aiLog: [], aiRunning: false }
 const AI_OUTLINE_TIMEOUT_MS = 12000
 const AI_PAGE_TIMEOUT_MS = 10000
 
@@ -126,6 +126,52 @@ function designTab() {
   return `<main>${FIXTURES.map(renderFixture).join("")}</main>`
 }
 
+function dataTable(headers, rows) {
+  return `<div class="brief-table-wrap"><table class="brief-table"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+}
+
+function bulletList(items) {
+  return `<ul>${(items || []).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+}
+
+function benchmarkBriefTab() {
+  const dataset = DATASETS.traverseCargoBenchmark
+  const brief = dataset.brief
+  const partGroups = dataset.parts.reduce((groups, part) => {
+    if (!groups[part.system]) groups[part.system] = []
+    groups[part.system].push(part)
+    return groups
+  }, {})
+  const groupNames = {
+    "waist-fly": "S01 - Pretina y bragueta",
+    "upper-body": "S02 - Cuerpo superior y movilidad",
+    pockets: "S03 - Bolsillos",
+    "zip-off": "S04 - Interfaz convertible zip-off",
+    "lower-leg": "S05 - Piernas inferiores, rodillas y bajos",
+  }
+  return `<main class="brief-main">
+    <section class="fixture brief-hero">
+      <div class="fx-head"><h2>${escapeHtml(dataset.hdr.pname)}</h2><span class="chip">FUENTE DE VERDAD</span></div>
+      <p>${escapeHtml(dataset.note)}</p>
+      <div class="brief-metrics"><strong>${dataset.parts.length} piezas</strong><strong>${brief.materials.length} materiales</strong><strong>${brief.trims.length} avios</strong><strong>${dataset.designs.length} aplicaciones</strong><strong>${brief.measurements.poms.length} POM</strong></div>
+    </section>
+    <section class="brief-section"><h2>Producto</h2>${dataTable(["Campo", "Dato"], [
+      ["Style", dataset.hdr.sno], ["Categoria", dataset.hdr.cat], ["Uso", brief.product.use], ["Usuario", brief.product.user],
+      ["Tallas", brief.product.sizes.join(", ")], ["Base", brief.product.baseSize], ["Proteccion", brief.product.protection], ["Transformacion", brief.product.transformation],
+    ])}<h3>Prioridades</h3>${bulletList(brief.product.priorities)}</section>
+    <section class="brief-section"><h2>Materiales</h2>${dataTable(["ID", "Material", "Especificacion"], brief.materials.map((item) => [item.id, item.name, item.spec]))}</section>
+    <section class="brief-section"><h2>Avios</h2>${dataTable(["ID", "Especificacion"], brief.trims.map((item) => [item.id, item.spec]))}</section>
+    <section class="brief-section"><h2>Colorways</h2>${dataTable(["Codigo", "Principal", "Refuerzo", "Avios", "Hilo"], brief.colorways.map((item) => [item.id, item.F01, item.F02, item.trims, item.thread]))}</section>
+    <section class="brief-section"><h2>Mapa de piezas</h2>${Object.entries(partGroups).map(([system, items]) => `<h3>${escapeHtml(groupNames[system] || system)} - ${items.length} piezas</h3>${dataTable(["ID", "Pieza", "Material", "Corte", "Construccion"], items.map((item) => [item.id, item.label, item.material, item.cut, item.construction]))}`).join("")}</section>
+    <section class="brief-section"><h2>Aplicaciones</h2>${dataset.designs.map((design) => `<article class="brief-design"><h3>${escapeHtml(design.id + " - " + design.name)}</h3>${dataTable(["Campo", "Dato"], [["Posicion", design.pos], ["Landmark", design.posDetail], ["Tecnica", design.tec], ["Medida", design.w + " x " + design.h + " mm"], ["Archivo", design.fileName]])}</article>`).join("")}</section>
+    <section class="brief-section"><h2>Construccion</h2><h3>Costuras</h3>${bulletList(brief.construction.seams)}<h3>Presillas</h3>${bulletList(brief.construction.bartacks)}<h3>Orden critico</h3>${bulletList(brief.construction.criticalOrder)}</section>
+    <section class="brief-section"><h2>Medidas - talla base ${brief.measurements.baseSize}</h2>${dataTable(["ID", "POM", "Valor", "Tolerancia"], brief.measurements.poms.map((item) => [item.id, item.name, item.value, item.tolerance]))}<h3>Gradacion</h3>${bulletList(brief.measurements.grading)}<p class="pending">${escapeHtml(brief.measurements.status)}</p></section>
+    <section class="brief-section"><h2>Etiquetado y empaque</h2><h3>Etiquetas</h3>${bulletList(brief.labelsAndPackaging.labels)}<h3>Empaque</h3>${bulletList(brief.labelsAndPackaging.pack)}</section>
+    <section class="brief-section"><h2>Control de calidad</h2>${bulletList(brief.quality)}</section>
+    <section class="brief-section pending-section"><h2>Pendiente de confirmar - DeepSeek no puede inferir</h2>${bulletList(brief.openPoints)}</section>
+  </main>`
+}
+
 function aiTab() {
   const options = Object.keys(DATASETS)
     .map((k) => `<option value="${k}" ${state.aiDataset === k ? "selected" : ""}>${DATASETS[k].label}</option>`)
@@ -153,7 +199,7 @@ async function runAiPlan() {
   const key = state.aiDataset
   const dataset = DATASETS[key]
   const ctx = ctxFor(dataset)
-  const planCtx = { garmentType: dataset.label, parts: dataset.parts, designs: dataset.designs, lang: "ES" }
+  const planCtx = { garmentType: dataset.label, parts: dataset.parts, designs: dataset.designs, brief: dataset.brief, lang: "ES" }
   state.aiRunning = true
   state.aiPages = null
   state.aiLog = ["Outline: asking the model which pages the document needs…"]
@@ -211,15 +257,17 @@ function render() {
       </div>
       <div class="controls">
         <button class="tab ${state.tab === "design" ? "on" : ""}" id="tab-design">Design system</button>
+        <button class="tab ${state.tab === "brief" ? "on" : ""}" id="tab-brief">Benchmark brief</button>
         <button class="tab ${state.tab === "ai" ? "on" : ""}" id="tab-ai">AI plan</button>
         <label><input type="checkbox" id="t-mono" ${state.mono ? "checked" : ""}/> Grayscale</label>
         <label><input type="checkbox" id="t-grid" ${state.grid ? "checked" : ""}/> Grid</label>
       </div>
       <nav class="toc">${toc}</nav>
     </header>
-    ${state.tab === "design" ? designTab() : aiTab()}`
+    ${state.tab === "design" ? designTab() : state.tab === "brief" ? benchmarkBriefTab() : aiTab()}`
 
   document.getElementById("tab-design").addEventListener("click", () => { state.tab = "design"; render() })
+  document.getElementById("tab-brief").addEventListener("click", () => { state.tab = "brief"; render() })
   document.getElementById("tab-ai").addEventListener("click", () => { state.tab = "ai"; render() })
   document.getElementById("t-mono").addEventListener("change", (e) => { state.mono = e.target.checked; render() })
   document.getElementById("t-grid").addEventListener("change", (e) => { state.grid = e.target.checked; render() })
