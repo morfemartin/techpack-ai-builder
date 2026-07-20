@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ILLUSTRATOR_LAYERS, illustratorLayerReport, prepareIllustratorSvg } from "./illustratorSvg.js"
+import { ILLUSTRATOR_LAYERS, illustratorLayerReport, prepareIllustratorSvg, prepareIllustratorSvgWithAssets } from "./illustratorSvg.js"
 
 const SOURCE = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1188 840' width='297mm' height='210mm'>" +
   "<metadata>{}</metadata><rect width='1188' height='840' fill='#fff'/>" +
@@ -41,5 +41,19 @@ describe("prepareIllustratorSvg", () => {
     expect(result).toContain('data-source-baseline="central"')
     expect(result).toContain('y="23.5"')
     expect(result).toContain('xlink:href="data:image/png;base64,AAAA"')
+  })
+
+  it("can externalize embedded images into named package assets", () => {
+    const withImages = SOURCE
+      .replace("<g id='ARTWORK'>", "<g id='ARTWORK'><image id='REFERENCE__LOGO_HEADER' data-asset-role='logo' data-asset-label='logo-header' href='data:image/png;base64,QUJD'/>")
+      .replace("</svg>", "<image data-asset-role='reference' data-asset-label='Logo pecho.png' href='data:image/svg+xml;base64,PHN2Zy8+'/></svg>")
+    const result = prepareIllustratorSvgWithAssets(withImages, { id: "p1", title: "Logo Pecho", pageNumber: 9, totalPages: 11 })
+    expect(result.assets.map((asset) => asset.file)).toEqual([
+      "assets/P09--logo-pecho--logo--logo-header-01.png",
+      "assets/P09--logo-pecho--reference--logo-pecho-png-02.svg",
+    ])
+    expect(result.svg).toContain('href="../assets/P09--logo-pecho--logo--logo-header-01.png"')
+    expect(result.svg).toContain('"linkedAssets"')
+    expect(result.svg).not.toContain("data:image/png;base64")
   })
 })
