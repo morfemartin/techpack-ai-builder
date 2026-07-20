@@ -4,10 +4,11 @@ vi.mock("./deepseekClient.js", () => ({
   DeepSeekError: class DeepSeekError extends Error {},
   getLocalAIHealth: vi.fn(async () => ({ status: "ok", model: "qwen" })),
   requestAIOnce: vi.fn(),
+  requestAIStreamOnce: vi.fn(),
 }))
 
-import { getLocalAIHealth, requestAIOnce } from "./deepseekClient.js"
-import { resetHybridAIForTests, runHybridAI } from "./hybridAI.js"
+import { getLocalAIHealth, requestAIOnce, requestAIStreamOnce } from "./deepseekClient.js"
+import { resetHybridAIForTests, runHybridAI, runHybridAIStream } from "./hybridAI.js"
 
 function waitForAbort(signal) {
   return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }))
@@ -77,5 +78,25 @@ describe("runHybridAI", () => {
     const newRun = runHybridAI({ task: "review", messages: [{ role: "user", content: "new" }], validator: () => true, fallback: "new fallback", providers: ["nvidia"] })
     await expect(oldRun).rejects.toMatchObject({ name: "AbortError" })
     await expect(newRun).resolves.toMatchObject({ content: "new", provider: "nvidia" })
+  })
+
+  it("forwards real provider chunks before accepting the validated final answer", async () => {
+    requestAIStreamOnce.mockImplementation(async ({ onEvent, provider }) => {
+      onEvent({ contentSoFar: "{\"field\"", deltaText: "{\"field\"", tokensSoFar: 1 })
+      onEvent({ contentSoFar: "{\"field\":true}", deltaText: ":true}", tokensSoFar: 2 })
+      return { content: '{"field":true}', provider, model: "deepseek" }
+    })
+    const events = []
+    const result = await runHybridAIStream({
+      task: "explain",
+      messages: [{ role: "user", content: "x" }],
+      validator: (content) => content.includes("true"),
+      fallback: "fallback",
+      providers: ["nvidia"],
+      onEvent: (event) => events.push(event),
+    })
+    expect(result).toMatchObject({ provider: "nvidia", content: '{"field":true}' })
+    expect(events).toHaveLength(2)
+    expect(events[1]).toMatchObject({ provider: "nvidia", tokensSoFar: 2 })
   })
 })

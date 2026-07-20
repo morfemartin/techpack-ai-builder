@@ -85,9 +85,9 @@ describe("ensureMinimumGeneralQuestions", () => {
     expect(ensureMinimumGeneralQuestions(reqs, {})).toBe(reqs)
   })
 
-  it("does not add fallback fields when seed facts exist", () => {
+  it("keeps asking production decisions even when an initial seed has facts", () => {
     const reqs = { garmentType: "polo", fields: [] }
-    expect(ensureMinimumGeneralQuestions(reqs, { Color: "Azul" })).toBe(reqs)
+    expect(pendingFields(ensureMinimumGeneralQuestions(reqs, { Color: "Azul" }), "general").map((field) => field.label)).toContain("Tela principal")
   })
 
   it("builds hoodie-specific local fallback questions when IA is unavailable", () => {
@@ -286,7 +286,7 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(pendingFields(result, "general").map((f) => f.label)).toContain("Tela principal")
   })
 
-  it("streams and reports increasing progress when onProgress is given, still returning a valid result", async () => {
+  it("streams completed technical fields when onProgress is given, still returning a valid result", async () => {
     deepseekChatStream.mockImplementation(async ({ onEvent }) => {
       onEvent({ contentSoFar: '{"fields":[{"label":"Tela","why":"x"}', tokensSoFar: 10 })
       onEvent({ contentSoFar: validResponse, tokensSoFar: 30 })
@@ -298,8 +298,9 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(deepseekChatStream).toHaveBeenCalledTimes(1)
     expect(deepseekChat).not.toHaveBeenCalled()
     expect(seen.length).toBe(2)
-    expect(seen[1].percent).toBeGreaterThan(seen[0].percent)
+    expect(seen[1].tokensSoFar).toBeGreaterThan(seen[0].tokensSoFar)
     expect(seen[0].lastLabel).toBe("Tela")
+    expect(seen[1].completedLabels).toEqual(["Tela"])
     expect(result.garmentType).toBe("Camisa")
     expect(result.fields[0].label).toBe("Tela")
   })

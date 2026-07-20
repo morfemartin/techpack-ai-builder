@@ -13,26 +13,6 @@ const C = palette
 const hair = `1px solid ${C.ink.hex}`
 
 const OPENING = "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa, Jogger)"
-const ANALYSIS_FALLBACK_MS = 7000
-
-export async function withIntakeTimeout(promise, timeoutMs = ANALYSIS_FALLBACK_MS) {
-  let timer = null
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          const error = new Error("analysis_timeout")
-          error.useLocalFallback = true
-          reject(error)
-        }, timeoutMs)
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 // Phase-aware "systemic thinking" intake (F3.1). Instead of a free-form
 // per-turn DeepSeek conversation, it makes ONE requirements call up front
 // (analyzeRequirements) and then WALKS the resulting field list locally:
@@ -65,6 +45,7 @@ function Bubble({ role: msgRole, children }) {
         fontSize: type.size.sm,
         fontFamily: type.fonts.ui,
         lineHeight: 1.4,
+        whiteSpace: "pre-line",
       }}
     >
       {children}
@@ -81,7 +62,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [currentField, setCurrentField] = useState(null)
   const [input, setInput] = useState("")
   const [sending, setSending] = useState(false)
-  const [progress, setProgress] = useState(null) // { percent, lastLabel } | null - only set while streaming the analysis
+  const [liveReply, setLiveReply] = useState("")
   const [aiStatus, setAIStatus] = useState("")
   const [error, setError] = useState(null)
   // Stack of {key, phase} pushed right before each askNext() advance - lets
@@ -118,6 +99,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
 
   function questionText(field) {
     return field.why ? field.label + " — " + field.why : field.label
+  }
+
+  function showStructuredStream(progressUpdate, action) {
+    const labels = progressUpdate && progressUpdate.completedLabels ? progressUpdate.completedLabels : []
+    if (labels.length > 0) {
+      setLiveReply(action + "\n" + labels.map((label) => "✓ " + label).join("\n"))
+    }
   }
 
   // Every path that finishes the walk (4 non-generalOnly sites: no-designs
@@ -165,7 +153,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     const runId = ++analysisRun.current
     setSending(true)
     setError(null)
-    setProgress({ percent: 0, lastLabel: null })
+    setLiveReply("Estoy construyendo las preguntas técnicas de esta prenda…")
     try {
       const analysis = await analyzeRequirements({
           garmentType,
@@ -174,7 +162,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           lang: "ES",
           onStatus: setAIStatus,
           onProgress: (p) => {
-            if (analysisRun.current === runId) setProgress(p)
+            if (analysisRun.current === runId) showStructuredStream(p, "Ya identifiqué estas decisiones de producción:")
           },
         })
       if (analysisRun.current !== runId) return
@@ -195,7 +183,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       askNext(localReqs, "general")
     } finally {
       setSending(false)
-      setProgress(null)
+      setLiveReply("")
     }
   }
 
@@ -207,7 +195,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   async function runDesignAnalysis(generalReqs) {
     setSending(true)
     setError(null)
-    setProgress({ percent: 0, lastLabel: null })
+    setLiveReply("Estoy revisando qué aplicaciones necesitan su propia especificación…")
     try {
       const designAnalysis = await analyzeDesignExpression({
           garmentType: garmentLabel || generalReqs.garmentType,
@@ -215,7 +203,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           tecs,
           lang: "ES",
           onStatus: setAIStatus,
-          onProgress: (p) => setProgress(p),
+          onProgress: (p) => showStructuredStream(p, "Ya detecté estas especificaciones de diseño:"),
         })
       const merged = mergeDesignFields(generalReqs, designAnalysis.fields)
       setReqs(merged)
@@ -227,7 +215,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       finishIntake(generalReqs)
     } finally {
       setSending(false)
-      setProgress(null)
+      setLiveReply("")
     }
   }
 
@@ -241,7 +229,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   async function runBriefAuthoring(finalReqs) {
     setSending(true)
     setError(null)
-    setProgress({ percent: 0, lastLabel: null })
+    setLiveReply("Estoy redactando las instrucciones para ilustración…")
     try {
       const designs = reqsToDesigns(finalReqs)
       const { briefs: authored } = await authorIllustrationBriefs({
@@ -249,7 +237,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           designs,
           lang: "ES",
           onStatus: setAIStatus,
-          onProgress: (p) => setProgress(p),
+          onProgress: (p) => showStructuredStream(p, "Ya quedaron definidos estos elementos:"),
         })
       setBriefs(authored)
       post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha, con instrucciones de ilustración incluidas. Podés continuar.")
@@ -260,7 +248,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       finishIntake(finalReqs)
     } finally {
       setSending(false)
-      setProgress(null)
+      setLiveReply("")
     }
   }
 
@@ -311,13 +299,21 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     post("user", value)
     setSending(true)
     setError(null)
+    setLiveReply("Estoy revisando esa duda…")
     try {
-      const answer = await answerFieldQuestion({ field: currentField, garmentType: garmentLabel || (reqs && reqs.garmentType), question: value, onStatus: setAIStatus })
+      const answer = await answerFieldQuestion({
+        field: currentField,
+        garmentType: garmentLabel || (reqs && reqs.garmentType),
+        question: value,
+        onStatus: setAIStatus,
+        onProgress: ({ contentSoFar }) => setLiveReply(contentSoFar || "Estoy revisando esa duda…"),
+      })
       post("assistant", answer)
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : "No pude responder eso. Podés seguir con la pregunta igual.")
     } finally {
       setSending(false)
+      setLiveReply("")
     }
   }
 
@@ -493,25 +489,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               ))}
             </div>
           )}
-          {sending && imageAnalyzing && (
-            <div style={{ display: "flex", flexDirection: "column", gap: space(1), alignSelf: "flex-start", maxWidth: "90%", width: 260 }}>
-              <div style={{ height: 6, background: C.canvas.hex, border: hair }}>
-                <div style={{ height: "100%", width: Math.min(95, (imageProgress ? imageProgress.tokensSoFar : 0) * 8) + "%", background: role.priority.fill, transition: "width 160ms linear" }} />
-              </div>
-              <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6, fontFamily: type.fonts.data }}>
-                {imageProgress && imageProgress.partialText ? "Analizando la foto: " + imageProgress.partialText + "…" : "Analizando la foto…"}
-              </span>
-            </div>
-          )}
-          {sending && !imageAnalyzing && (
-            <div style={{ display: "flex", flexDirection: "column", gap: space(1), alignSelf: "flex-start", maxWidth: "90%", width: 260 }}>
-              <div style={{ height: 6, background: C.canvas.hex, border: hair }}>
-                <div style={{ height: "100%", width: (progress ? progress.percent : 0) + "%", background: role.priority.fill, transition: "width 160ms linear" }} />
-              </div>
-              <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6, fontFamily: type.fonts.data }}>
-                {aiStatus || (progress && progress.lastLabel ? "Analizando: " + progress.lastLabel + "…" : "Analizando la prenda…")}
-              </span>
-            </div>
+          {sending && (
+            <Bubble role="assistant">
+              {imageAnalyzing
+                ? (imageProgress && imageProgress.partialText ? "Analizando la foto: " + imageProgress.partialText : "Estoy analizando la foto…")
+                : (liveReply || aiStatus || "Estoy procesando la información…")}
+              <span aria-hidden="true"> ▍</span>
+            </Bubble>
           )}
         </div>
         {error && (

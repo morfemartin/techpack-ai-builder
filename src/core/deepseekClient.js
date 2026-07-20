@@ -386,10 +386,32 @@ async function attemptChatStream({ messages, maxTokens, temperature, model, thin
   return content
 }
 
+// One physical SSE request. The hybrid orchestrator uses this instead of
+// converting a completed JSON response into a fake final event, so screens
+// that opt into streaming receive the provider's actual chunks as they arrive.
+export async function requestAIStreamOnce({
+  messages,
+  maxTokens = 1000,
+  temperature = 0.2,
+  model,
+  thinking = false,
+  provider,
+  signal,
+  timeoutMs,
+  onEvent,
+} = {}) {
+  const content = await attemptChatStream({ messages, maxTokens, temperature, model, thinking, onEvent, provider, signal, timeoutMs })
+  return {
+    content,
+    provider: provider || resolveAITransport({ messages, model, provider }).provider,
+    model: model || (provider === "local" ? "qwen-local" : "deepseek-ai/deepseek-v4-pro"),
+  }
+}
+
 // onEvent(partial) fires on every SSE delta that carries content:
 //   { contentSoFar: string, deltaText: string, tokensSoFar: number }
 // tokensSoFar counts SSE EVENTS, not real tokens - NVIDIA batches several
-// tokens per event, so this is only ever an estimate for a progress bar.
+// tokens per event, so callers use it only as stream ordering metadata.
 //
 // Resolves with the final assembled content string once a full attempt
 // succeeds. Wraps attemptChatStream() in the same RETRYABLE_MAX_ATTEMPTS
@@ -402,9 +424,10 @@ async function attemptChatStream({ messages, maxTokens, temperature, model, thin
 // past the open phase).
 export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent, task, validator, fallback, onStatus, signal, onResult, providers, operationId, provider, timeoutMs, maxAttempts = RETRYABLE_MAX_ATTEMPTS, retryCapacityOnly = false } = {}) {
   if (task) {
-    const content = await deepseekChat({ messages, maxTokens, temperature, model, thinking, task, validator, fallback, onStatus, signal, onResult, providers, operationId })
-    if (onEvent) onEvent({ contentSoFar: content, deltaText: content, tokensSoFar: ESTIMATED_COMPAT_EVENTS })
-    return content
+    const { runHybridAIStream } = await import("./hybridAI.js")
+    const result = await runHybridAIStream({ task, messages, maxTokens, temperature, validator, fallback, onStatus, signal, providers, operationId, onEvent })
+    if (onResult) onResult(result)
+    return result.content
   }
   let lastErr
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

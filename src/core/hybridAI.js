@@ -1,4 +1,4 @@
-import { DeepSeekError, getLocalAIHealth, requestAIOnce } from "./deepseekClient.js"
+import { DeepSeekError, getLocalAIHealth, requestAIOnce, requestAIStreamOnce } from "./deepseekClient.js"
 import { TASK_POLICIES } from "./hybridTasks.js"
 export { HYBRID_TASKS, TASK_POLICIES } from "./hybridTasks.js"
 
@@ -128,6 +128,39 @@ async function providerAttempt(provider, options, controller, deadline) {
   }
 }
 
+async function streamProviderAttempt(provider, options, controller, deadline, onEvent) {
+  const started = Date.now()
+  let attempts = 0
+  while (attempts < 2) {
+    attempts++
+    try {
+      const response = await requestAIStreamOnce({
+        ...options,
+        provider,
+        model: provider === "nvidia" ? NVIDIA_MODEL : undefined,
+        signal: controller.signal,
+        timeoutMs: Math.max(1, deadline - Date.now()),
+        onEvent: (event) => onEvent && onEvent({ ...event, provider }),
+      })
+      const content = validateContent(options.validator, response.content)
+      if (provider === "nvidia") recordNvidiaSuccess()
+      return {
+        content,
+        provider,
+        model: response.model || (provider === "nvidia" ? NVIDIA_MODEL : "qwen-local"),
+        latencyMs: Date.now() - started,
+        degraded: provider !== "nvidia",
+        fallbackReason: provider === "local" ? "deepseek_slow_or_invalid" : null,
+      }
+    } catch (error) {
+      if (controller.signal.aborted) throw error
+      if (provider === "nvidia") recordNvidiaFailure()
+      if (!retryableCapacityError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
+      await delay(500, controller.signal)
+    }
+  }
+}
+
 function requestKey(task, messages, options) {
   return JSON.stringify([task, messages, options.maxTokens, options.temperature])
 }
@@ -217,6 +250,79 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
     }
   })()
 
+  inflight.set(key, operation)
+  try { return await operation } finally { if (inflight.get(key) === operation) inflight.delete(key) }
+}
+
+// Streaming counterpart of runHybridAI. It keeps the same winner rule (the
+// first provider whose FINAL response satisfies the task contract), while
+// forwarding actual SSE chunks to the UI along the way.
+export async function runHybridAIStream({ task, messages, validator, fallback, onStatus, onEvent, signal, maxTokens, temperature = 0.2, providers = ["nvidia", "local"], operationId } = {}) {
+  const policy = TASK_POLICIES[task]
+  if (!policy) throw new Error("Unknown hybrid AI task: " + task)
+  const options = { messages, validator, maxTokens: maxTokens || policy.maxTokens, temperature, thinking: !!policy.thinking }
+  const enabled = new Set(providers)
+  const key = requestKey(task, messages, options) + JSON.stringify([...enabled]) + ":stream"
+  if (inflight.has(key)) return inflight.get(key)
+  const id = operationId || task + "-stream-" + (++operationSequence)
+  const previous = activeOperations.get(task)
+  if (previous && previous.id !== id) previous.controller.abort("superseded")
+  const operationAbort = composeAbort(signal)
+  activeOperations.set(task, { id, controller: operationAbort.controller })
+
+  const operation = (async () => {
+    const started = Date.now()
+    const deadline = started + policy.budgetMs
+    const nvidia = composeAbort(operationAbort.controller.signal)
+    const qwen = composeAbort(operationAbort.controller.signal)
+    const failures = []
+    let settled = false
+    const accept = (result) => {
+      if (settled || activeOperations.get(task)?.id !== id) throw abortError("stale_operation")
+      settled = true
+      if (result.provider === "nvidia") qwen.controller.abort("winner_selected")
+      else nvidia.controller.abort("winner_selected")
+      const seconds = Math.max(1, Math.round(result.latencyMs / 1000))
+      onStatus && onStatus(result.provider === "local" ? `Respondido por Qwen · ${seconds} s` : `Respondido por DeepSeek · ${seconds} s`)
+      logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: result.fallbackReason })
+      return result
+    }
+    const candidates = []
+    if (enabled.has("nvidia") && !circuitIsOpen()) {
+      onStatus && onStatus("Consultando DeepSeek…")
+      candidates.push(streamProviderAttempt("nvidia", options, nvidia.controller, deadline, onEvent).then(accept).catch((error) => { failures.push(error); throw error }))
+    } else if (enabled.has("nvidia")) {
+      failures.push(new Error("nvidia_circuit_open"))
+    }
+    if (enabled.has("local")) {
+      candidates.push((async () => {
+        await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
+        if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
+        onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando Qwen local…" : "Consultando Qwen local…")
+        return enqueueQwen(() => streamProviderAttempt("local", options, qwen.controller, deadline, onEvent)).then(accept)
+      })().catch((error) => { failures.push(error); throw error }))
+    }
+    try {
+      return await Promise.any(candidates)
+    } catch {
+      if (operationAbort.controller.signal.aborted) throw abortError()
+      let fallbackContent = typeof fallback === "function" ? await fallback() : fallback
+      if (fallbackContent === undefined) throw failures[0] || new Error("No AI provider returned a valid response")
+      fallbackContent = validateContent(validator, fallbackContent)
+      const reason = failures.map((error) => error && (error.status || error.message)).filter(Boolean).join(",") || "providers_failed"
+      const result = { content: fallbackContent, provider: "contract", model: "deterministic", latencyMs: Date.now() - started, degraded: true, fallbackReason: reason }
+      onStatus && onStatus("Usando respuesta base verificable")
+      logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: reason })
+      return result
+    } finally {
+      nvidia.controller.abort("operation_finished")
+      qwen.controller.abort("operation_finished")
+      nvidia.dispose()
+      qwen.dispose()
+      operationAbort.dispose()
+      if (activeOperations.get(task)?.id === id) activeOperations.delete(task)
+    }
+  })()
   inflight.set(key, operation)
   try { return await operation } finally { if (inflight.get(key) === operation) inflight.delete(key) }
 }

@@ -33,14 +33,6 @@ export function parseJSONOrRepair(raw, errorMessage) {
   throw new DeepSeekError(errorMessage, { raw })
 }
 
-// Rough calibration for the progress estimate below: a typical analysis
-// completion runs ~600-700 tokens against the 3000-token cap, and NVIDIA
-// batches several tokens per SSE event - observed live around ~50-70 events
-// for a full run. Not exact (event count != token count), just a live signal
-// for a progress bar, same spirit as the retry-delay constants in
-// deepseekClient.js.
-const ESTIMATED_EVENT_BUDGET = 60
-
 // Only trusts a field's "label" once its whole object has closed - anchored
 // on "why" because it's the LAST key in this prompt's fixed field shape (see
 // the JSON template below), so seeing it means the field just finished
@@ -51,6 +43,25 @@ export function extractLastCompletedLabel(text) {
   let last = null
   while ((match = re.exec(text))) last = match[1]
   return last
+}
+
+export function extractCompletedLabels(text) {
+  const labels = []
+  const seen = new Set()
+  const re = /"label"\s*:\s*"([^"]+)"[^{}]*"why"\s*:\s*"[^"]*"\s*\}/g
+  let match
+  while ((match = re.exec(String(text || "")))) {
+    if (!seen.has(match[1])) {
+      seen.add(match[1])
+      labels.push(match[1])
+    }
+  }
+  return labels
+}
+
+function streamProgress(contentSoFar, tokensSoFar, provider) {
+  const completedLabels = extractCompletedLabels(contentSoFar)
+  return { tokensSoFar, provider, completedLabels, lastLabel: completedLabels[completedLabels.length - 1] || null }
 }
 
 // A field's status:
@@ -110,12 +121,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         maxTokens: 3800,
         temperature: 0.2,
         ...hybrid,
-        onEvent: ({ contentSoFar, tokensSoFar }) => {
-          onProgress({
-            percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
-            lastLabel: extractLastCompletedLabel(contentSoFar),
-          })
-        },
+        onEvent: ({ contentSoFar, tokensSoFar, provider }) => onProgress(streamProgress(contentSoFar, tokensSoFar, provider)),
       })
     : await deepseekChat({
         messages: [{ role: "user", content: instructions }],
@@ -155,10 +161,6 @@ export function normalizeRequirements(parsed, garmentType) {
       return base
     })
   return { garmentType: (parsed && parsed.garmentType) || garmentType, fields }
-}
-
-function hasSeedFacts(seed) {
-  return !!(seed && typeof seed === "object" && Object.keys(seed).some((key) => String(seed[key] || "").trim()))
 }
 
 function hasGeneralAsk(fields) {
@@ -347,7 +349,7 @@ function fallbackGeneralQuestions(garmentType = "") {
 // numbered technical questions, not jump straight to the final catch-all.
 export function ensureMinimumGeneralQuestions(reqs, seed) {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
-  if (hasSeedFacts(seed) || hasGeneralAsk(fields)) return reqs
+  if (hasGeneralAsk(fields)) return reqs
   const existingKeys = new Set(fields.map((f) => f && f.key).filter(Boolean))
   const fallbacks = fallbackGeneralQuestions(reqs && reqs.garmentType).filter((f) => !existingKeys.has(f.key))
   return { ...reqs, fields: [...fields, ...fallbacks] }
@@ -411,12 +413,12 @@ export function revertField(reqs, key) {
   }
 }
 
-// Pure: a cheap, deliberately-simple signal that the user typed a CLARIFYING
-// QUESTION about the current field rather than an answer to it (e.g. "que es
-// eso?") - a literal "?" in either Spanish or English phrasing is reliable
-// enough that a fancier classifier isn't worth the extra DeepSeek round trip.
 export function looksLikeQuestion(text) {
-  return /\?/.test(String(text || ""))
+  const normalized = String(text || "").trim().toLowerCase()
+  if (!normalized) return false
+  if (/[?¿]/.test(normalized)) return true
+  return /^(que|qué|como|cómo|cual|cuál|cuanto|cuánto|donde|dónde|cuando|cuándo|quien|quién|por que|por qué|para que|para qué)\b/.test(normalized)
+    || /\b(que es|qué es|no entiendo|explica(?:me)?|a que te refieres|a qué te refieres|dame un ejemplo|por que importa|por qué importa|what is|i don't understand|explain)\b/.test(normalized)
 }
 
 // True when nothing in `category` (or overall) still needs asking.
@@ -487,12 +489,7 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
         fallback: JSON.stringify({ garmentType, fields: [] }),
         onStatus,
         signal,
-        onEvent: ({ contentSoFar, tokensSoFar }) => {
-          onProgress({
-            percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
-            lastLabel: extractLastCompletedLabel(contentSoFar),
-          })
-        },
+        onEvent: ({ contentSoFar, tokensSoFar, provider }) => onProgress(streamProgress(contentSoFar, tokensSoFar, provider)),
       })
     : await deepseekChat({
         messages: [{ role: "user", content: instructions }],
@@ -612,12 +609,7 @@ export async function authorIllustrationBriefs({ garmentType, designs, lang = "E
         fallback: () => JSON.stringify({ briefs: designs.map((design) => ({ name: design.name, illustrationBrief: `Dibujar ${design.name} en ${design.pos || "la ubicacion confirmada"}. Marcar tecnica ${design.tec || "PENDIENTE DE CONFIRMAR"} y no inferir medidas.` })) }),
         onStatus,
         signal,
-        onEvent: ({ contentSoFar, tokensSoFar }) => {
-          onProgress({
-            percent: Math.min(100, Math.round((tokensSoFar / ESTIMATED_EVENT_BUDGET) * 100)),
-            lastLabel: extractLastCompletedLabel(contentSoFar),
-          })
-        },
+        onEvent: ({ contentSoFar, tokensSoFar, provider }) => onProgress(streamProgress(contentSoFar, tokensSoFar, provider)),
       })
     : await deepseekChat({
         messages: [{ role: "user", content: instructions }],
@@ -665,7 +657,7 @@ export function attachIllustrationBriefs(designs, briefs) {
 // current field/options without advancing the walk (see looksLikeQuestion) -
 // plain text, no JSON, no options/status semantics, same spirit as
 // authorIllustrationBriefs' "this is prose for a human, not a question shape."
-export async function answerFieldQuestion({ field, garmentType, question, lang = "ES", onStatus, signal }) {
+export async function answerFieldQuestion({ field, garmentType, question, lang = "ES", onStatus, onProgress, signal }) {
   const f = field || {}
   const optionsText = Array.isArray(f.options) && f.options.length > 0 ? "Opciones sugeridas: " + f.options.join(", ") + ". " : ""
   const instructions =
@@ -676,7 +668,7 @@ export async function answerFieldQuestion({ field, garmentType, question, lang =
     "Respondé de forma clara y breve (maximo 3 oraciones), en espanol, explicando el termino o resolviendo la duda. " +
     "No le devuelvas una pregunta, no uses JSON, solo el texto de la respuesta."
 
-  const raw = await deepseekChat({
+  const request = {
     messages: [{ role: "user", content: instructions }],
     maxTokens: 300,
     temperature: 0.3,
@@ -685,7 +677,10 @@ export async function answerFieldQuestion({ field, garmentType, question, lang =
     fallback: `${f.label || "Este campo"} define una decision tecnica de la prenda. ${f.why || "Afecta como la fabrica interpreta y construye el producto."} ${optionsText}`.trim(),
     onStatus,
     signal,
-  })
+  }
+  const raw = onProgress
+    ? await deepseekChatStream({ ...request, onEvent: ({ contentSoFar, provider }) => onProgress({ contentSoFar, provider }) })
+    : await deepseekChat(request)
   return raw.replace(/```/g, "").trim()
 }
 

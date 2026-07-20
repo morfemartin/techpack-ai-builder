@@ -1,23 +1,14 @@
-import { describe, expect, it, vi } from "vitest"
-import { withIntakeTimeout } from "./GarmentChat.jsx"
+import { describe, expect, it } from "vitest"
+import { looksLikeQuestion } from "../core/techpackRequirements.js"
 
-describe("withIntakeTimeout", () => {
-  it("returns a provider result that arrives before the deadline", async () => {
-    await expect(withIntakeTimeout(Promise.resolve("ok"), 10)).resolves.toBe("ok")
+describe("conversational clarification intent", () => {
+  it("keeps the current question active when the user asks a natural-language doubt without punctuation", () => {
+    expect(looksLikeQuestion("que es eso")).toBe(true)
+    expect(looksLikeQuestion("no entiendo esta opcion")).toBe(true)
+    expect(looksLikeQuestion("explicame con un ejemplo")).toBe(true)
   })
 
-  it("rejects stalled provider work with a fallback marker", async () => {
-    vi.useFakeTimers()
-    try {
-      const result = withIntakeTimeout(new Promise(() => {}), 25)
-      const rejection = expect(result).rejects.toMatchObject({
-        message: "analysis_timeout",
-        useLocalFallback: true,
-      })
-      await vi.advanceTimersByTimeAsync(25)
-      await rejection
-    } finally {
-      vi.useRealTimers()
-    }
+  it("does not mistake a normal option value for a question", () => {
+    expect(looksLikeQuestion("Algodon pique")).toBe(false)
   })
 })
