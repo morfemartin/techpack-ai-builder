@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError, resolveAITransport } from "./deepseekClient.js"
+import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError, getTextAIProvider, resolveAITransport } from "./deepseekClient.js"
 
 function mockFetchOnce(body, ok = true, status = 200) {
   global.fetch = vi.fn().mockResolvedValue({
@@ -82,6 +82,16 @@ describe("deepseekClient", () => {
       provider: "local",
       url: "http://127.0.0.1:11435/v1/chat/completions",
     })
+  })
+
+  it("activates the private bridge on the dedicated Studio page only", () => {
+    vi.stubGlobal("window", {
+      location: { search: "", pathname: "/techpack-ai-builder/studio.html", hostname: "morfemartin.github.io" },
+    })
+    expect(getTextAIProvider()).toBe("local")
+
+    window.location.pathname = "/techpack-ai-builder/"
+    expect(getTextAIProvider()).toBe("nvidia")
   })
 
   it("always routes image messages to NVIDIA even in studio mode", () => {

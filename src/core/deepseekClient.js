@@ -10,9 +10,19 @@
 // `vite dev` never executes /api/* on its own. Production: Vercel serves it
 // directly. Either way this file just calls the relative URL below.
 
-const NVIDIA_PROXY_URL = import.meta.env.VITE_DEEPSEEK_PROXY_URL || "/api/deepseek"
+// GitHub Pages is static, so its own `/api/*` path cannot execute the Vercel
+// function. Production Pages therefore uses the deployed, CORS-restricted
+// proxy while local/Vercel deployments keep their same-origin endpoint.
+function defaultNvidiaProxyURL() {
+  if (import.meta.env.VITE_DEEPSEEK_PROXY_URL) return import.meta.env.VITE_DEEPSEEK_PROXY_URL
+  if (typeof window !== "undefined" && /(^|\.)github\.io$/i.test(window.location.hostname || "")) {
+    return "https://techpack-ai-builder.vercel.app/api/deepseek"
+  }
+  return "/api/deepseek"
+}
+
+const NVIDIA_PROXY_URL = defaultNvidiaProxyURL()
 const LOCAL_STUDIO_URL = import.meta.env.VITE_LOCAL_STUDIO_AI_URL || "http://127.0.0.1:11435/v1/chat/completions"
-const TEXT_PROVIDER_KEY = "techpack.textProvider"
 const DEFAULT_TEXT_PROVIDER = import.meta.env.VITE_TEXT_AI_PROVIDER || "nvidia"
 // No client-side default model for plain text calls: `model` stays undefined
 // when a caller doesn't specify one, so JSON.stringify() drops the key
@@ -50,29 +60,22 @@ function queryStudioProvider() {
   try {
     const requested = new URLSearchParams(window.location.search).get("studio")
     if (requested === "local" || requested === "nvidia") {
-      window.localStorage.setItem(TEXT_PROVIDER_KEY, requested)
       return requested
     }
   } catch {}
   return null
 }
 
+function isStudioPage() {
+  if (typeof window === "undefined") return false
+  return /\/studio\.html$/i.test(window.location.pathname || "")
+}
+
 export function getTextAIProvider() {
   const requested = queryStudioProvider()
   if (requested) return requested
-  if (typeof window !== "undefined") {
-    try {
-      const stored = window.localStorage.getItem(TEXT_PROVIDER_KEY)
-      if (stored === "local" || stored === "nvidia") return stored
-    } catch {}
-  }
+  if (isStudioPage()) return "local"
   return DEFAULT_TEXT_PROVIDER === "local" ? "local" : "nvidia"
-}
-
-export function setTextAIProvider(provider) {
-  if (provider !== "local" && provider !== "nvidia") throw new Error("Unsupported text AI provider")
-  if (typeof window !== "undefined") window.localStorage.setItem(TEXT_PROVIDER_KEY, provider)
-  return provider
 }
 
 function containsImage(messages) {

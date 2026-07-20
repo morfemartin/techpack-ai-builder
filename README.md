@@ -102,8 +102,12 @@ uv tool install mlx-lm
 npm run studio:ai
 ```
 
-Después abrí `http://localhost:3000/?studio=local`. Configuración, límites y
-modelo de amenazas: **[docs/STUDIO-AI.md](docs/STUDIO-AI.md)**.
+Después abrí `http://localhost:3000/studio.html`. La entrada publicada para
+pruebas del estudio es
+**[morfemartin.github.io/techpack-ai-builder/studio.html](https://morfemartin.github.io/techpack-ai-builder/studio.html)**:
+activa Qwen solo cuando el bridge privado está disponible en la Mac y conserva
+NVIDIA para visión. Configuración, límites y modelo de amenazas:
+**[docs/STUDIO-AI.md](docs/STUDIO-AI.md)**.
 
 ## Arquitectura multi-prenda
 

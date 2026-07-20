@@ -1,5 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const rootDir = fileURLToPath(new URL('.', import.meta.url))
 
 // GitHub Pages serves project sites at https://<user>.github.io/<repo>/, so
 // the production build needs that repo-name base path baked into asset URLs.
@@ -7,6 +11,14 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ command }) => ({
   plugins: [react()],
   base: command === 'build' ? '/techpack-ai-builder/' : '/',
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(rootDir, 'index.html'),
+        studio: resolve(rootDir, 'studio.html'),
+      },
+    },
+  },
   server: {
     port: 3000,
     // api/deepseek.js is a Vercel serverless function - plain `vite dev`
