@@ -26,6 +26,13 @@ describe("prepareIllustratorSvg", () => {
     expect(result.indexOf("LAYER_05_DESIGNER_COMMUNICATION")).toBeLessThan(result.indexOf("LAYER_07_PAGE_CHROME"))
   })
 
+  it("removes redundant clip paths that block Illustrator batch import", () => {
+    const clipped = SOURCE.replace("<g id='ARTWORK'>", "<defs><clipPath id='clip'><rect width='10' height='10'/></clipPath></defs><g id='ARTWORK' clip-path='url(#clip)'>")
+    const result = prepareIllustratorSvg(clipped)
+    expect(result).not.toContain("clipPath")
+    expect(result).not.toContain("clip-path")
+  })
+
   it("preserves source fonts and uses explicit cross-editor baselines", () => {
     const withImage = SOURCE.replace("</svg>", "<image href='data:image/png;base64,AAAA'/></svg>")
     const result = prepareIllustratorSvg(withImage)

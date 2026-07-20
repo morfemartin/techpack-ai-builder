@@ -109,6 +109,15 @@ export function prepareIllustratorSvg(svg, page = {}) {
     if (href) node.setAttributeNS(XLINK_NS, "xlink:href", href)
   })
 
+  // Illustrator 30.4 presents a blocking TinySVG warning for every clipPath.
+  // Layout text is already measured and wrapped inside its artboard, so the
+  // Adobe interchange profile removes these redundant import-time clips.
+  collectElements(root, "g").forEach((node) => node.removeAttribute("clip-path"))
+  collectElements(root, "clipPath").forEach((node) => node.parentNode.removeChild(node))
+  collectElements(root, "defs").forEach((node) => {
+    if (!Array.from(node.childNodes).some((child) => child.nodeType === 1)) node.parentNode.removeChild(node)
+  })
+
   const defs = Array.from(root.childNodes).filter((node) => node.nodeType === 1 && node.nodeName === "defs")
   const promoted = collectElements(root, "g").filter((node) => {
     const category = layerFor(node)

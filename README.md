@@ -85,6 +85,11 @@ La muestra reproducible se genera con:
 npm run illustrator:sample
 ```
 
+Desde el modal de exportacion tambien se puede descargar un paquete completo:
+el JSX incluido crea un solo archivo AI con todas las paginas como mesas de
+trabajo nombradas y siete capas semanticas globales. Affinity abre directamente
+los SVG editables incluidos.
+
 ## Arquitectura multi-prenda
 
 Toda la data específica de una prenda (piezas por defecto, nombres de piezas en 3 idiomas, posiciones de diseño disponibles, y el diagrama de silueta de 4 vistas con sus callouts) vive en un único archivo bajo `src/garments/`. El motor de wizard, generación de SVG y vista previa son genéricos y leen de ese archivo — no hay nada hardcodeado a "gorra" fuera de `src/garments/cap.js`.

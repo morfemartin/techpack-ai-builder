@@ -12,7 +12,7 @@
   "files": {
     "legacy": "01-legacy-system.svg",
     "illustrator": "02-illustrator-system.svg",
-    "nativeAi": "02-illustrator-system.ai",
+    "nativeAi": "Techpack-complete.ai",
     "importer": "../Techpack-Import-Illustrator.jsx"
   },
   "expectedLayersBottomToTop": [
@@ -57,6 +57,63 @@
       "id": "LAYER_07_PAGE_CHROME",
       "present": true,
       "childCount": 3
+    }
+  ],
+  "artboards": [
+    {
+      "file": "pages/P01--cover.svg",
+      "id": "cover",
+      "title": "Parka Alpina Modular 3L"
+    },
+    {
+      "file": "pages/P02--document-index.svg",
+      "id": "document-index",
+      "title": "Indice de produccion"
+    },
+    {
+      "file": "pages/P03--structure-shell-body.svg",
+      "id": "structure-shell-body",
+      "title": "Sistema 01 · Cuerpo exterior y sellado"
+    },
+    {
+      "file": "pages/P04--structure-hood-neck.svg",
+      "id": "structure-hood-neck",
+      "title": "Sistema 02 · Capucha y cuello"
+    },
+    {
+      "file": "pages/P05--structure-sleeves-cuffs.svg",
+      "id": "structure-sleeves-cuffs",
+      "title": "Sistema 03 · Mangas, sisas y punos"
+    },
+    {
+      "file": "pages/P06--structure-closures-pockets.svg",
+      "id": "structure-closures-pockets",
+      "title": "Sistema 04 · Cierres, tapetas y bolsillos"
+    },
+    {
+      "file": "pages/P07--structure-lining-insulation.svg",
+      "id": "structure-lining-insulation",
+      "title": "Sistema 05 · Forro, aislante e interior"
+    },
+    {
+      "file": "pages/P08--structure-trims-labels.svg",
+      "id": "structure-trims-labels",
+      "title": "Sistema 06 · Ajustes, herrajes y rotulos"
+    },
+    {
+      "file": "pages/P09--design-logo-pecho-reflectivo.svg",
+      "id": "design-logo-pecho-reflectivo",
+      "title": "D1 · Logo pecho reflectivo"
+    },
+    {
+      "file": "pages/P10--design-mapa-topografico-espalda.svg",
+      "id": "design-mapa-topografico-espalda",
+      "title": "D2 · Mapa topografico espalda"
+    },
+    {
+      "file": "pages/P11--design-parche-rescate-manga.svg",
+      "id": "design-parche-rescate-manga",
+      "title": "D3 · Parche rescate manga"
     }
   ]
 }

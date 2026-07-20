@@ -9,7 +9,7 @@ TechPack AI Builder uses two complementary deliverables:
 
 A browser cannot generate Illustrator's private editing payload. Renaming an SVG to `.ai`, or adding Adobe-looking metadata, would be misleading. Adobe documents SVG, PDF, EPS and AI as supported formats, but only Illustrator can add **Preserve Illustrator Editing Capabilities** data to AI/PDF files.
 
-The production target is therefore a package containing conservative SVG pages, a manifest and an Illustrator importer. A later milestone will add a multipage PDF as the visual/print reference.
+The production target is therefore a package containing conservative SVG pages, a manifest and an Illustrator importer. The importer creates one AI document with named A4 artboards in a four-column grid and seven global semantic layers. A later milestone will add a multipage PDF as the visual/print reference.
 
 ## Format comparison
 
@@ -40,6 +40,7 @@ The exporter additionally guarantees:
 - source font families and sizes preserved, with `dominant-baseline=central` converted to explicit baselines using the source font class metrics;
 - unique names for anonymous groups;
 - seven top-level semantic containers;
+- no redundant `clipPath` nodes that trigger blocking Illustrator warnings;
 - well-formed XML validation before release.
 
 Layer contract, bottom to top:
@@ -78,7 +79,11 @@ Stack-order fallback: true
 Missing wrappers: none
 ```
 
-This test proves native layer creation and naming. Final sign-off still requires screenshots of text rendering, expanded layer contents, artboard dimensions and the legacy SVG in the user's Illustrator installation.
+The final acceptance run produced 11 named artboards, seven global layers and
+11 page groups per layer. The four-column grid avoids Illustrator's maximum
+canvas width, which was reached when the tenth A4 page was placed in one row.
+The user validated the final document in both Affinity 3.2.3 and Illustrator
+30.4.0; the evidence and iteration history are in the comparison README.
 
 An early comparison build replaced the source font stacks while also converting
 the baseline. Illustrator opened it, but the changed font metrics displaced
@@ -90,8 +95,8 @@ for the UI stack and `0.35em` for the monospaced data stack.
 ## Improvement plan
 
 1. **Current comparison:** validate one dense design page against the legacy SVG and collect screenshots.
-2. **Product integration:** replace data-URI downloads with Blob downloads and offer an Illustrator package from the export dialog.
-3. **Multipage bridge:** extend the JSX importer to create one artboard and one parent layer per physical page, then save a single AI document.
+2. **Product integration (complete):** Blob downloads now offer original SVG, editable SVG, JSX and a complete ZIP from the export dialog.
+3. **Multipage bridge (complete):** the JSX importer creates one named artboard per physical page and saves a single AI document.
 4. **Visual master:** generate a multipage PDF and compare Illustrator output against it in automated visual regression tests.
 5. **Typography modes:** ship editable text with a font preflight and an optional outlined-text copy for visual lockoff.
 6. **Release gate:** validate XML, IDs, images, dimensions, layer/object counts, minimum text size and Illustrator import reports before publishing.
