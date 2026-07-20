@@ -243,3 +243,49 @@ export function buildLayeredRequirements({ garmentType, seed = {}, modelFields =
 export function requiredLayers(garmentType) {
   return [...new Set(garmentTemplates(garmentType).map((template) => template.layer))]
 }
+
+// Splices the model's genuinely NEW general "ask" questions on top of the
+// layered floor - the garment-specific depth ("¿el puño lleva cordón
+// interno?") that a fixed template can never anticipate. The floor is still
+// the only thing that GUARANTEES coverage; this only ADDS, never replaces or
+// removes a layer question, and skips anything that already overlaps a layer
+// by key/label/alias so the same datum is never asked twice.
+export function mergeAdditionalGeneralAsk({ garmentType, layeredFields, modelFields = [], max = 6 } = {}) {
+  const templates = garmentTemplates(garmentType)
+  const existingKeys = new Set((layeredFields || []).map((f) => normalize(f.key)))
+  const existingLabels = (layeredFields || []).map((f) => normalize(f.label)).filter(Boolean)
+  const templateAliasSets = templates.map((t) => new Set([t.key, t.label, ...t.aliases].map(normalize)))
+
+  function overlapsExisting(candidate) {
+    const key = normalize(candidate.key)
+    const label = normalize(candidate.label)
+    if (existingKeys.has(key)) return true
+    if (existingLabels.some((existing) => existing.length > 2 && label.length > 2 && (existing.includes(label) || label.includes(existing)))) return true
+    return templateAliasSets.some((aliases) => aliases.has(key) || (label && aliases.has(label)))
+  }
+
+  const seen = new Set()
+  const extra = []
+  for (const candidate of modelFields || []) {
+    if (!candidate || candidate.category !== "general" || candidate.status !== ASK) continue
+    if (typeof candidate.key !== "string" || !candidate.key.trim()) continue
+    if (overlapsExisting(candidate)) continue
+    const dedupeKey = normalize(candidate.key)
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    const options = Array.isArray(candidate.options) ? candidate.options.filter((o) => typeof o === "string" && o.trim()) : []
+    extra.push({
+      key: candidate.key.trim(),
+      label: candidate.label || candidate.key,
+      category: "general",
+      layer: "Especifico de esta prenda",
+      example: "",
+      status: ASK,
+      value: "",
+      options: options.length >= 2 ? options.slice(0, 4) : ["Sí", "No"],
+      why: candidate.why || "detalle propio de esta prenda, no cubierto por la guia estandar",
+    })
+    if (extra.length >= max) break
+  }
+  return extra
+}

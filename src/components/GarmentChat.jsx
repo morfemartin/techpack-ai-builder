@@ -3,9 +3,9 @@ import { DeepSeekError } from "../core/deepseekClient.js"
 import {
   analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
   looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
-  attachIllustrationBriefs, FIELD_STATUS, fallbackRequirements,
+  attachIllustrationBriefs, FIELD_STATUS, fallbackRequirements, analyzeRequirements,
 } from "../core/techpackRequirements.js"
-import { downscaleImage, answerFieldFromImage } from "../core/visionExtract.js"
+import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -75,10 +75,19 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
+  // Mirrors `phase` for the background AI-depth splice in runAnalysis() below -
+  // that promise resolves well after the render that started it, so it needs
+  // a ref (not the closed-over `phase` value) to check whether the general
+  // walk is STILL live before touching `reqs`.
+  const phaseRef = useRef(phase)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [history, sending, currentField])
+
+  useEffect(() => {
+    phaseRef.current = phase
+  }, [phase])
 
   // Kick off the up-front analysis when a garment type is known (either passed
   // in by a seed door, or once the user names it). Guarded so it runs once per
@@ -156,11 +165,37 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     // can never leave a non-expert staring at "Analizando la prenda".
     const localReqs = fallbackRequirements(garmentType, seed || {})
     setError(null)
-    setAIStatus("Guia tecnica por capas lista")
+    setAIStatus("Guia tecnica por capas lista · profundizando con IA…")
     setReqs(localReqs)
     setPhase("asking")
     post("assistant", "Voy a construir la ficha por capas: producto, materiales, calce, construccion, terminaciones, produccion y diseno. Empezamos por lo que mas condiciona el resultado.")
     askNext(localReqs, "general")
+
+    // Deepen in the background (NVIDIA+Qwen hybrid, HYBRID_TASKS.INTAKE): the
+    // IA reasons about THIS specific garment and may surface construction
+    // questions the fixed layer template can't anticipate. Never blocks the
+    // walk above. If it resolves while the user is still on the general
+    // questions, the new ones splice onto the end of the live queue; if the
+    // walk already moved on (or the call fails/times out), nothing is lost -
+    // the layer floor already asked everything factory-critical.
+    analyzeRequirements({ garmentType, seed: seed || {}, tecs })
+      .then((aiReqs) => {
+        if (phaseRef.current !== "asking") return
+        const aiGeneralAsk = (aiReqs.fields || []).filter((f) => f.category === "general" && f.status === FIELD_STATUS.ASK)
+        let addedCount = 0
+        setReqs((prev) => {
+          if (!prev) return prev
+          const existingKeys = new Set(prev.fields.map((f) => f.key))
+          const additions = aiGeneralAsk.filter((f) => !existingKeys.has(f.key))
+          addedCount = additions.length
+          if (additions.length === 0) return prev
+          return { ...prev, fields: [...prev.fields, ...additions] }
+        })
+        setAIStatus(addedCount > 0 ? "Guia tecnica por capas lista · +" + addedCount + " pregunta" + (addedCount > 1 ? "s" : "") + " especifica" + (addedCount > 1 ? "s" : "") + " de IA" : "Guia tecnica por capas lista")
+      })
+      .catch(() => {
+        if (phaseRef.current === "asking") setAIStatus("Guia tecnica por capas lista")
+      })
   }
 
   // Second DeepSeek call (F3.2): reasons about which discrete elements of
@@ -333,11 +368,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     post("assistant", "Listo, ya tengo todo. Podés continuar.")
   }
 
-  // Mid-chat photo upload (F1.5's sibling): answers whatever field is
-  // currently on screen from a photo instead of typed text. Deliberately a
-  // single quick vision call (no quadrant split - that's for the exhaustive
-  // upfront intake, not a one-question lookup) and deliberately PRE-FILLS the
-  // input rather than auto-submitting, so a wrong read never locks in silently.
+  // Mid-chat photo upload: answers the current field from one full-image pass
+  // plus four native-resolution quadrants. The merged answer still only
+  // PRE-FILLS the input, so visual evidence can never lock itself in silently.
   //
   // Posts TWO things to history so the photo actually reads as part of the
   // conversation instead of a silent background action: the photo itself (a
@@ -357,12 +390,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setImageProgress(null)
     setError(null)
     try {
-      const downscaled = await downscaleImage(file)
-      post("user", <img src={"data:image/jpeg;base64," + downscaled.base64} alt="Foto adjunta" style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
-      const suggestion = await answerFieldFromImage({
+      const segmented = await splitImageIntoQuadrants(file)
+      const segments = [segmented.full, ...segmented.quadrants]
+      post("user", <img src={"data:image/jpeg;base64," + segmented.full.base64} alt="Foto adjunta" style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
+      const suggestion = await answerFieldFromImageSegments({
         field: fieldAsked,
         garmentType: garmentLabel || (reqs && reqs.garmentType),
-        imageBase64: downscaled.base64,
+        segments,
         onProgress: (p) => setImageProgress(p),
       })
       post("assistant", "Según la foto: " + suggestion)
@@ -478,7 +512,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           {sending && (
             <Bubble role="assistant">
               {imageAnalyzing
-                ? (imageProgress && imageProgress.partialText ? "Analizando la foto: " + imageProgress.partialText : "Estoy analizando la foto…")
+                ? (imageProgress
+                    ? `${imageProgress.label || "Analizando foto"} · ${imageProgress.segmentNumber || 1}/${imageProgress.totalSegments || 5}${imageProgress.partialText ? "\n" + imageProgress.partialText : ""}`
+                    : "Preparando vista completa y cuatro detalles…")
                 : (liveReply || aiStatus || "Estoy procesando la información…")}
               <span aria-hidden="true"> ▍</span>
             </Bubble>

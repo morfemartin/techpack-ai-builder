@@ -14,7 +14,7 @@
 import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
-import { buildLayeredRequirements } from "./requirementLayers.js"
+import { buildLayeredRequirements, mergeAdditionalGeneralAsk } from "./requirementLayers.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
@@ -108,10 +108,17 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
 
   const hybrid = {
     task: HYBRID_TASKS.INTAKE,
+    // The deterministic layer floor (below) already guarantees >=8 general
+    // asks regardless of what the model returns, so this validator no longer
+    // needs to (and must not) enforce a count - an upper bound here fed the
+    // hybrid circuit breaker every time a thorough model answer legitimately
+    // exceeded it, which was a real contributor to NVIDIA getting starved.
+    // It only checks basic shape: unique keys, and any "ask" field the model
+    // proposed has a well-formed 2-4 option list.
     validator: (content) => {
       const value = ensureMinimumGeneralQuestions(normalizeRequirements(parseJSONOrRepair(content, "invalid intake"), garmentType), seed)
       const asked = value.fields.filter((field) => field.category === "general" && field.status === FIELD_STATUS.ASK)
-      return asked.length >= 8 && asked.length <= 12 && new Set(value.fields.map((field) => field.key)).size === value.fields.length && asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
+      return new Set(value.fields.map((field) => field.key)).size === value.fields.length && asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
     },
     fallback: () => JSON.stringify(fallbackRequirements(garmentType, seed)),
     onStatus,
@@ -354,14 +361,24 @@ function fallbackGeneralQuestions(garmentType = "") {
 export function ensureMinimumGeneralQuestions(reqs, seed) {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
   const garmentType = (reqs && reqs.garmentType) || "Prenda"
+  const generalFields = fields.filter((field) => field && field.category === "general")
+  const designFields = fields.filter((field) => field && field.category === "design")
 
   // The external model may advise on wording, but it is never authoritative
-  // about coverage. Only source evidence (vision, CSV or user-provided seed)
-  // can prefill a contractual question. This prevents a confident weak model
-  // from silently marking vital construction decisions as "assumed".
-  const layered = buildLayeredRequirements({ garmentType, seed })
-  const designFields = fields.filter((field) => field && field.category === "design")
-  return { ...reqs, garmentType: layered.garmentType, fields: [...layered.fields, ...designFields] }
+  // about COVERAGE. Only source evidence (vision, CSV, user-provided seed, or
+  // the model's own KNOWN/ASSUMED facts) can prefill a contractual question -
+  // this prevents a confident weak model from silently marking a vital
+  // construction decision as "assumed" instead of asking it.
+  const layered = buildLayeredRequirements({ garmentType, seed, modelFields: generalFields })
+
+  // Coverage is guaranteed above; this is pure ADDITION on top of it. A model
+  // that reasoned about THIS specific garment may have surfaced a genuinely
+  // new question the fixed layer template can't anticipate (a particular
+  // trim, a construction variant) - splice those in instead of discarding
+  // them, so the chat keeps the layer guarantee AND the model's depth.
+  const extra = mergeAdditionalGeneralAsk({ garmentType, layeredFields: layered.fields, modelFields: generalFields })
+
+  return { ...reqs, garmentType: layered.garmentType, fields: [...layered.fields, ...extra, ...designFields] }
 }
 
 export function fallbackRequirements(garmentType, seed) {

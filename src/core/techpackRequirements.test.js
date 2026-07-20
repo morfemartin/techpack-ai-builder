@@ -100,6 +100,34 @@ describe("ensureMinimumGeneralQuestions", () => {
     expect(labels).toContain("Bolsillos")
     expect(labels).toContain("Terminaciones visibles")
   })
+
+  // Regression guard for the "chat lost its depth" report: a model field that
+  // does NOT match any fixed layer must now SURVIVE (additive), instead of
+  // being silently discarded the way it was before this fix.
+  it("keeps the model's genuinely new garment-specific question on top of the layer floor", () => {
+    const reqs = {
+      garmentType: "hoodie",
+      fields: [
+        { key: "drawcord_tips", label: "Herrajes del cordón", category: "general", status: "ask", value: "", options: ["Metal", "Plástico"], why: "define acabado del cordón" },
+      ],
+    }
+    const result = ensureMinimumGeneralQuestions(reqs, {})
+    const asks = pendingFields(result, "general")
+    // the layer floor is still fully present...
+    expect(asks.map((f) => f.key)).toEqual(expect.arrayContaining(["fabric", "fit", "hood"]))
+    // ...AND the model's specific question was not thrown away
+    expect(asks.map((f) => f.key)).toContain("drawcord_tips")
+  })
+
+  it("still drops a model field that duplicates a layer (by key) rather than asking it twice", () => {
+    const reqs = {
+      garmentType: "hoodie",
+      fields: [{ key: "fabric_v2", label: "Tela principal", category: "general", status: "ask", value: "", options: ["A", "B"], why: "" }],
+    }
+    const result = ensureMinimumGeneralQuestions(reqs, {})
+    const asks = pendingFields(result, "general")
+    expect(asks.filter((f) => f.label === "Tela principal")).toHaveLength(1)
+  })
 })
 
 describe("pendingFields", () => {
