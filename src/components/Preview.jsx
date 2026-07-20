@@ -4,6 +4,7 @@ import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { palette, role, type } from "../design/tokens.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
+import { CHROME, GRID, PAGE } from "../design/metrics.js"
 
 // This is the live on-screen mockup shown in the "Vista Previa" wizard step -
 // the thing a user actually looks at before clicking "Generar SVG". It has to
@@ -19,8 +20,8 @@ export function Preview({ lang, hdr, parts, designs, logo, page, txCache, garmen
   var pn = garment.partLabels[lang] || garment.partLabels.ES
   var ap = parts.filter((p) => p.on)
   var SCALE = 0.54
-  var W = 1200, H = 900, hH = 80, discH = 28, bodyH = H - hH - discH
-  var lW = 320, rW = W - lW, vW = rW / 2, vH = bodyH / 2
+  var W = PAGE.width, H = PAGE.height, hH = CHROME.header, discH = CHROME.footer, bodyH = H - hH - discH
+  var lW = GRID.span(3), rW = W - lW, vW = rW / 2, vH = bodyH / 2
   var rH = Math.max(16, Math.floor((bodyH - 42) / Math.max(ap.length, 1)))
   var txData = txCache && txCache[lang]
   var wrap = { width: W, height: H, transformOrigin: "top left", transform: "scale(" + SCALE + ")", background: C.white.hex, border: "1.5px solid " + C.ink.hex, position: "absolute", top: 0, left: 0, fontFamily: type.fonts.ui, boxSizing: "border-box", overflow: "hidden" }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { VOCAB, buildPlannedPages, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
+import { solveLayout } from "../layout/solve.js"
 
 describe("weightsToGrow", () => {
   it("returns exact proportions when weights already sum to 100", () => {
@@ -105,7 +106,7 @@ describe("interpretPagePlan", () => {
     garment: { partLabels: { ES: { body: "Cuerpo" } } },
   }
 
-  it("keeps structural chrome (header/disclaimer) at a fixed height and lets content grow", () => {
+  it("keeps chrome fixed, sizes data to content, and parks the slack in a spacer before the bottom chrome", () => {
     const root = interpretPagePlan(
       {
         id: "overview",
@@ -121,15 +122,46 @@ describe("interpretPagePlan", () => {
     )
 
     expect(root.direction).toBe("column")
-    expect(root.children).toHaveLength(3)
+    // header + partsList + injected slack-spacer + disclaimer: this page has
+    // no absorber (no illustration), so measure-then-solve parks the leftover
+    // in ONE invisible spacer pinned just above the disclaimer.
+    expect(root.children).toHaveLength(4)
     // header: fixed strip, does not grow
     expect(root.children[0].grow).toBe(0)
-    expect(root.children[0].basis).toBe(82)
-    // partsList: content, grows to fill
-    expect(root.children[1].grow).toBe(60)
-    // disclaimer: fixed strip, does not grow
-    expect(root.children[2].grow).toBe(0)
-    expect(root.children[2].basis).toBe(30)
+    expect(root.children[0].basis).toBe(64)
+    // partsList: bounded content at its natural height (1 part = 16 header
+    // strip + 18 table row), never stretched by the plan weight anymore
+    expect(root.children[1].grow).toBe(0)
+    expect(root.children[1].basis).toBe(34)
+    // slack spacer: the only growing node
+    expect(root.children[2].grow).toBe(1)
+    // disclaimer: fixed strip, pinned to the bottom
+    expect(root.children[3].grow).toBe(0)
+    expect(root.children[3].basis).toBe(24)
+  })
+
+  it("gives a bounded band its measured height and routes ALL slack to the absorber, whatever the AI's weights say", () => {
+    const root = interpretPagePlan(
+      {
+        id: "p",
+        title: "P",
+        purpose: "overview",
+        regions: [
+          { type: "header", weight: 10 },
+          // the model absurdly over-weights the note (30) vs the illustration (40) -
+          // measure-then-solve must ignore that for the bounded note
+          { type: "note", note: "Nota corta.", weight: 30 },
+          { type: "illustration", weight: 40, slots: 1 },
+          { type: "disclaimer", weight: 10 },
+        ],
+      },
+      ctx
+    )
+    expect(root.children).toHaveLength(3)
+    const composition = root.children[1]
+    expect(composition.direction).toBe("column")
+    expect(composition.grow).toBe(1)
+    expect(composition.children.some((child) => child.basis > 0)).toBe(true)
   })
 
   it("renders planned pages into the same [{name,svg}] shape as buildAllPages", () => {
@@ -159,7 +191,8 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("Custom Overview")
     expect(pages[0].svg).toContain("FRONT")
     expect(pages[0].svg).toContain("Cuerpo")
-    expect(pages[0].svg).toContain("Todos los disenos")
+    expect(pages[0].svg).toContain("width='297mm'")
+    expect(pages[0].svg).toContain("P. 01 / 01")
   })
 
   it("uses the matching design when a page purpose points to design:name", () => {
@@ -210,17 +243,50 @@ describe("split composition (2D layout)", () => {
     expect(normalizePlan(raw).pages[0].regions.map((r) => r.type)).toEqual(["header"])
   })
 
-  it("builds a horizontal row for a split, inner grows taken from inner weights", () => {
+  it("builds a horizontal row for a split when the content column has enough real content to fill it", () => {
+    // A dense table cannot share the vertical axis with a useful illustration,
+    // so the evaluator chooses columns and sizes them from content constraints.
+    const fullCtx = { ...ctx, parts: Array.from({ length: 12 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true })) }
     const root = interpretPagePlan(
       { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
-      ctx
+      fullCtx
     )
     expect(root.children).toHaveLength(3)
     const splitNode = root.children[1]
     expect(splitNode.direction).toBe("row")
     expect(splitNode.children).toHaveLength(2)
-    expect(splitNode.children[0].grow).toBe(25)
-    expect(splitNode.children[1].grow).toBe(75)
+    expect(splitNode.children.every((child) => child.grow === 0)).toBe(true)
+    expect(splitNode.children[0].basis).toBe(272)
+    expect(splitNode.children[1].basis).toBeGreaterThan(splitNode.children[0].basis)
+  })
+
+  // The core fix for the reported design critique: a split that pairs an
+  // illustration with a SHORT specs/parts block used to always stretch that
+  // block into a full-height side column next to the illustration, leaving
+  // visible dead white space below a one- or two-row table. With only 1 part
+  // row (needs ~50px) against a split allotted ~718px, the compositor should
+  // stack instead: illustration on top (grows to fill), the short block below
+  // sized to its own natural content height.
+  it("stacks illustration-on-top + content-below when the content column would mostly be dead white space", () => {
+    const root = interpretPagePlan(
+      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "partsList", weight: 25 }, { type: "illustration", weight: 75, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      ctx
+    )
+    expect(root.children).toHaveLength(3)
+    const composition = root.children[1]
+    expect(composition.direction).toBe("column")
+    expect(composition.children).toHaveLength(2)
+    expect(composition.children[0].basis).toBeGreaterThan(composition.children[1].basis)
+  })
+
+  it("places one short color band below when that preserves more illustration area", () => {
+    const root = interpretPagePlan(
+      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      ctx
+    )
+    expect(root.children).toHaveLength(3)
+    expect(root.children[1].direction).toBe("column")
+    expect(root.children[1].children[1].basis).toBeGreaterThan(0)
   })
 
   it("renders both columns of a split into the same page svg", () => {
@@ -271,7 +337,7 @@ describe("effectivePartsForPage (piece-aware pages)", () => {
 })
 
 describe("buildPlannedPages parts-list pagination (F4.7)", () => {
-  const manyParts = Array.from({ length: 30 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true }))
+  const manyParts = Array.from({ length: 40 }, (_, i) => ({ id: "p" + i, val: "Valor " + i, on: true }))
   const ctx = {
     lang: "ES",
     hdr: { brand: "Morfe", pname: "Hoodie" },
@@ -282,7 +348,7 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     garment: { partLabels: { ES: {} } },
   }
   // A parts list given only a small split column - not nearly enough room
-  // for 30 rows at the fixed compact row height.
+  // for 40 rows at the compact row height.
   const overflowPlan = {
     pages: [
       {
@@ -304,12 +370,14 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[0].name).toBe("overview")
     expect(pages[1].name).toContain("cont")
+    expect(pages.reduce((total, page) => total + (page.svg.match(/>Valor \d+</g) || []).length, 0)).toBe(40)
+    pages.forEach((page) => expect(page.svg).toContain("id='ARTWORK'"))
   })
 
   it("numbers continuation rows continuing from where the first page left off (no restart, no gap)", () => {
     const pages = buildPlannedPages(overflowPlan, ctx)
     const allText = pages.map((p) => p.svg).join("\n")
-    // every one of the 30 parts' values must appear exactly once across the
+    // every one of the 40 parts' values must appear exactly once across the
     // whole paginated set - nothing lost, nothing duplicated. Matched as an
     // exact SVG text-node value (">Valor 1<") so "Valor 1" doesn't false-
     // positive against "Valor 10".."Valor 19" as a substring.
@@ -324,5 +392,125 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
     const smallCtx = { ...ctx, parts: manyParts.slice(0, 3) }
     const pages = buildPlannedPages(overflowPlan, smallCtx)
     expect(pages).toHaveLength(1)
+  })
+})
+
+describe("buildPlannedPages design-table pagination", () => {
+  const colors = Array.from({ length: 50 }, (_, index) => ({
+    name: "Color " + (index + 1),
+    hex: "#" + (index + 1).toString(16).padStart(6, "0"),
+  }))
+  const stopSeq = Array.from({ length: 60 }, (_, index) => ({ stop: index + 1, name: "Thread " + (index + 1), stitches: 1000 + index }))
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: [],
+    designs: [{ name: "Dense", colors, emb: { machine: "Tajima", stitches: "60000", stopSeq } }],
+  }
+  const plan = { pages: [{
+    id: "dense",
+    title: "Dense design",
+    purpose: "design:Dense",
+    regions: [
+      { type: "header" },
+      { type: "titleBar" },
+      { type: "illustration", slots: 1 },
+      { type: "colorSpecs" },
+      { type: "embSpecs" },
+      { type: "disclaimer" },
+    ],
+  }] }
+
+  it("continues colors and embroidery stops instead of clipping rows below their legible floor", () => {
+    const pages = buildPlannedPages(plan, ctx)
+    const allSvg = pages.map((item) => item.svg).join("\n")
+    expect(pages.length).toBeGreaterThan(1)
+    expect(pages[0].name).toContain("color_placement")
+    expect(pages.slice(1).every((page) => page.name.includes("embroidery_execution"))).toBe(true)
+    expect(pages[0].svg).toContain("id='TECH_DATA__COLORS'")
+    expect(pages[0].svg).not.toContain("id='TECH_DATA__EMBROIDERY'")
+    pages.slice(1).forEach((page) => {
+      expect(page.svg).toContain("id='TECH_DATA__EMBROIDERY'")
+      expect(page.svg).not.toContain("id='TECH_DATA__COLORS'")
+      expect(page.svg).toContain("id='ARTWORK'")
+    })
+    colors.forEach((color) => {
+      const compact = allSvg.split(">" + color.name + "  " + color.hex + "<").length - 1
+      const expanded = allSvg.split(">" + color.name + "<").length - 1
+      expect(compact + expanded).toBe(1)
+    })
+    stopSeq.forEach((stop) => expect(allSvg.split(": " + stop.name + " (").length - 1).toBe(1))
+  })
+})
+
+describe("Layout Engine v3 document assembly", () => {
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Morfe", pname: "Hoodie" },
+    parts: [{ id: "body", val: "Cotton", on: true }],
+    designs: [{
+      name: "Chest",
+      pos: "Pecho izquierdo",
+      colors: [{ name: "Black", hex: "#111111" }],
+      imageData: "aGVsbG8=",
+      imageType: "png",
+    }],
+  }
+  const plan = { pages: [
+    { id: "cover", title: "Hoodie", purpose: "cover", regions: [{ type: "header" }, { type: "titleBar" }, { type: "illustration", slots: 1 }, { type: "disclaimer" }] },
+    { id: "chest", title: "Chest", purpose: "design:Chest", regions: [{ type: "header" }, { type: "titleBar" }, { type: "illustration", slots: 1, briefs: [{ view: "Front", mustMark: ["neck seam"] }] }, { type: "colorSpecs" }, { type: "disclaimer" }] },
+  ] }
+
+  it("renders A4 handoff pages in two passes with index and stable numbering", () => {
+    const pages = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+    expect(pages).toHaveLength(3)
+    expect(pages.map((page) => [page.pageNumber, page.totalPages])).toEqual([[1, 3], [2, 3], [3, 3]])
+    expect(pages[0].svg).not.toContain("INDICE DE PRODUCCION")
+    expect(pages[1].purpose).toBe("index")
+    expect(pages[1].svg).toContain("INDICE DE PRODUCCION")
+    expect(pages[1].svg).toContain("QUE CONTIENE / PARA QUE SIRVE")
+    expect(pages[1].svg).toContain("P. 02 / 03")
+    expect(pages[2].svg).toContain("P. 03 / 03")
+    expect(pages[2].svg).toContain("V1/2026 · NO APROBADA PARA PRODUCCION")
+    expect(pages[2].svg).toContain("TODOS LOS DERECHOS · Morfe")
+    pages.forEach((page, index) => expect(page.svg).toContain(">" + String(index + 1).padStart(2, "0") + "</text>"))
+  })
+
+  it("emits editable references and per-slot instructions nested inside artwork", () => {
+    const page = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })[2]
+    for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS__V1", "REFERENCES", "PAGE_CHROME__HEADER"]) {
+      expect(page.svg).toContain("id='" + id + "'")
+    }
+    expect(page.svg).toContain("id='DESIGNER_COMMUNICATION' data-removable='true'")
+    const artworkStart = page.svg.indexOf("id='ARTWORK'")
+    const instructionsStart = page.svg.indexOf("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
+    const artworkEnd = page.svg.indexOf("</g>", instructionsStart)
+    expect(instructionsStart).toBeGreaterThan(artworkStart)
+    expect(artworkEnd).toBeGreaterThan(instructionsStart)
+    expect(page.svg).toContain("V1.1 neck seam")
+    expect(page.svg).toContain("REFERENCIA - NO A ESCALA")
+    const fontSizes = [...page.svg.matchAll(/font-size='([\d.]+)'/g)].map((match) => Number(match[1]))
+    expect(Math.min(...fontSizes)).toBeGreaterThanOrEqual(10)
+  })
+
+  it("migrates a legacy instruction region into its illustration without retaining a layout block", () => {
+    const normalized = normalizePlan({ pages: [{
+      id: "legacy",
+      regions: [
+        { type: "illustration", slots: 1 },
+        { type: "artworkInstructions", briefs: [{ view: "Front", mustMark: ["zipper"] }] },
+      ],
+    }] })
+    expect(normalized.pages[0].regions.map((region) => region.type)).toEqual(["illustration"])
+    expect(normalized.pages[0].regions[0].briefs[0].mustMark).toEqual(["zipper"])
+  })
+
+  it("inserts separate cover and index pages when the plan omitted the cover", () => {
+    const pages = buildPlannedPages({ pages: [plan.pages[1]] }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+    expect(pages[0].purpose).toBe("cover")
+    expect(pages[1].purpose).toBe("index")
+    expect(pages[1].svg).toContain("INDICE DE PRODUCCION")
+    expect(pages[2].pageNumber).toBe(3)
+    expect(pages[2].totalPages).toBe(3)
   })
 })

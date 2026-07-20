@@ -1,4 +1,5 @@
 import { palette, type } from "../design/tokens.js"
+import { BAR, CHIP, CHROME, GRID, HEADER, INSET, PRINT, headerCells } from "../design/metrics.js"
 
 export const NA = "N/A"
 
@@ -13,18 +14,51 @@ export const R = (x, y, w, h, fill, stroke, sw) =>
   "<rect x='" + x + "' y='" + y + "' width='" + w + "' height='" + h + "' fill='" + fill + "' stroke='" + (stroke || palette.ink.hex) + "' stroke-width='" + (sw || "0.6") + "'/>"
 
 // `family` defaults to the UI grotesque; pass type.svgFonts.data for anything
-// that IS a value (codes, mm, hex, counts) rather than descriptive text - see
+// that IS a value (codes, hex, mm, counts) rather than descriptive text - see
 // docs/UX-DESIGN.md §4 for why (0/O, 1/l/I disambiguation + column alignment).
-export const TX = (x, y, txt, sz, bold, anchor, color, family) =>
-  "<text x='" + x + "' y='" + y + "' text-anchor='" + (anchor || "start") + "' dominant-baseline='central' font-family='" + (family || type.svgFonts.ui) + "' font-size='" + sz + "' font-weight='" + (bold ? "bold" : "normal") + "' fill='" + (color || palette.ink.hex) + "'>" + sv(txt) + "</text>"
+// `tracking` (optional, px) adds letter-spacing - display/title lockups only.
+export const TX = (x, y, txt, sz, bold, anchor, color, family, tracking) =>
+  "<text x='" + x + "' y='" + y + "' text-anchor='" + (anchor || "start") + "' dominant-baseline='central' font-family='" + (family || type.svgFonts.ui) + "' font-size='" + sz + "' font-weight='" + (bold ? "bold" : "normal") + (tracking ? "' letter-spacing='" + tracking : "") + "' fill='" + (color || palette.ink.hex) + "'>" + sv(txt) + "</text>"
+
+// One numbered index chip for the whole system (role.index): solid red square,
+// centered white mono numeral. Same mark in a parts row, an illustration slot,
+// or a wizard step - cross-referenced by number, found first on the sheet.
+export function svgChip(cx, cy, label, size) {
+  var c = size || CHIP
+  return (
+    R(cx - c / 2, cy - c / 2, c, c, palette.red.hex, palette.red.hex, "0") +
+    TX(cx, cy, label, PRINT.minFont, true, "middle", palette.white.hex, type.svgFonts.data)
+  )
+}
+
+// Inner section title bar (PANTONE / CMYK, embroidery sheet...): role.priority
+// blue, FULL block width, left-aligned label at the shared INSET - the same
+// grammar as the page titleBar, so every blue bar on a page shares edges and
+// alignment instead of each block inventing its own inset.
+export function svgSectionBar(x, y, w, title) {
+  return R(x, y, w, BAR.h, palette.blue.hex, "none") + TX(x + INSET, y + BAR.h / 2, title, BAR.fontSize, true, "start", palette.white.hex, undefined, 0.6)
+}
 
 // A quiet structural label cell (SEASON, STYLE NO, ...): white fill + ink
 // border + bold ink text - part of the retícula itself, not a colored chip.
 // Color is reserved for the roles that actually need attention (see tokens.js).
-export const LBL = (x, y, w, h, txt) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.8") + TX(x + w / 2, y + h / 2, txt, 9, true, "middle", palette.ink.hex)
+export const LBL = (x, y, w, h, txt) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.8") + TX(x + w / 2, y + h / 2, txt, PRINT.minFont, true, "middle", palette.ink.hex)
 
 // A value cell holding an actual data value -> mono face.
-export const VAL = (x, y, w, h, v) => R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.6") + TX(x + 5, y + h / 2, v || NA, 9, false, "start", palette.ink.hex, type.svgFonts.data)
+export const VAL = (x, y, w, h, v) => {
+  const fitted = fitText(v || NA, Math.max(1, w - 10), Math.max(1, h - 4), {
+    maxSize: PRINT.minFont,
+    minSize: PRINT.minFont,
+    lineHeightRatio: 1.1,
+  })
+  const blockHeight = fitted.lines.length * fitted.lineHeight
+  let out = R(x, y, w, h, palette.white.hex, palette.ink.hex, "0.6")
+  fitted.lines.forEach((line, index) => {
+    const lineY = y + (h - blockHeight) / 2 + fitted.lineHeight * (index + 0.5)
+    out += TX(x + 5, lineY, line, fitted.size, false, "start", palette.ink.hex, type.svgFonts.data)
+  })
+  return out
+}
 
 /* ---- DIMENSION LINE SVG ---- */
 // role.index (red): a precision reference mark, same family as callouts/POM
@@ -42,7 +76,7 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
     s += "<line x1='" + rx + "' y1='" + (ly - 10) + "' x2='" + rx + "' y2='" + (ly + 10) + "' stroke='" + red + "' stroke-width='0.8' stroke-dasharray='2,2'/>"
     var mx = (lx + rx) / 2
     s += R(mx - 22, ly - 9, 44, 18, palette.white.hex, "none")
-    s += TX(mx, ly, label, 9, true, "middle", red, type.svgFonts.data)
+    s += TX(mx, ly, label, PRINT.minFont, true, "middle", red, type.svgFonts.data)
   } else {
     var tx2 = x1 + offset, ty1 = y1, ty2 = y2
     s += "<line x1='" + tx2 + "' y1='" + ty1 + "' x2='" + tx2 + "' y2='" + ty2 + "' stroke='" + red + "' stroke-width='1.2'/>"
@@ -52,36 +86,66 @@ export function dimLine(x1, y1, x2, y2, label, offset, horiz) {
     s += "<line x1='" + (tx2 - 10) + "' y1='" + ty2 + "' x2='" + (tx2 + 10) + "' y2='" + ty2 + "' stroke='" + red + "' stroke-width='0.8' stroke-dasharray='2,2'/>"
     var my = (ty1 + ty2) / 2
     s += R(tx2 - 30, my - 9, 60, 18, palette.white.hex, "none")
-    s += TX(tx2, my, label, 9, true, "middle", red, type.svgFonts.data)
+    s += TX(tx2, my, label, PRINT.minFont, true, "middle", red, type.svgFonts.data)
   }
   return s
 }
 
 /* ---- HEADER / DISCLAIMER BLOCKS (garment-agnostic) ---- */
+// Both rows are laid on ONE column grid (metrics.js HEADER): after the fixed
+// logo cell, the width divides into 5 equal modules; the top row spans
+// [1,1,1,1,1] and the bottom row [1,2,1,1], so every bottom-row cell edge
+// lands exactly on a top-row edge and both rows fill the page flush to the
+// right margin. The old version gave each row ad-hoc cell widths - the rows
+// ended at different x positions and no edges aligned.
+function headerRowHeight(cells, fields) {
+  var maxLines = 1
+  cells.forEach(function (cell, index) {
+    var valueWidth = Math.max(1, cell.w - Math.min(HEADER.label, cell.w) - 10)
+    maxLines = Math.max(maxLines, wrapLines(fields[index][1] || NA, valueWidth, PRINT.minFont).length)
+  })
+  return Math.max(CHROME.header / 2, Math.ceil((maxLines * PRINT.minFont + 8) / GRID.baseline) * GRID.baseline)
+}
+
+export function headerHeight(hdr, W) {
+  var safe = hdr || {}
+  var topFields = [["SEASON", safe.season], ["STYLE NO", safe.sno], ["CATEGORY", safe.cat], ["FABRIC", safe.fab], ["FACTORY", safe.fac]]
+  var bottomFields = [["BRAND", safe.brand], ["NAME", safe.pname], ["INPUT", safe.ind], ["OUTPUT", safe.outd]]
+  return headerRowHeight(headerCells(W, HEADER.topSpans), topFields) + headerRowHeight(headerCells(W, HEADER.bottomSpans), bottomFields)
+}
+
 export function svgHeader(hdr, logo, W, hH) {
   var s = ""
+  var safeHdr = hdr || {}
+  var topFields = [["SEASON", safeHdr.season], ["STYLE NO", safeHdr.sno], ["CATEGORY", safeHdr.cat], ["FABRIC", safeHdr.fab], ["FACTORY", safeHdr.fac]]
+  var bottomFields = [["BRAND", safeHdr.brand], ["NAME", safeHdr.pname], ["INPUT", safeHdr.ind], ["OUTPUT", safeHdr.outd]]
+  var topH = headerRowHeight(headerCells(W, HEADER.topSpans), topFields)
+  var bottomH = headerRowHeight(headerCells(W, HEADER.bottomSpans), bottomFields)
+  var naturalH = topH + bottomH
+  if (hH > naturalH) bottomH += hH - naturalH
+  var totalH = topH + bottomH
   // Logo slot: pure white (print-first), ink border. Muted placeholder text
   // when no logo was uploaded - not a brand/role color, just a chrome hint.
-  s += R(0, 0, 88, hH, palette.white.hex, palette.ink.hex, "0.8")
-  if (logo) s += "<image href='" + logo + "' x='4' y='4' width='80' height='" + (hH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
-  else s += TX(44, hH / 2, "LOGO", 9, false, "middle", "#9AA0AB")
-  var x = 88
-  ;[["SEASON", hdr.season, 58, 100], ["STYLE NO", hdr.sno, 62, 95], ["CATEGORY", hdr.cat, 68, 90], ["FABRIC", hdr.fab, 54, 130], ["FACTORY", hdr.fac, 56, 100]].forEach(function (row) {
-    var lw = row[2], vw = row[3], w = vw || (W - x - lw)
-    s += LBL(x, 0, lw, hH / 2, row[0]) + VAL(x + lw, 0, w, hH / 2, row[1])
-    x += lw + w
-  })
-  x = 88
-  ;[["BRAND", hdr.brand, 50, 88], ["NAME", hdr.pname, 48, 510], ["INPUT", hdr.ind, 48, 85], ["OUTPUT", hdr.outd, 54, 100]].forEach(function (row) {
-    var lw = row[2], vw = row[3], w = vw || (W - x - lw)
-    s += LBL(x, hH / 2, lw, hH / 2, row[0]) + VAL(x + lw, hH / 2, w, hH / 2, row[1])
-    x += lw + w
-  })
+  s += R(0, 0, HEADER.logo, totalH, palette.white.hex, palette.ink.hex, "0.8")
+  if (logo) s += "<image id='REFERENCE__LOGO_HEADER' data-asset-role='logo' data-asset-label='logo-header' href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (totalH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
+  else s += TX(HEADER.logo / 2, totalH / 2, "LOGO", PRINT.minFont, false, "middle", "#9AA0AB")
+
+  function headerRow(cells, fields, y, rowH) {
+    var out = ""
+    cells.forEach(function (cell, i) {
+      var lw = Math.min(HEADER.label, cell.w)
+      out += LBL(cell.x, y, lw, rowH, fields[i][0]) + VAL(cell.x + lw, y, cell.w - lw, rowH, fields[i][1])
+    })
+    return out
+  }
+
+  s += headerRow(headerCells(W, HEADER.topSpans), topFields, 0, topH)
+  s += headerRow(headerCells(W, HEADER.bottomSpans), bottomFields, topH, bottomH)
   return s
 }
 
 export function svgDisc(t, hdr, W, dy, discH) {
-  return R(0, dy, W, discH, palette.white.hex, palette.ink.hex, "0.8") + TX(W / 2, dy + discH / 2, t.disc + " " + (hdr.brand || "[Marca]") + t.discSfx, 9, false, "middle", palette.ink.hex)
+  return R(0, dy, W, discH, palette.white.hex, palette.ink.hex, "0.8") + TX(W / 2, dy + discH / 2, t.disc + " " + (hdr.brand || "[Marca]") + t.discSfx, PRINT.minFont, false, "middle", palette.ink.hex)
 }
 
 // Shrinks font size (within [minSize,maxSize]) until the wrapped text fits
@@ -93,7 +157,7 @@ export function svgDisc(t, hdr, W, dy, discH) {
 export function fitText(text, maxWidth, maxHeight, opts) {
   var o = opts || {}
   var maxSize = o.maxSize || 11
-  var minSize = o.minSize || 7
+  var minSize = o.minSize || PRINT.minFont
   var lineHeightRatio = o.lineHeightRatio || 1.35
   var raw = text == null ? "" : String(text)
   if (!raw) return { size: maxSize, lineHeight: Math.round(maxSize * lineHeightRatio), lines: [] }
@@ -107,15 +171,20 @@ export function fitText(text, maxWidth, maxHeight, opts) {
   return { size: minSize, lineHeight: floorLh, lines: wrapLines(raw, maxWidth, minSize).slice(0, maxLines) }
 }
 
-// Word-wraps plain text into lines that roughly fit `maxWidth` px at
-// `fontSize`. No real text measurement is available here (this builds raw
-// SVG <text> strings, in both browser and Node/vitest) - avgCharWidth is a
-// practical heuristic for this project's UI sans-serif, not exact metrics.
+// Word-wraps plain text into lines that conservatively fit `maxWidth` px at
+// `fontSize`. Raw SVG is also built in Node, where getBBox is unavailable, so
+// the ratio deliberately models a wide technical/mono glyph. Long unbroken
+// tokens are split as well: URLs, codes and measurements cannot escape.
 export const wrapLines = (text, maxWidth, fontSize) => {
   if (text == null || text === "") return []
-  const avgCharWidth = fontSize * 0.55
+  const avgCharWidth = fontSize * 0.62
   const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth))
-  const words = String(text).split(/\s+/)
+  const words = String(text).split(/\s+/).flatMap((word) => {
+    if (word.length <= maxCharsPerLine) return [word]
+    const chunks = []
+    for (let index = 0; index < word.length; index += maxCharsPerLine) chunks.push(word.slice(index, index + maxCharsPerLine))
+    return chunks
+  })
   const lines = []
   let currentLine = ""
   for (const word of words) {

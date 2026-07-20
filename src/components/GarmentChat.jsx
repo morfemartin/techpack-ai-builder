@@ -3,7 +3,7 @@ import { DeepSeekError } from "../core/deepseekClient.js"
 import {
   analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
   looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs,
-  attachIllustrationBriefs, FIELD_STATUS,
+  attachIllustrationBriefs, FIELD_STATUS, fallbackRequirements,
 } from "../core/techpackRequirements.js"
 import { downscaleImage, answerFieldFromImage } from "../core/visionExtract.js"
 import { palette, role, type, space } from "../design/tokens.js"
@@ -13,6 +13,25 @@ const C = palette
 const hair = `1px solid ${C.ink.hex}`
 
 const OPENING = "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa, Jogger)"
+const ANALYSIS_FALLBACK_MS = 7000
+
+export async function withIntakeTimeout(promise, timeoutMs = ANALYSIS_FALLBACK_MS) {
+  let timer = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error("analysis_timeout")
+          error.useLocalFallback = true
+          reject(error)
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 // Phase-aware "systemic thinking" intake (F3.1). Instead of a free-form
 // per-turn DeepSeek conversation, it makes ONE requirements call up front
@@ -75,6 +94,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
+  const analysisRun = useRef(0)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -141,17 +161,23 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   }
 
   async function runAnalysis(garmentType) {
+    const runId = ++analysisRun.current
     setSending(true)
     setError(null)
     setProgress({ percent: 0, lastLabel: null })
     try {
-      const analysis = await analyzeRequirements({
-        garmentType,
-        seed: seed || {},
-        tecs,
-        lang: "ES",
-        onProgress: (p) => setProgress(p),
-      })
+      const analysis = await withIntakeTimeout(
+        analyzeRequirements({
+          garmentType,
+          seed: seed || {},
+          tecs,
+          lang: "ES",
+          onProgress: (p) => {
+            if (analysisRun.current === runId) setProgress(p)
+          },
+        }),
+      )
+      if (analysisRun.current !== runId) return
       setReqs(analysis)
       const assumed = analysis.fields.filter((f) => f.status === FIELD_STATUS.ASSUMED && String(f.value || "").trim())
       if (assumed.length > 0) {
@@ -160,8 +186,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       setPhase("asking")
       askNext(analysis, "general")
     } catch (e) {
-      setError(e instanceof DeepSeekError ? e.message : "No se pudo analizar la prenda. Probá de nuevo.")
-      analyzedFor.current = null // allow a retry
+      analysisRun.current += 1 // ignore late progress from the timed-out IA call
+      const localReqs = fallbackRequirements(garmentType, seed || {})
+      setReqs(localReqs)
+      setPhase("asking")
+      setError(null)
+      post("assistant", "La IA está saturada o tardó demasiado, así que arranco con preguntas base para " + garmentType + " y seguimos sin bloquearnos.")
+      askNext(localReqs, "general")
     } finally {
       setSending(false)
       setProgress(null)
@@ -178,13 +209,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setError(null)
     setProgress({ percent: 0, lastLabel: null })
     try {
-      const designAnalysis = await analyzeDesignExpression({
-        garmentType: garmentLabel || generalReqs.garmentType,
-        generalFields: reqsToParts(generalReqs),
-        tecs,
-        lang: "ES",
-        onProgress: (p) => setProgress(p),
-      })
+      const designAnalysis = await withIntakeTimeout(
+        analyzeDesignExpression({
+          garmentType: garmentLabel || generalReqs.garmentType,
+          generalFields: reqsToParts(generalReqs),
+          tecs,
+          lang: "ES",
+          onProgress: (p) => setProgress(p),
+        }),
+      )
       const merged = mergeDesignFields(generalReqs, designAnalysis.fields)
       setReqs(merged)
       setPhase("designing")
@@ -212,12 +245,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setProgress({ percent: 0, lastLabel: null })
     try {
       const designs = reqsToDesigns(finalReqs)
-      const { briefs: authored } = await authorIllustrationBriefs({
-        garmentType: garmentLabel || finalReqs.garmentType,
-        designs,
-        lang: "ES",
-        onProgress: (p) => setProgress(p),
-      })
+      const { briefs: authored } = await withIntakeTimeout(
+        authorIllustrationBriefs({
+          garmentType: garmentLabel || finalReqs.garmentType,
+          designs,
+          lang: "ES",
+          onProgress: (p) => setProgress(p),
+        }),
+      )
       setBriefs(authored)
       post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha, con instrucciones de ilustración incluidas. Podés continuar.")
       finishIntake(finalReqs)

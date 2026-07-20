@@ -130,6 +130,27 @@ describe("deepseekClient", () => {
     vi.useRealTimers()
   })
 
+  // Observed live via network inspection: api/deepseek.js's own upstream
+  // timeout returns a 504 {error:"upstream_timeout"} when NVIDIA itself never
+  // answers in time - distinct from OUR client-side FETCH_TIMEOUT_MS (that one
+  // throws and hits wrapFetchFailure/networkError instead). This 504 was
+  // falling straight through to the caller's fallback instead of getting a
+  // second attempt.
+  it("deepseekChat retries on a 504 from the proxy's own upstream timeout, then succeeds", async () => {
+    vi.useFakeTimers()
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 504, json: async () => ({ error: "upstream_timeout", detail: "NVIDIA no respondio antes del timeout del proxy" }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: "ok" } }] }) })
+
+    const promise = deepseekChat({ messages: [] })
+    await vi.runAllTimersAsync()
+    const result = await promise
+    expect(result).toBe("ok")
+    expect(global.fetch).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
   it("deepseekChat gives up after exhausting retries on a persistent 503", async () => {
     vi.useFakeTimers()
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: "upstream_error", detail: "ResourceExhausted" }) })

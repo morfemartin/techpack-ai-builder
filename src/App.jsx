@@ -10,7 +10,8 @@ import { toGrayscale } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
-import { planDocumentOutline, planPageLayout } from "./core/documentPlan.js"
+import { repairPage } from "./pages/pageContracts.js"
+import { fallbackDocumentOutline, planDocumentOutline, planPageLayout, withPlanningTimeout } from "./core/documentPlan.js"
 import { GARMENTS, GARMENT_LIST } from "./garments/index.js"
 import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCustomGarment.js"
 import { downloadGarmentFile } from "./garments/exportGarment.js"
@@ -21,9 +22,13 @@ import { EmbForm } from "./components/EmbForm.jsx"
 import { SvgModal } from "./components/SvgModal.jsx"
 import { Preview } from "./components/Preview.jsx"
 import { GarmentChat } from "./components/GarmentChat.jsx"
+import { ReviewChat } from "./components/ReviewChat.jsx"
+import { buildReviewFindings } from "./core/reviewDiff.js"
+import { applyReviewAnswers } from "./core/applyReviewAnswers.js"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { palette, role, type, space } from "./design/tokens.js"
+import { GRID, PAGE } from "./design/metrics.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
 const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
@@ -165,6 +170,8 @@ export default function App() {
   const [plannedPreviewError, setPlannedPreviewError] = useState(null)
   const [monoMode, setMonoMode] = useState(false) // grayscale toggle - render-time only, never re-triggers AI planning
   const [viewAllPages, setViewAllPages] = useState(false) // "see every page at once" contact sheet
+  const [reviewFindings, setReviewFindings] = useState(null) // problems from the pre-download intent-vs-document diff
+  const [pendingReview, setPendingReview] = useState(null) // {pages, plan, lang, tx, garmentType} held behind the review gate
   const tl = T.ES
 
   function selectGarment(id, { vision = false } = {}) {
@@ -380,18 +387,18 @@ export default function App() {
   }
 
   function placeholderSvg(page, i, total) {
-    var W = 1200
-    var H = 900
+    var W = PAGE.width
+    var H = PAGE.height
     var title = svgSafeText((page && page.title) || "Pagina " + (i + 1))
     var label = "Desarrollando pagina " + (i + 1) + " de " + total
     return (
-      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>" +
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>" +
       "<rect width='" + W + "' height='" + H + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1.5'/>" +
-      "<rect x='80' y='80' width='1040' height='740' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
-      "<rect x='80' y='80' width='8' height='740' fill='" + role.highlight.fill + "'/>" +
-      "<text x='120' y='160' font-family='" + type.svgFonts.ui + "' font-size='32' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
-      "<text x='120' y='214' font-family='" + type.svgFonts.data + "' font-size='18' fill='" + role.priority.fill + "'>" + label + "</text>" +
-      "<text x='120' y='264' font-family='" + type.svgFonts.ui + "' font-size='16' fill='" + C.ink.hex + "'>La IA esta asignando bloques, pesos y notas tecnicas.</text>" +
+      "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='" + GRID.span(8) + "' height='" + (H - GRID.margin * 2) + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
+      "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='8' height='" + (H - GRID.margin * 2) + "' fill='" + role.highlight.fill + "'/>" +
+      "<text x='80' y='130' font-family='" + type.svgFonts.ui + "' font-size='28' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
+      "<text x='80' y='178' font-family='" + type.svgFonts.data + "' font-size='16' fill='" + role.priority.fill + "'>" + label + "</text>" +
+      "<text x='80' y='224' font-family='" + type.svgFonts.ui + "' font-size='14' fill='" + C.ink.hex + "'>La IA esta organizando contenido e instrucciones textiles.</text>" +
       "</svg>"
     )
   }
@@ -409,7 +416,7 @@ export default function App() {
     }
   }
 
-  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages } = {}) {
+  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan } = {}) {
     var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
     function publishPages(pages) {
       if (onPages) onPages(pages)
@@ -418,7 +425,12 @@ export default function App() {
     setDocumentPlanning(true)
     setDocumentPlanStatus("Estructurando el documento...")
     try {
-      var outline = await planDocumentOutline({ garmentType, parts, designs, lang })
+      var outline
+      try {
+        outline = await withPlanningTimeout(planDocumentOutline({ garmentType, parts, designs, lang }))
+      } catch {
+        outline = fallbackDocumentOutline({ garmentType, parts, designs, lang })
+      }
       var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, outline.pages.length) }))
       publishPages(placeholders)
       var plannedPages = []
@@ -427,47 +439,139 @@ export default function App() {
         var page = outline.pages[i]
         setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
         try {
-          var planned = await planPageLayout(
-            page,
-            { garmentType, parts, designs, lang },
-            {
-              onProgress: (progress) => {
-                setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+          var planned = await withPlanningTimeout(
+            planPageLayout(
+              page,
+              { garmentType, parts, designs, lang },
+              {
+                onProgress: (progress) => {
+                  setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+                },
               },
-            }
+            ),
           )
           plannedPages.push(planned)
         } catch {
           plannedPages.push(fallbackPageLayout(page))
         }
-        var rendered = buildPlannedPages({ pages: plannedPages }, ctx)
+        var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
         publishPages(outline.pages.map((p, idx) => (idx < rendered.length ? rendered[idx] : placeholders[idx])))
       }
-      return buildPlannedPages({ pages: plannedPages }, ctx)
+      // Hand the planned document (pages with their regions) to the caller so
+      // the pre-download review can diff intake intent against what each page
+      // actually carries.
+      if (onPlan) onPlan({ pages: plannedPages })
+      return buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
     } finally {
       setDocumentPlanning(false)
       setDocumentPlanStatus("")
     }
   }
 
+  // Applies grayscale (if toggled) and opens the SVG export modal. The single
+  // choke point every export path funnels through, AFTER the review gate.
+  function publishForExport(pages) {
+    if (monoMode) pages = pages.map((p) => ({ ...p, svg: toGrayscale(p.svg) }))
+    setSvgPages(pages)
+  }
+
   async function handleGenerate(lang) {
     var tx = await ensureTx(lang)
     var pages
+    var plan = null
     if (garmentId === "custom" && customGarment) {
       try {
-        pages = await buildCustomDocumentPages(lang, tx)
+        pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p) })
       } catch {
         pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
       }
     } else {
       pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
     }
-    // Grayscale is a pure render-time post-process (toGrayscale maps every hex
-    // to its luminance gray) - applied here so the EXPORTED file matches
-    // whatever the user was looking at, without threading a mono flag through
-    // the whole planning pipeline.
-    if (monoMode) pages = pages.map((p) => ({ ...p, svg: toGrayscale(p.svg) }))
-    setSvgPages(pages)
+
+    // Pre-download review round: diff the user's intake intent against the
+    // generated document. If anything is missing or unplaced, hold the pages
+    // behind the review chat; otherwise export straight away. Only the
+    // AI-planned custom path carries a plan to diff - registered garments use
+    // the fixed template and skip the review.
+    if (plan) {
+      var findings = buildReviewFindings({ hdr, parts, designs }, plan)
+      var problems = findings.filter((f) => f.kind === "missing" || f.kind === "unplaced")
+      if (problems.length > 0) {
+        var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+        setPendingReview({ pages, plan, lang, tx, garmentType })
+        setReviewFindings(findings)
+        return
+      }
+    }
+    publishForExport(pages)
+  }
+
+  function skipReview() {
+    const pages = pendingReview && pendingReview.pages
+    setReviewFindings(null)
+    setPendingReview(null)
+    if (pages) publishForExport(pages)
+  }
+
+  async function finishReview(answers) {
+    if (!pendingReview) return
+    const pending = pendingReview
+    const applied = applyReviewAnswers({ hdr, parts, designs, plan: pending.plan }, answers)
+    const planCtx = {
+      garmentType: pending.garmentType,
+      parts: applied.parts,
+      designs: applied.designs,
+      lang: pending.lang,
+    }
+    const affected = new Set(applied.affectedPageIds)
+    const revisedPlan = { pages: [] }
+
+    setDocumentPlanning(true)
+    try {
+      for (var i = 0; i < applied.plan.pages.length; i++) {
+        var page = applied.plan.pages[i]
+        if (!affected.has(page.id)) {
+          revisedPlan.pages.push(page)
+          continue
+        }
+
+        setDocumentPlanStatus("Aplicando revision: pagina " + (i + 1) + " de " + applied.plan.pages.length + "...")
+        try {
+          var replanned = await withPlanningTimeout(planPageLayout(page, planCtx))
+          revisedPlan.pages.push(replanned)
+        } catch {
+          // Review completion cannot be held hostage by the provider. The
+          // deterministic contract already knows the required page shape.
+          revisedPlan.pages.push(repairPage(page, planCtx).page)
+        }
+      }
+
+      const renderCtx = {
+        lang: pending.lang,
+        hdr: applied.hdr,
+        parts: applied.parts,
+        designs: applied.designs,
+        logo,
+        txData: pending.tx,
+        garment,
+      }
+      const rendered = buildPlannedPages(revisedPlan, renderCtx, { documentMode: "illustration-handoff", includeIndex: true })
+
+      // Commit the snapshots only after the corrected document rendered.
+      setHdr(applied.hdr)
+      setParts(applied.parts)
+      setDesigns(applied.designs)
+      setTxCache({})
+      setPlannedPreviewPages(rendered)
+      setPlannedPreviewKey("")
+      setReviewFindings(null)
+      setPendingReview(null)
+      publishForExport(rendered)
+    } finally {
+      setDocumentPlanning(false)
+      setDocumentPlanStatus("")
+    }
   }
 
   var previewPlanKey = step === 5 && garmentId === "custom" && customGarment
@@ -942,9 +1046,9 @@ export default function App() {
                       <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, fontFamily: type.fonts.data, marginBottom: space(1) }}>
                         {i + 1}. {p.name}
                       </div>
-                      <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
+                      <div style={{ width: PAGE.width * 0.54, height: PAGE.height * 0.54, position: "relative" }}>
                         <div
-                          style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                          style={{ width: PAGE.width, height: PAGE.height, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
                           dangerouslySetInnerHTML={{ __html: monoMode ? toGrayscale(p.svg) : p.svg }}
                         />
                       </div>
@@ -967,14 +1071,14 @@ export default function App() {
                 </div>
               )}
               {activePlannedPage ? (
-                <div style={{ width: 1200 * 0.54, height: 900 * 0.54, position: "relative" }}>
+                <div style={{ width: PAGE.width * 0.54, height: PAGE.height * 0.54, position: "relative" }}>
                   <div
-                    style={{ width: 1200, height: 900, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                    style={{ width: PAGE.width, height: PAGE.height, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
                     dangerouslySetInnerHTML={{ __html: monoMode ? toGrayscale(activePlannedPage.svg) : activePlannedPage.svg }}
                   />
                 </div>
               ) : (
-                <div style={{ height: 900 * 0.54, border: hair, background: C.white.hex, color: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: space(2) }}>
+                <div style={{ height: PAGE.height * 0.54, border: hair, background: C.white.hex, color: C.ink.hex, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: space(2) }}>
                   <div style={{ height: 6, width: 260, background: C.canvas.hex, border: hair }}>
                     <div style={{ height: "100%", width: documentPlanning ? "45%" : "0%", background: role.priority.fill }} />
                   </div>
@@ -995,6 +1099,7 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: C.shell.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.white.hex }}>
       {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
+      {reviewFindings && <ReviewChat findings={reviewFindings} onComplete={finishReview} onSkip={skipReview} />}
       <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
         {/* Wordmark — Morfe mark in white on the black shell */}
         <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>

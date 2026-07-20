@@ -7,12 +7,24 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { extractLastCompletedRegionType, planDocumentOutline, planPageLayout } from "./documentPlan.js"
+import { extractLastCompletedRegionType, fallbackDocumentOutline, planDocumentOutline, planPageLayout, withPlanningTimeout } from "./documentPlan.js"
 
 describe("document plan AI wrappers", () => {
   beforeEach(() => {
     deepseekChat.mockReset()
     deepseekChatStream.mockReset()
+  })
+
+  it("bounds stalled planning calls so the caller can use its fallback", async () => {
+    vi.useFakeTimers()
+    try {
+      const result = withPlanningTimeout(new Promise(() => {}), 25)
+      const rejection = expect(result).rejects.toThrow("planning_timeout")
+      await vi.advanceTimersByTimeAsync(25)
+      await rejection
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("normalizes an outline response into page descriptors", async () => {
@@ -32,21 +44,73 @@ describe("document plan AI wrappers", () => {
       lang: "ES",
     })
 
+    // The document contract (repairOutline) inserts the missing cover page
+    // in front of whatever the model proposed.
     expect(outline.pages).toEqual([
+      { id: "cover", title: "Sueter", purpose: "cover" },
       { id: "overview-page", title: "Sueter Overview", purpose: "overview", covers: undefined },
       { id: "logo", title: "Logo", purpose: "design:Chest Logo", covers: ["Chest Logo"] },
     ])
     expect(deepseekChat).toHaveBeenCalledOnce()
   })
 
-  it("falls back to overview plus design pages when the outline is empty", async () => {
+  it("preserves semantic objectives and views proposed for distributed construction pages", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{
+      id: "hood-system",
+      title: "Capucha",
+      purpose: "structure:hood-neck",
+      objective: "Documentar montaje de capucha",
+      pieces: ["hood"],
+      views: ["Exterior", "Interior"],
+    }] }))
+    const outline = await planDocumentOutline({ garmentType: "Hoodie", parts: [{ id: "hood", on: true }], designs: [] })
+    const page = outline.pages.find((item) => item.id === "hood-system")
+    expect(page.objective).toBe("Documentar montaje de capucha")
+    expect(page.views).toEqual(["Exterior", "Interior"])
+    expect(page.pieces).toEqual(["hood"])
+  })
+
+  it("gives the model the confirmed textile brief instead of only names and parts", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] }))
+    await planDocumentOutline({
+      garmentType: "Cargo",
+      parts: [{ id: "P01", on: true }],
+      designs: [],
+      brief: { construction: { seams: ["Safety stitch 516"] }, openPoints: ["Zipper lengths"] },
+    })
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).toContain("Brief textil confirmado")
+    expect(prompt).toContain("Safety stitch 516")
+    expect(prompt).toContain("Zipper lengths")
+  })
+
+  it("exposes the model proposal separately from deterministic contract repairs", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "body", title: "Body", purpose: "overview", pieces: ["P01"] }] }))
+    let telemetry
+    const outline = await planDocumentOutline(
+      { garmentType: "Cargo", parts: [{ id: "P01", on: true }], designs: [] },
+      { onProposal: (value) => { telemetry = value } }
+    )
+    expect(telemetry.raw).toContain('"body"')
+    expect(telemetry.proposed.pages[0].purpose).toBe("overview")
+    expect(telemetry.repairs).toContain("inserted cover page")
+    expect(outline.pages[0].purpose).toBe("cover")
+  })
+
+  it("falls back to cover + overview plus design pages when the outline is empty", async () => {
     deepseekChat.mockResolvedValueOnce('{"pages":[]}')
     const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
 
-    expect(outline.pages.map((p) => p.purpose)).toEqual(["overview", "design:Back Print"])
+    expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
   })
 
-  it("streams page layout progress and normalizes unknown region types away", async () => {
+  it("exposes the same contract-repaired fallback outline for non-blocking labs", () => {
+    const outline = fallbackDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
+
+    expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
+  })
+
+  it("streams progress, drops unknown region types, and repairs the page to its purpose contract", async () => {
     const events = []
     deepseekChatStream.mockImplementationOnce(async ({ onEvent }) => {
       onEvent({ contentSoFar: '{"regions":[{"type":"header"', tokensSoFar: 1 })
@@ -60,7 +124,10 @@ describe("document plan AI wrappers", () => {
       { onProgress: (event) => events.push(event) }
     )
 
-    expect(page.regions.map((r) => r.type)).toEqual(["header", "disclaimer"])
+    // "bogus" dropped by normalizePlan; the overview contract then inserts
+    // the missing mandatory regions (titleBar, illustration, partsList) and
+    // enforces canonical chrome order.
+    expect(page.regions.map((r) => r.type)).toEqual(["header", "titleBar", "illustration", "partsList", "disclaimer"])
     expect(events.at(-1)).toEqual({ percent: 5, lastLabel: "bogus" })
     expect(deepseekChatStream).toHaveBeenCalledOnce()
   })

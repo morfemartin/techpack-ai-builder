@@ -3,45 +3,41 @@ import { buildPage1, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, r
 import { capGarment } from "../garments/cap.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-// These assert the exact geometry the old hand-computed pixel math produced
-// (hH=80, detailsBar=22, tableHeader=20, discH=28 on an 1200x900 page -> a
-// body row of 792px, spec-table rows sharing 792-22-20=750px), so the switch
-// to the flexbox-style engine in buildPage1 is provably a like-for-like
-// layout, not just "it still builds."
-describe("buildPage1 layout parity", () => {
+// Registered-garment pages share the physical A4 geometry with planned pages.
+describe("buildPage1 A4 geometry", () => {
   const hdr = { brand: "Test Brand", season: "2027 SS", sno: "T001", cat: "Cap", fab: "Poly", fac: "", ind: "", outd: "", pname: "Test Cap" }
 
   function rects(svg) {
     return [...svg.matchAll(/<rect x='([\d.]+)' y='([\d.]+)' width='([\d.]+)' height='([\d.]+)'/g)].map((m) => m.slice(1).map(Number))
   }
 
-  it("keeps the header at the top spanning the full width, 80px tall", () => {
+  it("keeps the header at the top, 64 units tall", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
     // svgHeader's own logo block is the first rect it draws: x=0,y=0,w=88,h=80
-    const found = rects(svg).find(([x, y, w, h]) => x === 0 && y === 0 && w === 88 && h === 80)
+    const found = rects(svg).find(([x, y, w, h]) => x === 0 && y === 0 && w === 88 && h === 64)
     expect(found).toBeTruthy()
   })
 
-  it("positions the DETAILS bar right below the header, full width, 22px tall", () => {
+  it("positions the legacy DETAILS bar right below the header", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 80, 1200, 22])
+    expect(rects(svg)).toContainEqual([0, 64, 1188, 22])
   })
 
-  it("keeps the disclaimer bar at the bottom, full width, 28px tall", () => {
+  it("keeps the disclaimer bar at the bottom, full width, 24px tall", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 872, 1200, 28])
+    expect(rects(svg)).toContainEqual([0, 816, 1188, 24])
   })
 
-  it("draws the spec-table frame spanning from the DETAILS bar top to the disclaimer, 320px wide", () => {
+  it("draws the spec-table frame on three macro-grid columns", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
-    expect(rects(svg)).toContainEqual([0, 80, 320, 792])
+    expect(rects(svg)).toContainEqual([0, 64, 414, 752])
   })
 
-  it("sizes the 4-view grid cells to fill the 880x770 area below the DETAILS bar in a 2x2 grid", () => {
+  it("sizes the 4-view grid inside the remaining five columns", () => {
     // NOTE: the original hand-coded version started the view grid at y=hH (80),
     // flush with the DETAILS bar's own top instead of below it - since the
     // DETAILS bar is full-width and the view cells' opaque white background is
@@ -53,14 +49,13 @@ describe("buildPage1 layout parity", () => {
     const parts = capGarment.defaultParts.slice(0, 3)
     const svg = buildPage1("ES", hdr, parts, null, null, capGarment)
     const rs = rects(svg)
-    // vW = (1200-320)/2 = 440, vH = 770/2 = 385
-    expect(rs).toContainEqual([320, 102, 440, 385])
-    expect(rs).toContainEqual([760, 102, 440, 385])
-    expect(rs).toContainEqual([320, 487, 440, 385])
-    expect(rs).toContainEqual([760, 487, 440, 385])
+    expect(rs).toContainEqual([414, 86, 387, 365])
+    expect(rs).toContainEqual([801, 86, 387, 365])
+    expect(rs).toContainEqual([414, 451, 387, 365])
+    expect(rs).toContainEqual([801, 451, 387, 365])
   })
 
-  it("flexes part-row heights to fill exactly 750px regardless of how many parts are active", () => {
+  it("flexes part-row heights to fill exactly 714 units regardless of active count", () => {
     const two = buildPage1("ES", hdr, capGarment.defaultParts.filter((p) => p.on).slice(0, 2), null, null, capGarment)
     const five = buildPage1("ES", hdr, capGarment.defaultParts.filter((p) => p.on).slice(0, 5), null, null, capGarment)
 
@@ -68,19 +63,21 @@ describe("buildPage1 layout parity", () => {
     // are 320px wide (lW) - narrower than the disclaimer bar, which also has
     // y > 122 but spans the full page width, so filter on width too.
     const twoRowHeights = rects(two)
-      .filter(([x, y, w]) => x === 0 && w === 320 && y >= 122)
+      .filter(([x, y, w]) => x === 0 && w === 414 && y >= 102 && y < 816)
       .map(([, , , h]) => h)
     const fiveRowHeights = rects(five)
-      .filter(([x, y, w]) => x === 0 && w === 320 && y >= 122)
+      .filter(([x, y, w]) => x === 0 && w === 414 && y >= 102 && y < 816)
       .map(([, , , h]) => h)
 
     expect(twoRowHeights).toHaveLength(2)
-    expect(twoRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(750, 5)
-    expect(twoRowHeights[0]).toBeCloseTo(375, 5)
+    expect(twoRowHeights.reduce((a, b) => a + b, 0)).toBe(714)
+    expect(twoRowHeights[0]).toBe(357)
 
+    // 758/5 = 151.6 - with whole-pixel edge snapping rows alternate 151/152,
+    // preserving the exact total with zero gaps between rows.
     expect(fiveRowHeights).toHaveLength(5)
-    expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBeCloseTo(750, 5)
-    expect(fiveRowHeights[0]).toBeCloseTo(150, 5)
+    expect(fiveRowHeights.reduce((a, b) => a + b, 0)).toBe(714)
+    fiveRowHeights.forEach((h) => expect([142, 143]).toContain(h))
   })
 })
 
@@ -104,6 +101,84 @@ describe("buildPage1 with a garment that has no hand-drawn guides/callouts", () 
   it("draws no callout circles (no invented pointer coordinates)", () => {
     const svg = buildPage1("ES", hdr, bareGarment.defaultParts, null, null, bareGarment)
     expect(svg).not.toContain("<circle")
+  })
+})
+
+describe("shared metrics adoption (P1 alignment)", () => {
+  function textXs(svg) {
+    return [...svg.matchAll(/<text x='([\d.-]+)'[^>]*>([^<]*)<\/text>/g)].map((m) => ({ x: Number(m[1]), t: m[2] }))
+  }
+
+  it("parts-list header captions sit exactly on the row columns (same stops, same alignment)", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 400, height: 200 },
+      {
+        parts: [{ id: "body", val: "Cotton", on: true }],
+        partLabels: { body: "Body Panel" },
+        labels: { spec: "SPECS", detail: "DETAILS" },
+      }
+    )
+    const texts = textXs(svg)
+    const header = (t) => texts.find((e) => e.t === t)
+    // header caption x === data text x, per column
+    expect(header("SPECS").x).toBe(texts.find((e) => e.t === "Body Panel").x)
+    expect(header("DETAILS").x).toBe(texts.find((e) => e.t === "Cotton").x)
+    // the phantom "Archivo / Drive" header column (no data column ever existed) is gone
+    expect(svg).not.toContain("Archivo / Drive")
+  })
+
+  it("uses a narrow number track and compact two-digit chips", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 400, height: 200 },
+      {
+        parts: [{ id: "body", val: "Cotton", on: true }],
+        partLabels: { body: "Body Panel" },
+        labels: { spec: "SPECS", detail: "DETAILS" },
+        compact: true,
+        startIndex: 9,
+      }
+    )
+    expect(svg).toContain("<rect x='16' y='19' width='12' height='12'")
+    expect(svg).toContain("width='12'")
+    expect(svg).toContain(">10</text>")
+  })
+
+  it("distributes remaining rail height across rows when the compositor requests a filled table", () => {
+    const svg = renderPartsList(
+      { x: 0, y: 0, width: 272, height: 100 },
+      {
+        parts: [{ id: "a", val: "One", on: true }, { id: "b", val: "Two", on: true }],
+        compact: true,
+        fill: true,
+      }
+    )
+    expect(svg).toContain("y='16' width='272' height='42'")
+    expect(svg).toContain("y='58' width='272' height='42'")
+  })
+
+  it("svgHeader lays both rows on one grid: every bottom-row edge lands on a top-row edge, both rows fill the page", () => {
+    const hdr2 = { brand: "B", season: "S", sno: "1", cat: "C", fab: "F", fac: "X", ind: "I", outd: "O", pname: "P" }
+    const svg = buildPage1("ES", hdr2, capGarment.defaultParts.slice(0, 2), null, null, capGarment)
+    // Header rows are two 32-unit bands on the shared module grid.
+    const rects = [...svg.matchAll(/<rect x='([\d.]+)' y='([\d.]+)' width='([\d.]+)' height='([\d.]+)'/g)]
+      .map((m) => m.slice(1).map(Number))
+      .filter(([, y, , h]) => (y === 0 || y === 32) && h === 32)
+    const topEdges = new Set(rects.filter(([, y]) => y === 0).flatMap(([x, , w]) => [x, x + w]))
+    const bottomEdges = rects.filter(([, y]) => y === 32).flatMap(([x, , w]) => [x, x + w])
+    expect(bottomEdges.length).toBeGreaterThan(0)
+    bottomEdges.forEach((e) => expect(topEdges.has(e)).toBe(true))
+    // both rows end flush at the page's right edge
+    expect(Math.max(...topEdges)).toBe(1188)
+    expect(Math.max(...bottomEdges)).toBe(1188)
+  })
+
+  it("wraps long header values inside their cells instead of cutting them", () => {
+    const longHeader = { brand: "Test", season: "2028 FW", sno: "T-01", cat: "Outerwear", fab: "Poliester micro-plisado con membrana impermeable y acabado mate", fac: "Portugal", ind: "01/01/2028", outd: "02/02/2028", pname: "Parka" }
+    const svg = buildPage1("ES", longHeader, capGarment.defaultParts.slice(0, 2), null, null, capGarment)
+    expect(svg).toContain("Poliester micro-plisado")
+    expect(svg).toContain("membrana impermeable")
+    expect(svg).toContain("acabado mate")
+    expect(svg).not.toContain(">Poliester micro-plisado con membrana impermeable y acabado mate</text>")
   })
 })
 
@@ -133,6 +208,13 @@ describe("reusable page block helpers", () => {
     expect(svg).toContain("| #003DA5")
   })
 
+  it("uses compact color rows in a narrow design-data column", () => {
+    const svg = renderColorSpecs({ x: 0, y: 0, width: 180, height: 500 }, { colors: [{ name: "Blue & White", hex: "#003DA5" }] })
+
+    expect(svg).toContain("Blue &amp; White  #003DA5")
+    expect(svg).not.toContain("C:100 M:63")
+  })
+
   it("renders embroidery specs and stop sequences from partial data", () => {
     const svg = renderEmbSpecs(
       { x: 0, y: 0, width: 430, height: 340 },
@@ -156,15 +238,18 @@ describe("reusable page block helpers", () => {
 
   it("renders illustration placeholders without drawing garment vectors", () => {
     const svg = renderIllustrationZone(
-      { x: 10, y: 20, width: 300, height: 180 },
+      { x: 10, y: 20, width: 300, height: 360 },
       { slots: 3, refs: ["Front", "Back"], note: "Show front and back construction notes." }
     )
 
     expect(svg).toContain("FRONT")
     expect(svg).toContain("BACK")
     expect(svg).toContain("VISTA 3")
-    expect(svg).toContain("BRIEF PARA EL ILUSTRADOR")
-    expect(svg).toContain("Show") // brief text lives inside the art board
+    const visibleText = svg.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+    expect(visibleText).toContain("Show front and back construction notes.")
+    expect(svg).toContain("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
+    expect(svg).toContain("id='ARTBOARD_CONTENT_CLIP__V1'")
+    expect(svg).toContain("clip-path='url(#ARTBOARD_CONTENT_CLIP__V1)'")
     expect(svg).not.toContain("<path")
   })
 })

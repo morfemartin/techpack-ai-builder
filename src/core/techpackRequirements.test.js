@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, ensureMinimumGeneralQuestions, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, ensureMinimumGeneralQuestions, fallbackRequirements, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -88,6 +88,16 @@ describe("ensureMinimumGeneralQuestions", () => {
   it("does not add fallback fields when seed facts exist", () => {
     const reqs = { garmentType: "polo", fields: [] }
     expect(ensureMinimumGeneralQuestions(reqs, { Color: "Azul" })).toBe(reqs)
+  })
+
+  it("builds hoodie-specific local fallback questions when IA is unavailable", () => {
+    const result = fallbackRequirements("hoodie", {})
+    const labels = pendingFields(result, "general").map((f) => f.label)
+
+    expect(labels).toContain("Tela principal")
+    expect(labels).toContain("Capucha")
+    expect(labels).toContain("Bolsillo")
+    expect(labels).toContain("Punos y bajo")
   })
 })
 

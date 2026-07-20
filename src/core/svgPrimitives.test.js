@@ -10,7 +10,7 @@ describe("wrapLines", () => {
   it("wraps long text into multiple lines respecting character budget", () => {
     const maxWidth = 200
     const fontSize = 10
-    const avgCharWidth = fontSize * 0.55
+    const avgCharWidth = fontSize * 0.62
     const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth))
     const text = "the quick brown fox jumps over the lazy dog near the riverbank"
     const result = wrapLines(text, maxWidth, fontSize)
@@ -32,15 +32,17 @@ describe("wrapLines", () => {
     expect(wrapLines(undefined, 200, 10)).toEqual([])
   })
 
-  it("returns single-word line even if word exceeds per-line budget", () => {
+  it("splits a long token so URLs and technical codes cannot overflow", () => {
     const maxWidth = 50
     const fontSize = 10
-    const avgCharWidth = fontSize * 0.55
+    const avgCharWidth = fontSize * 0.62
     const maxCharsPerLine = Math.max(1, Math.floor(maxWidth / avgCharWidth))
     const longWord = "supercalifragilisticexpialidocious"
     expect(longWord.length).toBeGreaterThan(maxCharsPerLine)
     const result = wrapLines(longWord, maxWidth, fontSize)
-    expect(result).toEqual([longWord])
+    expect(result.join("")).toBe(longWord)
+    expect(result.length).toBeGreaterThan(1)
+    result.forEach((line) => expect(line.length).toBeLessThanOrEqual(maxCharsPerLine))
   })
 
   it("does not produce empty-string lines from multiple consecutive spaces", () => {

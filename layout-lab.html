@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layout Lab · TechPack</title>
+    <!--
+      Herramienta de desarrollo (NO forma parte de la app ni del build de
+      producción — `vite build` solo toma index.html). Banco de pruebas del
+      motor de layout: renderiza fixtures fijos sin tocar la IA ni el chat.
+    -->
+    <style>
+      :root {
+        --ink: #141518;
+        --paper: #e8eaef;
+        --line: #cfd3da;
+        --blue: #1a3fb0;
+        --red: #e5352b;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --ui: -apple-system, "Helvetica Neue", Arial, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--ui); }
+
+      .lab-head {
+        position: sticky; top: 0; z-index: 10;
+        background: var(--ink); color: #fff;
+        padding: 16px 24px; border-bottom: 3px solid var(--red);
+        display: grid; grid-template-columns: 1fr auto; grid-template-areas: "title controls" "toc toc";
+        gap: 12px 24px; align-items: center;
+      }
+      .lab-head .title { grid-area: title; }
+      .lab-head h1 { margin: 0; font-size: 20px; letter-spacing: 0.5px; }
+      .lab-head p { margin: 2px 0 0; font-size: 12px; font-family: var(--mono); color: #9aa0ab; }
+      .controls { grid-area: controls; display: flex; gap: 18px; font-size: 13px; }
+      .controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+      .toc { grid-area: toc; display: flex; flex-wrap: wrap; gap: 6px; }
+      .toc a {
+        font-family: var(--mono); font-size: 11px; text-decoration: none;
+        color: #fff; background: rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 2px;
+      }
+      .toc a:hover { background: var(--blue); }
+
+      main { padding: 24px; display: flex; flex-direction: column; gap: 40px; max-width: 1400px; margin: 0 auto; }
+
+      .fixture { scroll-margin-top: 120px; }
+      .fx-head { display: flex; align-items: baseline; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 6px; }
+      .fx-head h2 { margin: 0; font-size: 16px; }
+      .chip { font-family: var(--mono); font-size: 11px; background: var(--blue); color: #fff; padding: 2px 8px; }
+
+      .meta { display: flex; gap: 32px; margin: 10px 0 14px; }
+      .meta div { display: flex; flex-direction: column; gap: 2px; }
+      .meta dt { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--red); }
+      .meta dd { margin: 0; font-size: 12.5px; max-width: 620px; line-height: 1.4; }
+
+      .pages { display: flex; flex-wrap: wrap; gap: 20px; }
+      .page { margin: 0; }
+      .page-frame { position: relative; width: 620px; max-width: 100%; box-shadow: 0 2px 10px rgba(0,0,0,0.18); background: #fff; }
+      .page-frame svg { display: block; width: 100%; height: auto; }
+      .page-frame .overlay { position: absolute; inset: 0; pointer-events: none; }
+      figcaption { font-family: var(--mono); font-size: 11px; color: #666; margin-top: 6px; }
+
+      .err { font-family: var(--mono); font-size: 12px; color: #fff; background: var(--red); padding: 10px 12px; border-radius: 2px; }
+      .diagnostics { font-family: var(--mono); font-size: 11px; color: #222; background: #fff; border-left: 4px solid var(--blue); padding: 8px 10px; margin: 0 0 14px; }
+      .diagnostics summary { cursor: pointer; font-weight: 700; padding: 2px 0; }
+      .diagnostics[open] summary { margin-bottom: 8px; }
+      .diagnostics div + div { border-top: 1px solid #edf0f4; margin-top: 3px; padding-top: 3px; }
+
+      .controls .tab { font-family: var(--ui); font-size: 13px; padding: 4px 12px; background: rgba(255,255,255,0.1); color: #fff; border: none; cursor: pointer; }
+      .controls .tab.on { background: var(--blue); }
+      .ai-controls { display: flex; gap: 10px; margin: 12px 0; }
+      .ai-controls select, .ai-controls button { font-family: var(--ui); font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+      .ai-controls button { background: var(--blue); color: #fff; border-color: var(--blue); font-weight: 700; }
+      .ai-controls button:disabled { opacity: 0.5; cursor: default; }
+      .ai-log { font-family: var(--mono); font-size: 11px; color: #333; background: #fff; border: 1px solid var(--line); padding: 8px 10px; margin-bottom: 14px; max-height: 220px; overflow-y: auto; }
+      .ai-log .log-line { padding: 1px 0; border-bottom: 1px solid #f0f0f0; }
+      .brief-main { max-width: 1180px; gap: 24px; }
+      .brief-hero p { max-width: 900px; font-size: 15px; line-height: 1.5; }
+      .brief-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+      .brief-metrics strong { background: #fff; border: 1px solid var(--line); padding: 8px 12px; font-family: var(--mono); font-size: 12px; }
+      .brief-section { background: #fff; border-top: 5px solid var(--blue); padding: 20px; }
+      .brief-section h2 { margin: 0 0 14px; font-size: 20px; }
+      .brief-section h3 { margin: 20px 0 8px; font-size: 14px; }
+      .brief-section ul { margin: 0; padding-left: 22px; line-height: 1.55; }
+      .brief-table-wrap { overflow-x: auto; }
+      .brief-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .brief-table th, .brief-table td { padding: 9px 10px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+      .brief-table th { background: #f1f3f6; font-family: var(--mono); font-size: 11px; }
+      .brief-table td:first-child { font-family: var(--mono); white-space: nowrap; }
+      .brief-design + .brief-design { margin-top: 24px; }
+      .pending { border-left: 4px solid #e3b600; padding: 10px 12px; background: #fff8d6; }
+      .pending-section { border-top-color: #e3b600; }
+      .comparison-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+      .comparison-head h2 { margin-bottom: 4px; }
+      .comparison-head p { margin: 0; color: #5f6570; }
+      .comparison-head button { background: var(--blue); color: #fff; border: 0; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+      .comparison-head button:disabled { opacity: 0.55; cursor: default; }
+      .comparison-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+      .comparison-columns article { min-width: 0; }
+      .comparison-empty { min-height: 90px; padding: 18px; border: 1px dashed var(--line); color: #5f6570; }
+      .score-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+      .score-strip strong { border: 1px solid var(--line); padding: 5px 7px; font-family: var(--mono); font-size: 10px; }
+      .comparison-section pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 520px; overflow-y: auto; }
+      @media (max-width: 1000px) { .comparison-columns { grid-template-columns: 1fr; } }
+      code { font-family: var(--mono); font-size: 0.9em; background: rgba(0,0,0,0.06); padding: 1px 4px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/layoutLab/main.js"></script>
+  </body>
+</html>

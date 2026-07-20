@@ -1,12 +1,15 @@
 import { T } from "../core/i18n.js"
-import { NA, sv, R, TX, LBL, VAL, dimLine, svgHeader, svgDisc, wrapLines, fitText } from "../core/svgPrimitives.js"
+import { NA, sv, R, TX, LBL, VAL, dimLine, svgChip, svgHeader, svgDisc, svgSectionBar, wrapLines, fitText, headerHeight } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { palette, type } from "../design/tokens.js"
+import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
+import { briefLines } from "./briefs.js"
+import { partsTableLayout } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, startIndex } = {}) {
+export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, fill, startIndex } = {}) {
   var safeParts = Array.isArray(parts) ? parts.filter(function (p) { return p && p.on !== false }) : []
   var pn = partLabels || {}
   var txP = Array.isArray(txParts) ? txParts : null
@@ -19,41 +22,55 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   // aligned, so a short parts list reads as a clean table with breathing room
   // instead of a few rows stretched tall with tiny text floating in huge cells.
   // The registered Cap keeps the default flex-fill rows (grow:1) untouched.
-  var rowSizing = compact ? { basis: 30, grow: 0, min: 24 } : { grow: 1, min: 16 }
+  var tableLayout = compact ? partsTableLayout({ parts: safeParts, partLabels: pn, txParts: txP, width: box.width }) : null
+  var measuredRows = tableLayout ? tableLayout.rows : null
+  var columns = tableLayout ? tableLayout.columns : PARTS_COL
+  var rowExtra = fill && tableLayout && measuredRows.length > 0
+    ? Math.max(0, box.height - tableLayout.height) / measuredRows.length
+    : 0
+
+  // Header and data rows share the SAME content-aware column template. The
+  // chosen value stop minimizes wrapped height for this table; dividers and
+  // glyphs are rounded together so they cannot drift by sub-pixel amounts.
+  function colStops(b) {
+    return { divLabel: Math.round(b.x + b.width * columns.label), divValue: Math.round(b.x + b.width * columns.value) }
+  }
 
   var tableHeaderRow = leaf({
-    basis: 20,
-    render: (b) =>
-      R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
-      TX(b.x + b.width * 0.11, b.y + b.height / 2, "#", 8, true, "middle") +
-      TX(b.x + b.width * 0.32, b.y + b.height / 2, lx.spec || "SPECS", 8, true, "middle") +
-      TX(b.x + b.width * 0.62, b.y + b.height / 2, lx.detail || "DETAILS", 8, true, "middle") +
-      TX(b.x + b.width * 0.82, b.y + b.height / 2, lx.file || "Archivo / Drive", 7, true, "middle"),
+    basis: ROW.tableHeader,
+    render: (b) => {
+      var st = colStops(b)
+      return (
+        R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
+        TX(b.x + b.width * columns.index, b.y + b.height / 2, "#", PRINT.minFont, true, "middle") +
+        TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, lx.spec || "SPECS", PRINT.minFont, true, "start") +
+        TX(st.divValue + TEXT_PAD, b.y + b.height / 2, lx.detail || "DETAILS", PRINT.minFont, true, "start")
+      )
+    },
   })
 
   var partRows = safeParts.map((p, i) =>
     leaf({
-      ...rowSizing,
+      ...(compact ? { basis: measuredRows[i].height + rowExtra, grow: 0, min: measuredRows[i].height } : { grow: 1, min: 16 }),
       render: (b) => {
         var bg = i % 2 === 0 ? palette.white.hex : "#F7F7F8"
-        var nm = pn[p.id] || p.customName || "P" + p.id
-        var v = txP ? txP[i] : p.val
-        var divX1 = Math.round(b.x + b.width * 0.21)
-        var divX2 = Math.round(b.x + b.width * 0.5)
-        // role.index chip: the same red square + white mono number used for
-        // the stepper/part chips in the wizard UI - one visual language for
-        // "this is a numbered reference" across screen and print.
-        var chip = Math.min(b.height - 6, 15)
-        var chipX = b.x + b.width * 0.11 - chip / 2
-        var chipY = b.y + b.height / 2 - chip / 2
+        var metric = compact ? measuredRows[i] : null
+        var nm = metric ? metric.name : pn[p.id] || p.customName || "P" + p.id
+        var v = metric ? metric.value : txP ? txP[i] : p.val
+        var st = colStops(b)
+        function textLines(lines, x) {
+          var safeLines = Array.isArray(lines) && lines.length ? lines : [""]
+          var startY = b.y + b.height / 2 - ((safeLines.length - 1) * TABLE.lineHeight) / 2
+          return safeLines.map((line, lineIndex) => TX(x, startY + lineIndex * TABLE.lineHeight, line, PRINT.minFont, false, "start", undefined, type.svgFonts.data)).join("")
+        }
         return (
           R(b.x, b.y, b.width, b.height, bg, "#ccc", "0.4") +
-          R(chipX, chipY, chip, chip, palette.red.hex, palette.red.hex, "0") +
-          TX(b.x + b.width * 0.11, b.y + b.height / 2, start + i + 1, 7.5, true, "middle", palette.white.hex, type.svgFonts.data) +
-          "<line x1='" + divX1 + "' y1='" + b.y + "' x2='" + divX1 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(b.x + b.width * 0.21 + 3, b.y + b.height / 2, nm, 7, false, "start") +
-          "<line x1='" + divX2 + "' y1='" + b.y + "' x2='" + divX2 + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
-          TX(b.x + b.width * 0.5 + 3, b.y + b.height / 2, v || NA, 7, false, "start", undefined, type.svgFonts.data)
+          // role.index chip: shared mark via svgChip - same size everywhere.
+          svgChip(b.x + b.width * columns.index, b.y + b.height / 2, start + i + 1, Math.min(b.height - 4, TABLE.chip)) +
+          "<line x1='" + st.divLabel + "' y1='" + b.y + "' x2='" + st.divLabel + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
+          (metric ? textLines(metric.nameLines, st.divLabel + TEXT_PAD) : TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, nm, PRINT.minFont, false, "start")) +
+          "<line x1='" + st.divValue + "' y1='" + b.y + "' x2='" + st.divValue + "' y2='" + (b.y + b.height) + "' stroke='#ddd' stroke-width='0.5'/>" +
+          (metric ? textLines(metric.valueLines, st.divValue + TEXT_PAD) : TX(st.divValue + TEXT_PAD, b.y + b.height / 2, v || NA, PRINT.minFont, false, "start", undefined, type.svgFonts.data))
         )
       },
     })
@@ -62,51 +79,57 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   return renderLayoutToSVG(solveLayout(col({}, [tableHeaderRow, ...partRows]), box))
 }
 
-// How tall each color row gets: as close to the ideal 30px as the available
-// height allows, but NEVER so short a row gets dropped - a saturated color
-// list shrinks its rows (down to a still-legible floor) instead of silently
-// losing entries past some cutoff, matching every other "never truncate,
-// shrink instead" rule in this file.
-function colorRowHeight(count, availH) {
-  if (count <= 0) return 30
-  return Math.max(16, Math.min(30, Math.floor(availH / count)))
+// How tall each color row gets: as close to the ideal ROW.color as the
+// available height allows. Rows never shrink off the baseline grid; overflow
+// is handled by document pagination instead of by creating fractional rows.
+function colorRowHeight() {
+  return ROW.color
 }
+
+// Section modules occupy two baseline units: one title bar and one breathing
+// row before their data begins. This keeps every following row on-grid.
+var SECTION_AFTER_BAR_GAP = GRID.baseline
 
 export function renderColorSpecs(box, { colors } = {}) {
   var s = ""
   var ty = box.y
   var W = box.width
-  var limitY = box.y + box.height
   var safe = (colors || []).filter(function (c) { return c && c.hex })
 
-  s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
-  ty += 16
-  // role.priority bar, same treatment as the embroidery title below it.
-  s += R(box.x + 10, ty - 10, W - 20, 18, palette.blue.hex, "none")
-  s += TX(box.x + W / 2, ty - 1, "PANTONE / CMYK", 9, true, "middle", palette.white.hex)
-  ty += 18
-  var rowH = colorRowHeight(safe.length, limitY - ty)
+  // Full-width rule + full-width section bar (svgSectionBar): the same edges
+  // and left-aligned title grammar as the page titleBar, instead of the old
+  // 10px-inset centered bar that never lined up with anything else.
+  s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
+  s += svgSectionBar(box.x, ty, W, "PANTONE / CMYK")
+  ty += BAR.h + SECTION_AFTER_BAR_GAP
+  var rowH = colorRowHeight()
   var swatch = Math.min(20, rowH - 4)
-  var small = rowH < 26
+  // A color card may be intentionally composed as a narrow data column next
+  // to the illustration and embroidery sheet. In that shape the full CMYK
+  // sentence would cross into its neighbour even when the row is tall, so
+  // compact by available width as well as by row height.
+  var small = rowH < 26 || W < 260
+  var textX = box.x + INSET + swatch + TEXT_PAD * 2
   safe.forEach(function (col) {
     var cm = h2c(col.hex)
-    s += R(box.x + 12, ty + (rowH - swatch) / 2 - 6, swatch, swatch, col.hex, palette.ink.hex, "0.5")
+    var rowMidY = ty + rowH / 2
+    s += R(box.x + INSET, rowMidY - swatch / 2, swatch, swatch, col.hex, palette.ink.hex, "0.5")
     if (small) {
-      s += TX(box.x + 20 + swatch, ty + rowH / 2 - 8, (col.name || col.hex) + "  " + col.hex, 7.5, true, "start")
+      s += TX(textX, rowMidY, (col.name || col.hex) + "  " + col.hex, PRINT.minFont, true, "start")
     } else {
-      s += TX(box.x + 38, ty - 2, col.name || col.hex, 8, true, "start")
-      s += TX(box.x + 38, ty + 9, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, 7, false, "start", undefined, type.svgFonts.data)
+      s += TX(textX, rowMidY - 6, col.name || col.hex, PRINT.minFont, true, "start")
+      s += TX(textX, rowMidY + 7, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, PRINT.minFont, false, "start", undefined, type.svgFonts.data)
     }
     ty += rowH
   })
   return s
 }
 
-function colorSpecsHeight(colors, startY, limitY) {
+function colorSpecsHeight(colors) {
   var safe = (colors || []).filter(function (c) { return c && c.hex })
-  var ty = startY + 34
-  var rowH = colorRowHeight(safe.length, limitY - ty)
-  return ty - startY + safe.length * rowH
+  var headH = BAR.h + SECTION_AFTER_BAR_GAP
+  var rowH = colorRowHeight()
+  return headH + safe.length * rowH
 }
 
 export function renderEmbSpecs(box, { emb, title } = {}) {
@@ -115,41 +138,55 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
   var ef = emb
   var ty = box.y
   var W = box.width
-  var limitY = box.y + box.height
 
-  s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
-  ty += 16
-  s += R(box.x + 10, ty - 10, W - 20, 18, palette.blue.hex, "none")
-  s += TX(box.x + W / 2, ty - 1, title || "Embroidery Tech Sheet", 9, true, "middle", palette.white.hex)
-  ty += 18
-  var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", ef.stops + "/" + ef.trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
+  // Same full-width rule + section-bar grammar as renderColorSpecs, and the
+  // value column sits on the shared COL.value stop - stacked blocks now share
+  // their vertical alignment instead of each picking its own (0.55 vs 0.5).
+  s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
+  s += svgSectionBar(box.x, ty, W, title || "Embroidery Tech Sheet")
+  ty += BAR.h + SECTION_AFTER_BAR_GAP
+  var valueX = Math.round(box.x + W * COL.value) + TEXT_PAD
+  var stops = ef.stops !== undefined && ef.stops !== null && ef.stops !== "" ? ef.stops : NA
+  var trims = ef.trims !== undefined && ef.trims !== null && ef.trims !== "" ? ef.trims : NA
+  var er = [["Formato", ef.machine], ["Puntadas", ef.stitches], ["Cambios color", ef.colorChanges], ["Paradas/Cortes", stops + "/" + trims], ["Tela", ef.fabric], ["Estab.Top", ef.stabTopping], ["Estab.Backing", ef.stabBacking], ["Dimension", ef.w && ef.h ? (ef.w + "x" + ef.h + " mm") : NA], ["Area", ef.area ? (ef.area + " mm2") : NA], ["Max puntada", ef.maxStitch ? (ef.maxStitch + " mm") : NA], ["Min puntada", ef.minStitch ? (ef.minStitch + " mm") : NA], ["Max salto", ef.maxJump ? (ef.maxJump + " mm") : NA], ["Hilo", ef.totalThread], ["Bobina", ef.totalBobbin]]
   var seq = ef.stopSeq && ef.stopSeq.length > 0 ? ef.stopSeq : []
   // Same "never drop a row, shrink instead" rule as colorSpecs: count every
   // row this block WILL draw (fields + optional sequence header/rows) and fit
   // them all into the available height rather than cutting off at some fixed
   // line height once the box is smaller than expected.
-  var totalRows = er.length + (seq.length > 0 ? 1 + seq.length : 0)
-  var rowH = Math.max(11, Math.min(16, Math.floor((limitY - ty) / Math.max(1, totalRows))))
-  var fontSize = Math.max(6.5, Math.min(8, rowH - 6))
+  var rowH = ROW.emb
+  var fontSize = PRINT.minFont
   er.forEach(function (row) {
-    s += TX(box.x + 12, ty, row[0] + ":", fontSize, true, "start") + TX(box.x + W * 0.55, ty, row[1] || NA, fontSize, false, "start", undefined, type.svgFonts.data)
+    s += TX(box.x + INSET, ty, row[0] + ":", fontSize, true, "start") + TX(valueX, ty, row[1] || NA, fontSize, false, "start", undefined, type.svgFonts.data)
     ty += rowH
   })
   if (seq.length > 0) {
-    ty += Math.max(0, rowH - 12)
-    s += "<line x1='" + (box.x + 10) + "' y1='" + ty + "' x2='" + (box.x + W - 10) + "' y2='" + ty + "' stroke='#eee' stroke-width='0.8'/>"
+    s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#eee' stroke-width='0.8'/>"
     ty += rowH
-    s += TX(box.x + 12, ty, "Secuencia:", fontSize, true, "start")
+    s += TX(box.x + INSET, ty, "Secuencia:", fontSize, true, "start")
     ty += rowH
     seq.forEach(function (st) {
-      s += TX(box.x + 14, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", fontSize, false, "start", undefined, type.svgFonts.data)
+      s += TX(box.x + INSET + TEXT_PAD, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", fontSize, false, "start", undefined, type.svgFonts.data)
       ty += rowH
     })
   }
   return s
 }
 
-export function renderIllustrationZone(box, { slots, refs, note } = {}) {
+export function renderReferenceAsset(box, { design } = {}) {
+  if (!design || !design.imageData) return ""
+  var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
+  var label = design.fileName || design.name || "reference"
+  var pad = INSET
+  var labelH = BAR.h
+  var s = ""
+  s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
+  s += svgSectionBar(box.x, box.y, box.width, "REFERENCIA - NO A ESCALA")
+  s += "<image id='REFERENCE__ASSET' data-asset-role='reference' data-asset-label='" + sv(label) + "' href='data:" + mime + ";base64," + design.imageData + "' x='" + (box.x + pad) + "' y='" + (box.y + labelH + pad) + "' width='" + (box.width - pad * 2) + "' height='" + Math.max(1, box.height - labelH - pad * 2) + "' preserveAspectRatio='xMidYMid meet'/>"
+  return s
+}
+
+export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset, clipPrefix } = {}) {
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
   var noteText = note || ""
   // The illustration is the hero: it takes the WHOLE box (no note band carved
@@ -158,18 +195,34 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
   // re-flow, and it costs zero extra layout height.
   var cols = Math.ceil(Math.sqrt(slotCount))
   var rows = Math.ceil(slotCount / cols)
-  var gap = 12
-  var cellW = (box.width - gap * (cols + 1)) / cols
-  var cellH = (box.height - gap * (rows + 1)) / rows
+  var xGap = GRID.gutter
+  var yGap = GRID.verticalGap
+  var cellW = (box.width - xGap * Math.max(0, cols - 1)) / cols
+  var availableUnits = Math.max(1, Math.floor((box.height - yGap * Math.max(0, rows - 1)) / GRID.baseline))
+  var baseUnits = Math.floor(availableUnits / rows)
+  var extraUnits = availableUnits % rows
+  var rowHeights = Array.from({ length: rows }, function (_, rowIndex) {
+    return Math.max(1, baseUnits + (rowIndex < extraUnits ? 1 : 0)) * GRID.baseline
+  })
+  var rowOffsets = []
+  var runningY = box.y
+  rowHeights.forEach(function (height) {
+    rowOffsets.push(runningY)
+    runningY += height + yGap
+  })
   var s = ""
+  var designerCommunication = ""
 
   for (var i = 0; i < slotCount; i++) {
     var c = i % cols
     var r = Math.floor(i / cols)
-    var x = box.x + gap + c * (cellW + gap)
-    var y = box.y + gap + r * (cellH + gap)
-    var chip = 18
+    var cellH = rowHeights[r]
+    var x = box.x + c * (cellW + xGap)
+    var y = rowOffsets[r]
     var refLabel = Array.isArray(refs) && refs[i] ? String(refs[i]) : "Vista " + (i + 1)
+    var viewNumber = Math.max(0, Number(slotOffset) || 0) + i + 1
+    var safeClipPrefix = clipPrefix ? String(clipPrefix).replace(/[^a-zA-Z0-9_-]/g, "_") + "__" : ""
+    var clipId = safeClipPrefix + "ARTBOARD_CONTENT_CLIP__V" + viewNumber
     // Crop-marked art board: a hairline frame with inward corner registration
     // ticks reads as "place artwork here", not a blank box.
     s += R(x, y, cellW, cellH, "none", "#E4E6EA", "0.8")
@@ -178,28 +231,58 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
       s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + (p[0] + tk * p[2]) + "' y2='" + p[1] + "' stroke='#B7BCC6' stroke-width='1'/>"
       s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + p[0] + "' y2='" + (p[1] + tk * p[3]) + "' stroke='#B7BCC6' stroke-width='1'/>"
     })
+    // Wrapping is conservative and this clip is the invariant's final guard:
+    // no glyph, highlight or reference can paint outside its artwork slot.
+    s += "<defs><clipPath id='" + clipId + "'><rect x='" + (x + 1) + "' y='" + (y + 1) + "' width='" + Math.max(1, cellW - 2) + "' height='" + Math.max(1, cellH - 2) + "'/></clipPath></defs>"
+    designerCommunication += "<g clip-path='url(#" + clipId + ")'>"
     // Red index chip + uppercase view label, top-left (the tech-pack "FRONT
     // VIEW" / "BACK VIEW" caption). The chip stays the cell's only attention mark.
-    s += R(x + 8, y + 8, chip, chip, palette.red.hex, palette.red.hex, "0")
-    s += TX(x + 8 + chip / 2, y + 8 + chip / 2, i + 1, 8, true, "middle", palette.white.hex, type.svgFonts.data)
-    s += TX(x + 8 + chip + 8, y + 8 + chip / 2, String(refLabel).toUpperCase(), 9, true, "start", palette.ink.hex)
+    designerCommunication += svgChip(x + 8 + CHIP / 2, y + 8 + CHIP / 2, "V" + viewNumber)
+    designerCommunication += TX(x + 8 + CHIP + 8, y + 8 + CHIP / 2, String(refLabel).toUpperCase(), PRINT.captionFont, true, "start", palette.ink.hex)
 
-    if (i === 0 && noteText) {
-      // fitText shrinks the brief to whatever size makes it fit the available
-      // cell - a long, detailed brief (the kind a real illustrator actually
-      // needs) never gets silently cut off or run into the cell's edge.
-      var innerW = Math.max(40, cellW - 44)
-      var innerH = cellH * 0.6
-      var fit = fitText(noteText, innerW, innerH, { maxSize: 11, minSize: 7.5 })
-      var startY = y + cellH / 2 - (fit.lines.length * fit.lineHeight) / 2 + fit.lineHeight / 2
-      s += TX(x + cellW / 2, startY - fit.lineHeight - 6, "BRIEF PARA EL ILUSTRADOR", 8, true, "middle", "#9AA0AB")
-      fit.lines.forEach(function (line, li) {
-        s += TX(x + cellW / 2, startY + li * fit.lineHeight, line, fit.size, false, "middle", "#9AA0AB")
+    var brief = Array.isArray(briefs) ? briefs[i] : null
+    var textX = x + INSET
+    var textY = y + GRID.baseline * 3
+    var textW = Math.max(40, cellW - INSET * 2)
+    var maxLines = Math.max(2, Math.floor((cellH - GRID.baseline * 5) / GRID.baseline))
+    var modes = ["full", "checklist", "title"]
+    var selectedLines = []
+    if (brief) {
+      for (var modeIndex = 0; modeIndex < modes.length; modeIndex++) {
+        var candidateLines = []
+        briefLines(brief, modes[modeIndex]).forEach(function (line) {
+          wrapLines(line, textW, PRINT.minFont).forEach(function (wrapped) {
+            candidateLines.push({ text: wrapped, pending: line.indexOf("PENDIENTE DE CONFIRMAR") === 0 })
+          })
+        })
+        selectedLines = candidateLines
+        if (candidateLines.length <= maxLines) break
+      }
+      selectedLines = selectedLines.slice(0, maxLines)
+    }
+
+    designerCommunication += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
+    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
+    selectedLines.forEach(function (line, lineIndex) {
+      var ly = textY + lineIndex * GRID.baseline
+      if (line.pending) designerCommunication += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
+      designerCommunication += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : "#7D8490", type.svgFonts.data)
+    })
+    if (!brief && noteText) {
+      wrapLines(noteText, textW, PRINT.minFont).slice(0, maxLines).forEach(function (line, lineIndex) {
+        designerCommunication += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
       })
     }
+    if (cellH >= 120) {
+      var fullAreaLabel = "AREA EDITABLE PARA ILUSTRACION TECNICA"
+      var areaLabel = wrapLines(fullAreaLabel, Math.max(1, cellW - INSET * 2), PRINT.minFont).length === 1 ? fullAreaLabel : "AREA EDITABLE"
+      designerCommunication += TX(x + cellW / 2, y + cellH - 16, areaLabel, PRINT.minFont, true, "middle", "#9AA0AB")
+    }
+    designerCommunication += "</g>"
+    designerCommunication += "</g>"
   }
 
-  return s
+  return s + "<g id='DESIGNER_COMMUNICATION' data-removable='true'>" + designerCommunication + "</g>"
 }
 
 /* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
@@ -213,8 +296,10 @@ export function renderIllustrationZone(box, { slots, refs, note } = {}) {
 export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var t = T[lang] || T.ES
   var pn = garment.partLabels[lang] || garment.partLabels.ES
-  var W = 1200, H = 900, hH = 80, discH = 28
-  var lW = 320
+  // discH: just enough for svgDisc's single centered 9px line + breathing
+  // room - was 28, oversized for one line of text regardless of page content.
+  var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, PAGE.width), discH = CHROME.footer
+  var lW = GRID.span(3)
   var ap = parts.filter(function (p) { return p.on })
   var txP = txData && txData.parts ? txData.parts : null
 
@@ -231,7 +316,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 
   var specTable = leaf({
     basis: lW,
-    render: (b) => renderPartsList(b, { parts: ap, partLabels: pn, txParts: txP, labels: { spec: t.sp, detail: t.dt, file: "Archivo / Drive" } }),
+    render: (b) => renderPartsList(b, { parts: ap, partLabels: pn, txParts: txP, labels: { spec: t.sp, detail: t.dt } }),
   })
 
   function buildViewCell(vi) {
@@ -254,7 +339,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
           // role.index: solid red badge + white mono number - same "found first"
           // enumeration mark as the part-row chips, cross-referenced by number.
           s += "<line x1='" + (ox + cx2) + "' y1='" + (oy + cy2) + "' x2='" + (ox + tx2) + "' y2='" + (oy + ty2) + "' stroke='" + palette.red.hex + "' stroke-width='0.9'/>"
-          s += "<circle cx='" + (ox + cx2) + "' cy='" + (oy + cy2) + "' r='9' fill='" + palette.red.hex + "' stroke='" + palette.red.hex + "' stroke-width='1'/>"
+          s += "<circle cx='" + (ox + cx2) + "' cy='" + (oy + cy2) + "' r='" + CHIP / 2 + "' fill='" + palette.red.hex + "' stroke='" + palette.red.hex + "' stroke-width='1'/>"
           s += TX(ox + cx2, oy + cy2, ri + 1, 8, true, "middle", palette.white.hex, type.svgFonts.data)
         })
         return s
@@ -274,7 +359,7 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
   var root = col({}, [headerLeaf, detailsBar, bodyRow, discBar])
   var resolved = solveLayout(root, { x: 0, y: 0, width: W, height: H })
 
-  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
+  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>"
   s += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
   s += renderLayoutToSVG(resolved)
 
@@ -295,12 +380,12 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 /* ---- DESIGN PAGE: garment-independent, only needs the base translations ---- */
 export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   var t = T[lang] || T.ES
-  var W = 1200, H = 900, hH = 80, discH = 28, bodyH = H - hH - discH
+  var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, PAGE.width), discH = CHROME.footer, bodyH = H - hH - discH
   var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
-  var LW = isEmb ? 430 : 370
+  var LW = GRID.span(3)
   var RX = LW, RW = W - LW, RH = bodyH
 
-  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + W + "' height='" + H + "'>"
+  var s = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>"
   s += "<rect width='" + W + "' height='" + H + "' fill='" + palette.white.hex + "' stroke='" + palette.ink.hex + "' stroke-width='1.5'/>"
   s += svgHeader(hdr, logo, W, hH)
   // role.priority: this page's title bar - solid blue, white text.
@@ -323,8 +408,8 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   if (!isWhole) { rows.push([t.posDetail, txPosDetail || d.posDetail || NA, false], [t.wDes, d.w ? (d.w + " mm") : NA, true], [t.hDes, d.h ? (d.h + " mm") : NA, true]) }
   rows.forEach(function (row) {
     if (!row[0]) return
-    s += TX(12, ty, row[0] + ":", 9, true, "start") + TX(LW * 0.52, ty, String(row[1] || NA), 9, false, "start", undefined, row[2] ? type.svgFonts.data : type.svgFonts.ui)
-    ty += 21
+    s += TX(INSET, ty, row[0] + ":", 9, true, "start") + TX(Math.round(LW * COL.value) + TEXT_PAD, ty, String(row[1] || NA), 9, false, "start", undefined, row[2] ? type.svgFonts.data : type.svgFonts.ui)
+    ty += ROW.kv
   })
 
   if (isWhole) {
@@ -340,7 +425,7 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
 
   ty += 6
   s += renderColorSpecs({ x: 0, y: ty, width: LW, height: by + bodyH - ty }, { colors: d.colors })
-  ty += colorSpecsHeight(d.colors, ty, by + bodyH)
+  ty += colorSpecsHeight(d.colors)
 
   if (isEmb && d.emb) {
     ty += 8
@@ -361,7 +446,7 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
     var imgY = by + Math.round((RH - dh) / 2)
 
     var mime = d.imageType === "svg" ? "image/svg+xml" : "image/png"
-    s += "<image href='data:" + mime + ";base64," + d.imageData + "' x='" + imgX + "' y='" + imgY + "' width='" + dw + "' height='" + dh + "' preserveAspectRatio='xMidYMid meet'/>"
+    s += "<image id='REFERENCE__DESIGN_ASSET' data-asset-role='reference' data-asset-label='" + sv(d.fileName || d.name || "design-reference") + "' href='data:" + mime + ";base64," + d.imageData + "' x='" + imgX + "' y='" + imgY + "' width='" + dw + "' height='" + dh + "' preserveAspectRatio='xMidYMid meet'/>"
     s += R(imgX, imgY, dw, dh, "none", palette.red.hex, "0.8")
 
     var wLabel = (d.w ? d.w + " mm" : "w")

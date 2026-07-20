@@ -38,7 +38,7 @@ const RETRYABLE_BASE_DELAY_MS = 1500
 // enough for a legitimately slow real generation (observed up to ~20s) while
 // still turning a genuine hang into a clear, RETRYABLE error within a bounded
 // time instead of an infinite spinner.
-const FETCH_TIMEOUT_MS = 30000
+const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_DEEPSEEK_FETCH_TIMEOUT_MS) || 30000
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -89,8 +89,16 @@ function wrapFetchFailure(e) {
 // message from NVIDIA's model-serving layer during a rough patch. Same
 // transient-capacity flavor as the 503 case above, just a different shape,
 // so it gets the same retry treatment instead of surfacing immediately.
+//
+// Also observed live (confirmed via network inspection): api/deepseek.js's
+// OWN upstream timeout (UPSTREAM_TIMEOUT_MS/UPSTREAM_STREAM_STALL_TIMEOUT_MS)
+// firing when NVIDIA itself never responds in time - it returns a 504 with
+// {error:"upstream_timeout"}. This was NOT being retried (only 503 was),
+// so a single slow round-trip through the proxy fell straight through to
+// "no se pudo diseñar el documento con IA" instead of getting the same
+// automatic second attempt every other transient failure gets.
 function isRetryable(err) {
-  return !!err.networkError || err.status === 503 || /ResourceExhausted/i.test(err.detail || "") || /Failed to generate completions/i.test(err.detail || "")
+  return !!err.networkError || err.status === 503 || err.status === 504 || /ResourceExhausted/i.test(err.detail || "") || /Failed to generate completions/i.test(err.detail || "")
 }
 
 async function callOnce({ messages, maxTokens, temperature, model, thinking }) {

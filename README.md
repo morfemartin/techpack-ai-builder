@@ -15,6 +15,7 @@ Nota: esta demo estática no incluye las funciones asistidas por IA (importar CS
 - [Características](#características)
 - [Instalación](#instalación)
 - [Uso rápido](#uso-rápido)
+- [Compatibilidad con Illustrator](#compatibilidad-con-illustrator)
 - [Arquitectura multi-prenda](#arquitectura-multi-prenda)
 - [Diseño y UX](#diseño-y-ux)
 - [Roadmap](#roadmap)
@@ -41,7 +42,8 @@ Está pensado para dos públicos a la vez:
 - Editor de colores Pantone/nombre + hex, con conversión automática a CMYK.
 - Ficha técnica de bordado dedicada, con extracción automática de datos desde un PDF de máquina Wilcom (requiere API key de Anthropic, opcional).
 - Exportación multi-idioma (ES/EN/ZH) con traducción asistida por IA (opcional).
-- Cada página se genera como un SVG independiente, descargable o copiable — pensado para abrir como artboards separados en Illustrator.
+- Cada página se genera como SVG A4 horizontal (`297×210 mm`), descargable o copiable y agrupado semánticamente para abrir como artboards separados en Illustrator.
+- Cuando faltan dibujos técnicos, el resultado se identifica como **Illustration Handoff**: incluye índice, páginas numeradas, artboards editables e instrucciones textiles para que un diseñador gráfico complete las ilustraciones sin inventar construcción.
 - **Arquitectura multi-prenda desde el diseño**: agregar un nuevo tipo de prenda es un archivo de datos, no una reescritura — ver [abajo](#arquitectura-multi-prenda).
 
 ## Instalación
@@ -67,6 +69,26 @@ Opcional — para traducción automática y extracción de PDF de bordado, copi�
 4. Activá/editá las piezas de construcción (tela, cierre, paneles, etc.).
 5. Agregá uno o más diseños: posición, técnica, colores, imagen de referencia, y ficha de bordado si aplica.
 6. En la vista previa, generá el SVG por idioma y copiá/descargá cada página.
+
+## Compatibilidad con Illustrator
+
+El SVG abierto directamente sigue disponible como formato vectorial abierto.
+Para conservar una jerarquia de capas nativas y nombres estables en Illustrator,
+el proyecto tambien mantiene un contrato de exportacion y un importador JSX
+auditable. La investigacion de formatos, limitaciones de AI/PDF/SVG, prueba
+controlada y plan de integracion estan en
+**[docs/ILLUSTRATOR-COMPATIBILITY.md](docs/ILLUSTRATOR-COMPATIBILITY.md)**.
+
+La muestra reproducible se genera con:
+
+```bash
+npm run illustrator:sample
+```
+
+Desde el modal de exportacion tambien se puede descargar un paquete completo:
+el JSX incluido crea un solo archivo AI con todas las paginas como mesas de
+trabajo nombradas y siete capas semanticas globales. Affinity abre directamente
+los SVG editables incluidos.
 
 ## Arquitectura multi-prenda
 
@@ -97,6 +119,12 @@ interfaz y el SVG generado.
 El porqué de cada decisión (impresión, escala de grises, tipografía mono para
 datos, la retícula ligada al motor flexbox) está justificado en
 **[docs/UX-DESIGN.md](docs/UX-DESIGN.md)**.
+
+El motor de layout (grid, alineación, espacio en blanco y el compositor
+row-vs-stack) se desarrolla y prueba de forma aislada con un banco de pruebas
+visual — **[docs/layout-lab/](docs/layout-lab/README.md)** — que renderiza el
+compositor real contra entradas fijas, sin IA ni el wizard. _(Docs going
+forward are written in English.)_
 
 ## Roadmap
 
