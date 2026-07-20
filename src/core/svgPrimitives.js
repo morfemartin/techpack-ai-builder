@@ -127,7 +127,7 @@ export function svgHeader(hdr, logo, W, hH) {
   // Logo slot: pure white (print-first), ink border. Muted placeholder text
   // when no logo was uploaded - not a brand/role color, just a chrome hint.
   s += R(0, 0, HEADER.logo, totalH, palette.white.hex, palette.ink.hex, "0.8")
-  if (logo) s += "<image href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (totalH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
+  if (logo) s += "<image id='REFERENCE__LOGO_HEADER' data-asset-role='logo' data-asset-label='logo-header' href='" + logo + "' x='4' y='4' width='" + (HEADER.logo - 8) + "' height='" + (totalH - 8) + "' preserveAspectRatio='xMidYMid meet'/>"
   else s += TX(HEADER.logo / 2, totalH / 2, "LOGO", PRINT.minFont, false, "middle", "#9AA0AB")
 
   function headerRow(cells, fields, y, rowH) {

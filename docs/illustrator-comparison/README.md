@@ -5,9 +5,9 @@ Esta carpeta compara la misma pagina real del benchmark `O-complete-semantic-pro
 ## Archivos
 
 - `sample/01-legacy-system.svg`: salida anterior, sin preparacion especifica para Illustrator.
-- `sample/02-illustrator-system.svg`: misma pagina con XML explicito, fuentes y tamanos originales, baseline vertical explicito para Affinity/Illustrator, imagenes embebidas con `href` y `xlink:href`, metadata segura y siete grupos de capa estables.
+- `sample/02-illustrator-system.svg`: misma pagina con XML explicito, fuentes y tamanos originales, baseline vertical explicito para Affinity/Illustrator, imagenes con `href` y `xlink:href`, metadata segura y siete grupos de capa estables.
 - `sample/Techpack-complete.ai`: documento completo con once mesas de trabajo nombradas y siete capas globales.
-- `Techpack-Import-Illustrator.jsx`: promueve los grupos SVG a capas nativas y guarda el AI.
+- `Techpack-Import-Illustrator.jsx`: promueve los grupos SVG a capas nativas, incrusta imagenes vinculadas y guarda el AI.
 - `sample/illustrator-import-report.txt`: version, artboard, capas, objetos y grupos faltantes detectados por Illustrator.
 
 ## Capas esperadas
@@ -114,6 +114,7 @@ tablas, briefs, footer y numeracion dentro de sus limites.
 - fuentes, tamanos y espaciado preservados;
 - baseline corregido sin desplazar cajas ni columnas;
 - sin recortes, sustitucion tipografica ni dialogos bloqueantes;
+- imagenes cargadas empaquetadas en `assets/` con nombres legibles e incrustadas en el AI final;
 - apertura verificada en Illustrator 30.4 y Affinity 3.2.3.
 
 ![Capas nativas y geometria final en Illustrator](img/05-illustrator-final-layers.png)
@@ -128,6 +129,7 @@ tablas, briefs, footer y numeracion dentro de sus limites.
 | Aviso TinySVG repetido | `clipPath` redundante en cada pagina | Retirar clips despues de medir y envolver el contenido |
 | Once documentos independientes | Importacion directa pagina por pagina | Ensamblaje en un unico AI con mesas nombradas |
 | Limite horizontal del lienzo | Todas las mesas estaban en una sola fila | Reticula determinista de cuatro columnas |
+| Imagenes por reconectar | Assets subidos viajaban como blobs anonimos o vinculos sin contrato | Carpeta `assets/`, nombres deterministas, links relativos y embedding final en JSX |
 
 ## Capturas necesarias
 
@@ -145,6 +147,7 @@ Tomar las capturas al 100% de zoom y sin modificar el documento:
 - A4 horizontal: `297 x 210 mm`.
 - Ningun texto cortado, sustituido o desplazado.
 - Sin imagenes vinculadas ausentes.
+- `illustrator-import-report.txt` muestra `Remaining linked images: 0`.
 - Siete capas nativas con los nombres indicados.
 - La capa de comunicacion con el disenador puede ocultarse sin cambiar el documento de fabrica.
 - El SVG nuevo y el anterior contienen el mismo contenido; las diferencias deben provenir solo del contrato de importacion.

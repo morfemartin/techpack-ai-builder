@@ -176,12 +176,13 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
 export function renderReferenceAsset(box, { design } = {}) {
   if (!design || !design.imageData) return ""
   var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
+  var label = design.fileName || design.name || "reference"
   var pad = INSET
   var labelH = BAR.h
   var s = ""
   s += R(box.x, box.y, box.width, box.height, palette.white.hex, palette.ink.hex, "0.8")
   s += svgSectionBar(box.x, box.y, box.width, "REFERENCIA - NO A ESCALA")
-  s += "<image href='data:" + mime + ";base64," + design.imageData + "' x='" + (box.x + pad) + "' y='" + (box.y + labelH + pad) + "' width='" + (box.width - pad * 2) + "' height='" + Math.max(1, box.height - labelH - pad * 2) + "' preserveAspectRatio='xMidYMid meet'/>"
+  s += "<image id='REFERENCE__ASSET' data-asset-role='reference' data-asset-label='" + sv(label) + "' href='data:" + mime + ";base64," + design.imageData + "' x='" + (box.x + pad) + "' y='" + (box.y + labelH + pad) + "' width='" + (box.width - pad * 2) + "' height='" + Math.max(1, box.height - labelH - pad * 2) + "' preserveAspectRatio='xMidYMid meet'/>"
   return s
 }
 
@@ -445,7 +446,7 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
     var imgY = by + Math.round((RH - dh) / 2)
 
     var mime = d.imageType === "svg" ? "image/svg+xml" : "image/png"
-    s += "<image href='data:" + mime + ";base64," + d.imageData + "' x='" + imgX + "' y='" + imgY + "' width='" + dw + "' height='" + dh + "' preserveAspectRatio='xMidYMid meet'/>"
+    s += "<image id='REFERENCE__DESIGN_ASSET' data-asset-role='reference' data-asset-label='" + sv(d.fileName || d.name || "design-reference") + "' href='data:" + mime + ";base64," + d.imageData + "' x='" + imgX + "' y='" + imgY + "' width='" + dw + "' height='" + dh + "' preserveAspectRatio='xMidYMid meet'/>"
     s += R(imgX, imgY, dw, dh, "none", palette.red.hex, "0.8")
 
     var wLabel = (d.w ? d.w + " mm" : "w")

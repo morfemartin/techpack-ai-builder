@@ -71,6 +71,22 @@
     if (!sourceLayer.pageItems.length) sourceLayer.remove()
   }
 
+  function embedPlacedImages(doc) {
+    var embedded = 0
+    var failed = []
+    for (var i = doc.placedItems.length - 1; i >= 0; i--) {
+      var item = doc.placedItems[i]
+      var label = item.name || "placed-image-" + (i + 1)
+      try {
+        item.embed()
+        embedded++
+      } catch (err) {
+        failed.push(label + ": " + err)
+      }
+    }
+    return { embedded: embedded, failed: failed, remaining: doc.placedItems.length }
+  }
+
   function appendPage(destination, source, pageIndex, firstRect, pageName) {
     var sourceLayer = source.layers[0]
     var groups = importedGroups(sourceLayer)
@@ -119,6 +135,7 @@
   }
 
   destination.activate()
+  var imageReport = embedPlacedImages(destination)
   var packageRoot = sources[0].parent.name === "pages" ? sources[0].parent.parent : sources[0].parent
   var report = new File(packageRoot.fsName + "/illustrator-import-report.txt")
   report.encoding = "UTF-8"
@@ -129,6 +146,9 @@
   report.writeln("Pages: " + destination.artboards.length)
   report.writeln("Artboard grid: " + ARTBOARD_COLUMNS + " columns")
   report.writeln("Layers: " + destination.layers.length)
+  report.writeln("Embedded linked images: " + imageReport.embedded)
+  report.writeln("Remaining linked images: " + imageReport.remaining)
+  for (var e = 0; e < imageReport.failed.length; e++) report.writeln("- image embed failed: " + imageReport.failed[e])
   for (var p = 0; p < pageNames.length; p++) report.writeln("- " + pageNames[p])
   for (var l = 0; l < destination.layers.length; l++) report.writeln("- " + destination.layers[l].name + " | page groups=" + destination.layers[l].groupItems.length)
   report.close()

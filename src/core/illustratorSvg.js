@@ -35,6 +35,23 @@ function explicitBaselineOffset(fontFamily, fontSize) {
   return fontSize * (mono ? 0.35 : 0.36)
 }
 
+function slug(value) {
+  return String(value || "asset")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase() || "asset"
+}
+
+function extensionForMime(mime) {
+  if (/svg\+xml/i.test(mime)) return "svg"
+  if (/jpe?g/i.test(mime)) return "jpg"
+  if (/webp/i.test(mime)) return "webp"
+  if (/gif/i.test(mime)) return "gif"
+  return "png"
+}
+
 function parseSvg(svg) {
   const errors = []
   const doc = new DOMParser({
@@ -158,6 +175,58 @@ export function prepareIllustratorSvg(svg, page = {}) {
   })
 
   return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + new XMLSerializer().serializeToString(doc)
+}
+
+export function prepareIllustratorSvgWithAssets(svg, page = {}, options = {}) {
+  const doc = parseSvg(prepareIllustratorSvg(svg, page))
+  const root = doc.documentElement
+  const assetPathPrefix = options.assetPathPrefix || "../assets/"
+  const pageNumber = String(page.pageNumber || options.pageNumber || 1).padStart(2, "0")
+  const pageSlug = slug(page.title || page.name || page.id || "page")
+  const assets = []
+
+  collectElements(root, "image").forEach((node, index) => {
+    const href = node.getAttribute("href") || node.getAttributeNS(XLINK_NS, "href") || ""
+    const match = href.match(/^data:([^;,]+)(?:;[^,]*)?,([A-Za-z0-9+/=\s]+)$/)
+    if (!match) {
+      const existing = node.getAttribute("data-asset-label") || node.getAttribute("id") || "linked-image"
+      node.setAttribute("data-asset-name", existing)
+      return
+    }
+    const mime = match[1]
+    const base64 = match[2].replace(/\s+/g, "")
+    const role = slug(node.getAttribute("data-asset-role") || "image")
+    const label = slug(node.getAttribute("data-asset-label") || node.getAttribute("id") || ("image-" + (index + 1)))
+    const filename = "P" + pageNumber + "--" + pageSlug + "--" + role + "--" + label + "-" + String(assets.length + 1).padStart(2, "0") + "." + extensionForMime(mime)
+    const hrefValue = assetPathPrefix + filename
+    node.setAttribute("href", hrefValue)
+    node.setAttributeNS(XLINK_NS, "xlink:href", hrefValue)
+    node.setAttribute("data-asset-name", filename)
+    node.setAttribute("data-asset-mime", mime)
+    assets.push({ file: "assets/" + filename, filename, mime, base64 })
+  })
+
+  const metadata = root.getElementsByTagName("metadata")[0]
+  if (metadata) {
+    while (metadata.firstChild) metadata.removeChild(metadata.firstChild)
+    metadata.appendChild(doc.createCDATASection(JSON.stringify({
+      schema: "techpack-ai-builder/illustrator-svg/v1",
+      id: page.id || null,
+      title: page.title || null,
+      purpose: page.purpose || null,
+      pageNumber: page.pageNumber || 1,
+      totalPages: page.totalPages || 1,
+      physicalSize: "297mm x 210mm",
+      viewBox: root.getAttribute("viewBox"),
+      layers: ILLUSTRATOR_LAYERS,
+      linkedAssets: assets.map((asset) => ({ file: asset.file, mime: asset.mime })),
+    })))
+  }
+
+  return {
+    svg: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + new XMLSerializer().serializeToString(doc),
+    assets,
+  }
 }
 
 export function illustratorLayerReport(svg) {
