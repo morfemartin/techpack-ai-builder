@@ -75,11 +75,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
-  // Mirrors `phase` for the background AI-depth splice in runAnalysis() below -
-  // that promise resolves well after the render that started it, so it needs
-  // a ref (not the closed-over `phase` value) to check whether the general
-  // walk is STILL live before touching `reqs`.
+  // Mirror `phase`/`reqs` for the background AI-depth splice in runAnalysis()
+  // below - that promise resolves well after the render that started it, so
+  // it needs refs (not the closed-over state values) to check whether the
+  // general walk is STILL live, and to compute additions synchronously
+  // instead of via a setReqs updater (whose body React runs on its own
+  // schedule - reading a variable it assigns, right after calling setReqs,
+  // reads the STALE pre-update value; this bit a live status-line count).
   const phaseRef = useRef(phase)
+  const reqsRef = useRef(reqs)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -88,6 +92,10 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   useEffect(() => {
     phaseRef.current = phase
   }, [phase])
+
+  useEffect(() => {
+    reqsRef.current = reqs
+  }, [reqs])
 
   // Kick off the up-front analysis when a garment type is known (either passed
   // in by a seed door, or once the user names it). Guarded so it runs once per
@@ -181,17 +189,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     analyzeRequirements({ garmentType, seed: seed || {}, tecs })
       .then((aiReqs) => {
         if (phaseRef.current !== "asking") return
+        const currentReqs = reqsRef.current
+        if (!currentReqs) return
+        // Computed synchronously off reqsRef (not a setReqs updater's `prev`
+        // param, which React doesn't invoke inline - see the ref comment
+        // above) so the status line below always reflects what was ACTUALLY
+        // added, not a stale closure value.
         const aiGeneralAsk = (aiReqs.fields || []).filter((f) => f.category === "general" && f.status === FIELD_STATUS.ASK)
-        let addedCount = 0
-        setReqs((prev) => {
-          if (!prev) return prev
-          const existingKeys = new Set(prev.fields.map((f) => f.key))
-          const additions = aiGeneralAsk.filter((f) => !existingKeys.has(f.key))
-          addedCount = additions.length
-          if (additions.length === 0) return prev
-          return { ...prev, fields: [...prev.fields, ...additions] }
-        })
-        setAIStatus(addedCount > 0 ? "Guia tecnica por capas lista · +" + addedCount + " pregunta" + (addedCount > 1 ? "s" : "") + " especifica" + (addedCount > 1 ? "s" : "") + " de IA" : "Guia tecnica por capas lista")
+        const existingKeys = new Set(currentReqs.fields.map((f) => f.key))
+        const additions = aiGeneralAsk.filter((f) => !existingKeys.has(f.key))
+        if (additions.length > 0) setReqs({ ...currentReqs, fields: [...currentReqs.fields, ...additions] })
+        setAIStatus(additions.length > 0 ? "Guia tecnica por capas lista · +" + additions.length + " pregunta" + (additions.length > 1 ? "s" : "") + " especifica" + (additions.length > 1 ? "s" : "") + " de IA" : "Guia tecnica por capas lista")
       })
       .catch(() => {
         if (phaseRef.current === "asking") setAIStatus("Guia tecnica por capas lista")
