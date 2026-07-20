@@ -15,6 +15,7 @@ Nota: esta demo estática no incluye las funciones asistidas por IA (importar CS
 - [Características](#características)
 - [Instalación](#instalación)
 - [Uso rápido](#uso-rápido)
+- [Compatibilidad con Illustrator](#compatibilidad-con-illustrator)
 - [Arquitectura multi-prenda](#arquitectura-multi-prenda)
 - [Diseño y UX](#diseño-y-ux)
 - [Roadmap](#roadmap)
@@ -68,6 +69,21 @@ Opcional — para traducción automática y extracción de PDF de bordado, copi�
 4. Activá/editá las piezas de construcción (tela, cierre, paneles, etc.).
 5. Agregá uno o más diseños: posición, técnica, colores, imagen de referencia, y ficha de bordado si aplica.
 6. En la vista previa, generá el SVG por idioma y copiá/descargá cada página.
+
+## Compatibilidad con Illustrator
+
+El SVG abierto directamente sigue disponible como formato vectorial abierto.
+Para conservar una jerarquia de capas nativas y nombres estables en Illustrator,
+el proyecto tambien mantiene un contrato de exportacion y un importador JSX
+auditable. La investigacion de formatos, limitaciones de AI/PDF/SVG, prueba
+controlada y plan de integracion estan en
+**[docs/ILLUSTRATOR-COMPATIBILITY.md](docs/ILLUSTRATOR-COMPATIBILITY.md)**.
+
+La muestra reproducible se genera con:
+
+```bash
+npm run illustrator:sample
+```
 
 ## Arquitectura multi-prenda
 

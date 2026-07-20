@@ -1,0 +1,62 @@
+{
+  "schema": "techpack-ai-builder/illustrator-package/v1",
+  "generatedFrom": "O-complete-semantic-project",
+  "comparisonRule": "Both SVG files contain the same generated page and differ only in their export contract.",
+  "sourcePage": {
+    "id": "design-logo-pecho-reflectivo",
+    "title": "D1 · Logo pecho reflectivo",
+    "purpose": "design:Logo pecho reflectivo",
+    "pageNumber": 9,
+    "totalPages": 11
+  },
+  "files": {
+    "legacy": "01-legacy-system.svg",
+    "illustrator": "02-illustrator-system.svg",
+    "nativeAi": "02-illustrator-system.ai",
+    "importer": "../Techpack-Import-Illustrator.jsx"
+  },
+  "expectedLayersBottomToTop": [
+    {
+      "name": "PAGE_BACKGROUND",
+      "id": "LAYER_01_PAGE_BACKGROUND",
+      "present": true,
+      "childCount": 1
+    },
+    {
+      "name": "ARTWORK",
+      "id": "LAYER_02_ARTWORK",
+      "present": true,
+      "childCount": 1
+    },
+    {
+      "name": "REFERENCES",
+      "id": "LAYER_03_REFERENCES",
+      "present": true,
+      "childCount": 0
+    },
+    {
+      "name": "TECH_DATA",
+      "id": "LAYER_04_TECH_DATA",
+      "present": true,
+      "childCount": 2
+    },
+    {
+      "name": "DESIGNER_COMMUNICATION",
+      "id": "LAYER_05_DESIGNER_COMMUNICATION",
+      "present": true,
+      "childCount": 1
+    },
+    {
+      "name": "CALLOUTS",
+      "id": "LAYER_06_CALLOUTS",
+      "present": true,
+      "childCount": 0
+    },
+    {
+      "name": "PAGE_CHROME",
+      "id": "LAYER_07_PAGE_CHROME",
+      "present": true,
+      "childCount": 3
+    }
+  ]
+}

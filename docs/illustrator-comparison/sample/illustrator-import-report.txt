@@ -1,0 +1,15 @@
+Techpack AI Builder - Illustrator import report
+Illustrator: 30.4.0
+Source: /Users/martinmorfe/Desktop/techpack-ai-builder/docs/illustrator-comparison/sample/02-illustrator-system.svg
+Artboard: 0, 595.275573730469, 841.889770507812, 0
+Imported top-level groups: 7
+Stack-order fallback: true
+Layers:
+- 07 PAGE_CHROME | objects=1
+- 06 CALLOUTS | objects=1
+- 05 DESIGNER_COMMUNICATION | objects=1
+- 04 TECH_DATA | objects=1
+- 03 REFERENCES | objects=1
+- 02 ARTWORK | objects=1
+- 01 PAGE_BACKGROUND | objects=1
+Missing wrappers: none
