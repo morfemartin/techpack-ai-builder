@@ -71,22 +71,63 @@ columnas.
 
 ![Baseline corregido en Affinity](img/04-affinity-baseline-fixed.png)
 
-### 5. Importacion completa sin bloqueos
+### 5. Avisos TinySVG y dialogos repetidos
 
-Illustrator mostraba un aviso modal por cada `clipPath`; el motor ya mide y
-envuelve esos textos, por lo que el perfil Adobe elimina los recortes
-redundantes. Once mesas en una sola fila superaban ademas el ancho maximo del
-lienzo. El importador final usa una reticula de cuatro columnas y tres filas.
+Illustrator mostraba un aviso modal por cada `clipPath`. El renderer ya mide y
+envuelve los textos antes de exportar, asi que esos recortes eran redundantes.
+El perfil Adobe ahora los elimina sin modificar el contenido visible.
 
-Resultado aceptado:
+![Aviso TinySVG observado durante la importacion](img/06-tinysvg-warning.png)
 
-- 11 mesas A4 nombradas en orden fisico;
-- 7 capas globales;
-- 11 grupos de pagina dentro de cada capa;
+El primer importador multipagina abria cada SVG como un documento separado.
+Visualmente funcionaba, pero al cerrar Illustrator aparecia un dialogo de
+guardado por cada pagina y no existia un unico archivo maestro.
+
+![Iteracion con documentos separados y guardado repetido](img/07-multiple-documents-save-loop.png)
+
+### 6. Un solo documento con mesas nombradas
+
+El importador se cambio a dos pasadas:
+
+1. Abre cada pagina preparada, identifica sus siete grupos semanticos y copia
+   los objetos a grupos de pagina dentro de las capas globales.
+2. Crea una mesa A4 por pagina, la nombra y la coloca en una reticula de cuatro
+   columnas. Esta reticula evita superar el ancho maximo del lienzo de
+   Illustrator con documentos largos.
+
+El resultado es un solo `Techpack-complete.ai`, no once documentos sueltos.
+Cada mesa conserva el orden del indice y nombres como `P01 - cover`,
+`P02 - document index` y `P09 - design logo chest`.
+
+![Documento final con once mesas nombradas](img/08-final-multi-artboard-document.png)
+
+La inspeccion ampliada confirma que cada pagina mantiene header, artboards,
+tablas, briefs, footer y numeracion dentro de sus limites.
+
+![Detalle de las paginas finales](img/09-final-artboard-detail.png)
+
+### 7. Resultado aceptado
+
+- 11 mesas A4 nombradas y ordenadas en un unico archivo;
+- 7 capas globales con 11 grupos de pagina cada una;
 - comunicacion del disenador aislada y borrable;
-- sin sustitucion tipografica, desplazamiento ni dialogos bloqueantes.
+- fuentes, tamanos y espaciado preservados;
+- baseline corregido sin desplazar cajas ni columnas;
+- sin recortes, sustitucion tipografica ni dialogos bloqueantes;
+- apertura verificada en Illustrator 30.4 y Affinity 3.2.3.
 
-![Documento final y capas nativas en Illustrator](img/05-illustrator-final-layers.png)
+![Capas nativas y geometria final en Illustrator](img/05-illustrator-final-layers.png)
+
+## Resumen de decisiones
+
+| Problema | Causa | Solucion integrada |
+| --- | --- | --- |
+| Capas nombradas pero vacias | Illustrator descartaba los `id` SVG | Fallback por orden de apilado y promocion a capas nativas |
+| Texto con tamanos aparentes distintos | Sustitucion de familias durante la preparacion | Conservar familia, peso y tamano del renderer |
+| Texto desplazado verticalmente | Interpretacion distinta de `dominant-baseline` | Offset de baseline explicito por tipo de texto |
+| Aviso TinySVG repetido | `clipPath` redundante en cada pagina | Retirar clips despues de medir y envolver el contenido |
+| Once documentos independientes | Importacion directa pagina por pagina | Ensamblaje en un unico AI con mesas nombradas |
+| Limite horizontal del lienzo | Todas las mesas estaban en una sola fila | Reticula determinista de cuatro columnas |
 
 ## Capturas necesarias
 
