@@ -1,0 +1,23 @@
+Techpack AI Builder - Illustrator import report
+Illustrator: 30.4.0
+Pages: 11
+Artboard grid: 4 columns
+Layers: 7
+- P01 - cover
+- P02 - document index
+- P03 - structure shell body
+- P04 - structure hood neck
+- P05 - structure sleeves cuffs
+- P06 - structure closures pockets
+- P07 - structure lining insulation
+- P08 - structure trims labels
+- P09 - design logo pecho reflectivo
+- P10 - design mapa topografico espalda
+- P11 - design parche rescate manga
+- 07 PAGE_CHROME | page groups=11
+- 06 CALLOUTS | page groups=11
+- 05 DESIGNER_COMMUNICATION | page groups=11
+- 04 TECH_DATA | page groups=11
+- 03 REFERENCES | page groups=11
+- 02 ARTWORK | page groups=11
+- 01 PAGE_BACKGROUND | page groups=11
