@@ -510,20 +510,22 @@ export default function App() {
       pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
     }
 
-    // Pre-download review round: diff the user's intake intent against the
-    // generated document. If anything is missing or unplaced, hold the pages
-    // behind the review chat; otherwise export straight away. Only the
-    // AI-planned custom path carries a plan to diff - registered garments use
-    // the fixed template and skip the review.
+    // Pre-download review round: hold behind the review chat whenever the
+    // AI-planned custom path has a plan to review - the chat itself decides
+    // what (if anything) actually needs asking. Round 1 diffs intake intent
+    // against the generated document (missing/unplaced data); round 2 (the
+    // 4th review overall) then reasons like a technical designer over
+    // everything already decided for production-critical gaps - it runs
+    // even when round 1 found nothing, so it is NOT gated on `problems`.
+    // ReviewChat auto-skips itself (equivalent to `skipReview` below) if
+    // BOTH rounds end up empty, so a clean intake never sees an empty modal.
+    // Registered garments use the fixed template and have no plan to review.
     if (plan) {
       var findings = buildReviewFindings({ hdr, parts, designs }, plan)
-      var problems = findings.filter((f) => f.kind === "missing" || f.kind === "unplaced")
-      if (problems.length > 0) {
-        var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
-        setPendingReview({ pages, plan, lang, tx, garmentType })
-        setReviewFindings(findings)
-        return
-      }
+      var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+      setPendingReview({ pages, plan, lang, tx, garmentType })
+      setReviewFindings(findings)
+      return
     }
     publishForExport(pages)
   }
@@ -1120,7 +1122,7 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: C.shell.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.white.hex }}>
       {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
-      {reviewFindings && <ReviewChat findings={reviewFindings} onComplete={finishReview} onSkip={skipReview} />}
+      {reviewFindings && <ReviewChat findings={reviewFindings} hdr={hdr} parts={parts} designs={designs} onComplete={finishReview} onSkip={skipReview} />}
       <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
         {/* Wordmark — Morfe mark in white on the black shell */}
         <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>

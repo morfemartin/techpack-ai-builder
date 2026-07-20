@@ -115,3 +115,52 @@ describe("applyReviewAnswers", () => {
     expect(result.hdr).not.toBe(input.hdr)
   })
 })
+
+// The 4th round (src/core/productionReview.js): answers a QUESTION, so it
+// writes a readable note instead of toggling a region's presence.
+describe("applyReviewAnswers - production round (4th review)", () => {
+  it("appends a design-tied answer to that design's notes and marks its page affected", () => {
+    const result = applyReviewAnswers(baseInput(), [
+      { key: "production:buttons:design:Chest:count", choice: 0, option: "3-4", label: "¿Cuántos botones lleva el diseño \"Chest\"?" },
+    ])
+    const design = result.designs.find((d) => d.name === "Chest")
+    expect(design.notes).toBe('¿Cuántos botones lleva el diseño "Chest"?: 3-4')
+    expect(result.affectedPageIds).toContain("design-chest")
+  })
+
+  it("accumulates multiple production answers onto the same design as separate lines", () => {
+    const result = applyReviewAnswers(baseInput(), [
+      { key: "production:buttons:design:Chest:count", choice: 0, option: "3-4", label: "¿Cuántos botones?" },
+      { key: "production:buttons:design:Chest:spacing", choice: 0, option: "Equidistante", label: "¿Qué distancia entre botones?" },
+    ])
+    const design = result.designs.find((d) => d.name === "Chest")
+    expect(design.notes.split("\n")).toHaveLength(2)
+  })
+
+  it("appends a part-tied answer directly onto that part's printed value", () => {
+    const result = applyReviewAnswers(baseInput(), [
+      { key: "production:closure-zipper:part:body:pull", choice: 0, option: "Tirador de tela a juego", label: "¿Qué tipo de tirador lleva el cierre?" },
+    ])
+    const part = result.parts.find((p) => p.id === "body")
+    expect(part.val).toBe("French terry — Tirador de tela a juego")
+  })
+
+  it("falls back to the first design for an untied AI question with no named subject", () => {
+    const result = applyReviewAnswers(baseInput(), [
+      { key: "production:ai:hardware_finish", choice: 0, option: "Níquel mate", label: "¿Acabado de los herrajes?" },
+    ])
+    expect(result.designs[0].notes).toContain("Níquel mate")
+  })
+
+  it("prefers a typed free-text value over the option label when both are present", () => {
+    const result = applyReviewAnswers(baseInput(), [
+      { key: "production:ai:custom_note", choice: 0, option: "Completar ahora (escribí el valor)", value: "12mm exactos", label: "¿Ancho del dobladillo?" },
+    ])
+    expect(result.designs[0].notes).toContain("12mm exactos")
+    expect(result.designs[0].notes).not.toContain("Completar ahora")
+  })
+
+  it("ignores a production answer with no matching label (defensive, never crashes)", () => {
+    expect(() => applyReviewAnswers(baseInput(), [{ key: "production:ai:x", choice: 0, option: "Y" }])).not.toThrow()
+  })
+})

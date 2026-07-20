@@ -28,6 +28,20 @@ function parseAnswerKey(key) {
   return match ? { topic: match[1], field: match[2] } : null
 }
 
+// Production-round keys (src/core/productionReview.js): either tied to a
+// specific subject ("production:<rule>:design:<name>:<suffix>" /
+// "...:part:<id>:<suffix>") or a free AI-authored question with no fixed
+// subject ("production:ai:<key>"). Distinct shape from parseAnswerKey's
+// review:<topic>:<field> because this round answers a QUESTION (needs a
+// readable note), not a present/absent datum.
+function parseProductionKey(key) {
+  const ruleMatch = /^production:([^:]+):(design|part):(.+):([^:]+)$/.exec(String(key || ""))
+  if (ruleMatch) return { kind: "rule", subjectType: ruleMatch[2], subjectName: ruleMatch[3] }
+  const aiMatch = /^production:ai:(.+)$/.exec(String(key || ""))
+  if (aiMatch) return { kind: "ai" }
+  return null
+}
+
 /**
  * Apply the final-review walk to cloned intake and document-plan data.
  * Choice 0 fills/adds; choice 1 deliberately removes the referenced project
@@ -45,6 +59,47 @@ export function applyReviewAnswers(input, answers) {
   const changes = []
 
   for (const answer of Array.isArray(answers) ? answers : []) {
+    // Production round (src/core/productionReview.js): these answer a
+    // QUESTION rather than an add/remove decision, so they write a readable
+    // note instead of toggling presence. Design-tied and untied AI questions
+    // land on a design's `.notes` (the same field authorIllustrationBriefs
+    // already reads, so the answer reaches the printed brief on the next
+    // regeneration); part-tied questions append directly onto that part's
+    // printed `.val` since the BOM table has no separate notes column.
+    const production = parseProductionKey(answer && answer.key)
+    if (production) {
+      const question = String((answer && answer.label) || "").trim()
+      const chosen = (typeof answer.value === "string" && answer.value.trim()) || (answer && answer.option) || ""
+      if (question && chosen) {
+        const line = question + ": " + chosen
+        if (production.kind === "rule" && production.subjectType === "part") {
+          const partIndex = parts.findIndex((p) => sameText(p && p.id, production.subjectName))
+          if (partIndex >= 0) {
+            const current = String(parts[partIndex].val || "").trim()
+            parts[partIndex].val = current ? current + " — " + chosen : chosen
+            const bom = fullBomPage(plan.pages)
+            if (bom && bom.id) affected.add(bom.id)
+            changes.push({ action: "updated", topic: "production-part", field: production.subjectName, value: chosen })
+          }
+        } else {
+          // design-tied, or an untied AI question with no fixed subject -
+          // both fall back to the first design when no name was matched, so
+          // the answer is never silently lost.
+          const namedIndex = production.kind === "rule" ? designs.findIndex((d) => sameText(d && d.name, production.subjectName)) : -1
+          const targetIndex = namedIndex >= 0 ? namedIndex : 0
+          const design = designs[targetIndex]
+          if (design) {
+            const current = String(design.notes || "").trim()
+            design.notes = current ? current + "\n" + line : line
+            const designPage = plan.pages.find((page) => sameText(designPageName(page), design.name))
+            if (designPage && designPage.id) affected.add(designPage.id)
+            changes.push({ action: "updated", topic: "production-design", field: design.name || "", value: chosen })
+          }
+        }
+      }
+      continue
+    }
+
     const parsed = parseAnswerKey(answer && answer.key)
     if (!parsed) continue
     const { topic, field } = parsed

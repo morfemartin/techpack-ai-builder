@@ -1,17 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // REVIEW CHAT — the pre-download review round used by Layout Engine v3.
 //
-// Opens when the user hits "Generar SVG" and the deterministic intent-vs-
-// document diff (src/core/reviewDiff.js) found problems: intake data that is
-// empty, or data the generated document doesn't carry. Walks ONLY those
-// findings as a short chat with numbered options (same interaction grammar
-// as the intake walker), never re-interrogating what's already confirmed -
-// that shows as a one-line summary instead.
+// Two rounds, walked back to back as ONE continuous field queue:
 //
-// A single bounded DeepSeek call may rephrase the questions conversationally;
-// if it fails or times out the deterministic wording ships as-is - the review
-// works with zero AI availability. Always skippable ("Descargar igual"):
-// the review protects the user, it never holds the download hostage.
+// 1. Data-fidelity diff (src/core/reviewDiff.js): does the generated document
+//    carry what the intake already said? Only problems become questions -
+//    confirmed data shows as a one-line summary, never re-interrogated.
+// 2. Production review (src/core/productionReview.js), the 4th round: once
+//    round 1 is answered, this reasons like a senior technical designer over
+//    EVERYTHING already decided (material, technique, position, colors) for
+//    the production-critical detail only knowable at that point - "how many
+//    buttons, what spacing, does the placket flip side by gender." Runs even
+//    when round 1 had zero problems - it is not conditioned on the diff.
+//
+// Both rounds render through the same numbered-options walker; round 2's
+// fields simply get appended to `fields` once round 1's `done` fires, which
+// naturally re-opens the walk (idx no longer >= fields.length). A single
+// bounded DeepSeek call backs each round (hybrid NVIDIA+Qwen); if it fails or
+// times out the deterministic wording/checklist ships as-is - the review
+// works with zero AI availability and never holds the download hostage
+// (always skippable via "Descargar igual"; auto-skips itself if BOTH rounds
+// end up with nothing to ask).
 //
 // Deliberately a NEW component (GarmentChat.jsx has concurrent in-flight
 // work); it reuses the visual language, not the code.
@@ -23,6 +32,7 @@ import { Icon } from "./Icon.jsx"
 import { deepseekChat } from "../core/deepseekClient.js"
 import { HYBRID_TASKS } from "../core/hybridTasks.js"
 import { findingsToWalkFields, summarizeConfirmed } from "../core/reviewDiff.js"
+import { authorProductionQuestions } from "../core/productionReview.js"
 
 const C = palette
 const hair = `1px solid ${C.ink.hex}`
@@ -57,7 +67,7 @@ async function rephraseFields(fields) {
   })
 }
 
-export function ReviewChat({ findings, onComplete, onSkip }) {
+export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }) {
   const [fields, setFields] = useState(() => findingsToWalkFields(findings))
   const [idx, setIdx] = useState(0)
   const [answers, setAnswers] = useState([])
@@ -65,8 +75,10 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
   const [text, setText] = useState("")
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState("")
+  const [loadingProduction, setLoadingProduction] = useState(false)
   const summary = summarizeConfirmed(findings)
   const rephrased = useRef(false)
+  const productionAppended = useRef(false)
 
   useEffect(() => {
     if (rephrased.current) return
@@ -86,9 +98,38 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
   const current = fields[idx]
   const done = idx >= fields.length
 
+  // Round 2 (production review): fires exactly once, right when round 1's
+  // walk empties out - including immediately on mount if round 1 had zero
+  // problems. Appending to `fields` makes `done` false again on its own, so
+  // the SAME walk just continues into the new questions; if nothing comes
+  // back, `done` stays true and the auto-skip effect below fires.
+  useEffect(() => {
+    if (!done || productionAppended.current || applying) return
+    productionAppended.current = true
+    setLoadingProduction(true)
+    authorProductionQuestions({ hdr, parts, designs })
+      .then((extra) => {
+        if (Array.isArray(extra) && extra.length > 0) setFields((f) => [...f, ...extra])
+      })
+      .catch(() => {})
+      .finally(() => setLoadingProduction(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done])
+
+  // Nothing to review at all (round 1 was clean AND round 2 found no
+  // production gaps): never show a dead modal - complete instantly with an
+  // empty answer set, same as the user hitting "Descargar igual".
+  useEffect(() => {
+    if (done && productionAppended.current && !loadingProduction && fields.length === 0) onSkip()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done, loadingProduction, fields.length])
+
   function answer(choiceIdx, value) {
     if (applying) return
-    setAnswers((a) => [...a, { key: current.key, choice: choiceIdx, option: current.options[choiceIdx], value: value || "" }])
+    // `label` rides along so applyReviewAnswers() can write a readable note
+    // for production-round answers ("¿Cuántos botones...?: 3-4") - the
+    // review-diff answers ignore it, they derive meaning from key/choice alone.
+    setAnswers((a) => [...a, { key: current.key, choice: choiceIdx, option: current.options[choiceIdx], value: value || "", label: current.label }])
     setTyping(false)
     setText("")
     setIdx((i) => i + 1)
@@ -145,7 +186,11 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
     cursor: "pointer",
   })
 
-  if (fields.length === 0) return null
+  // Stay mounted (and visible) while round 2 is still being fetched even if
+  // round 1 had zero problems - otherwise the modal would flash blank for the
+  // whole production-review call. Only render nothing once we're sure both
+  // rounds are done and truly empty (the auto-skip effect handles that case).
+  if (fields.length === 0 && !loadingProduction) return null
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(20,21,24,0.72)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: space(4) }}>
@@ -154,7 +199,7 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
           <div>
             <div style={{ fontSize: type.size.md, fontWeight: 700, fontFamily: type.fonts.display, textTransform: "uppercase", color: C.ink.hex }}>Revisión final</div>
             <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginTop: 2 }}>
-              {done ? "Listo" : `Pregunta ${idx + 1} de ${fields.length}`}
+              {done ? (loadingProduction ? "Revisando producción…" : "Listo") : `Pregunta ${idx + 1} de ${fields.length}`}
             </div>
           </div>
           <button onClick={onSkip} disabled={applying} style={{ ...btn(C.white.hex, C.ink.hex), opacity: applying ? 0.45 : 1 }} title="Saltar la revisión y generar igual">
@@ -219,7 +264,17 @@ export function ReviewChat({ findings, onComplete, onSkip }) {
             </div>
           )}
 
-          {done && (
+          {done && loadingProduction && (
+            <div style={{ border: hair, padding: space(4), color: C.ink.hex, display: "flex", alignItems: "center", gap: space(2) }}>
+              <Icon name="hourglass" size={16} color={role.priority.fill} />
+              <div>
+                <div style={{ fontSize: type.size.sm, fontWeight: 700 }}>Revisando detalles de producción…</div>
+                <div style={{ fontSize: type.size.xs, opacity: 0.6, marginTop: 2 }}>Pensando como diseñador técnico sobre lo ya decidido - cantidades, distancias, variantes.</div>
+              </div>
+            </div>
+          )}
+
+          {done && !loadingProduction && (
             <div style={{ border: hair, padding: space(4), color: C.ink.hex }}>
               <div style={{ fontSize: type.size.sm, fontWeight: 700, marginBottom: space(1) }}>Revisión completada</div>
               <div style={{ fontSize: type.size.xs, opacity: 0.65, marginBottom: space(3) }}>
