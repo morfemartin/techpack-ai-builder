@@ -14,6 +14,7 @@
 import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
+import { buildLayeredRequirements } from "./requirementLayers.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
@@ -72,9 +73,10 @@ export const FIELD_STATUS = { KNOWN: "known", ASSUMED: "assumed", ASK: "ask" }
 
 /**
  * One DeepSeek call: reason like a textile technician about what a tech pack
- * for `garmentType` needs, fold in the `seed` we already have, and return the
- * full field list. Throws DeepSeekError on an unusable response (no silent
- * fallback - without requirements there's nothing to walk).
+ * for `garmentType` needs and enrich the evidence we already have. The final
+ * field list is NOT model-owned: the deterministic layer contract below
+ * decides every factory-critical question, so a weak or unavailable model
+ * cannot omit a whole production layer.
  *
  * @returns {{garmentType: string, fields: Array<{
  *   key: string, label: string, category: "general"|"design",
@@ -109,7 +111,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
     validator: (content) => {
       const value = ensureMinimumGeneralQuestions(normalizeRequirements(parseJSONOrRepair(content, "invalid intake"), garmentType), seed)
       const asked = value.fields.filter((field) => field.category === "general" && field.status === FIELD_STATUS.ASK)
-      return asked.length >= 6 && asked.length <= 10 && new Set(value.fields.map((field) => field.key)).size === value.fields.length && asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
+      return asked.length >= 8 && asked.length <= 12 && new Set(value.fields.map((field) => field.key)).size === value.fields.length && asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
     },
     fallback: () => JSON.stringify(fallbackRequirements(garmentType, seed)),
     onStatus,
@@ -152,6 +154,8 @@ export function normalizeRequirements(parsed, garmentType) {
         options: Array.isArray(f.options) ? f.options.filter((o) => typeof o === "string" && o.trim()) : [],
         why: typeof f.why === "string" ? f.why : "",
       }
+      if (typeof f.layer === "string" && f.layer.trim()) base.layer = f.layer.trim()
+      if (typeof f.example === "string" && f.example.trim()) base.example = f.example.trim()
       if (f.optional === true) base.optional = true
       // designSlot/designField only ever come from analyzeDesignExpression()'s
       // "design" category fields - added conditionally so analyzeRequirements()'s
@@ -349,10 +353,15 @@ function fallbackGeneralQuestions(garmentType = "") {
 // numbered technical questions, not jump straight to the final catch-all.
 export function ensureMinimumGeneralQuestions(reqs, seed) {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
-  if (hasGeneralAsk(fields)) return reqs
-  const existingKeys = new Set(fields.map((f) => f && f.key).filter(Boolean))
-  const fallbacks = fallbackGeneralQuestions(reqs && reqs.garmentType).filter((f) => !existingKeys.has(f.key))
-  return { ...reqs, fields: [...fields, ...fallbacks] }
+  const garmentType = (reqs && reqs.garmentType) || "Prenda"
+
+  // The external model may advise on wording, but it is never authoritative
+  // about coverage. Only source evidence (vision, CSV or user-provided seed)
+  // can prefill a contractual question. This prevents a confident weak model
+  // from silently marking vital construction decisions as "assumed".
+  const layered = buildLayeredRequirements({ garmentType, seed })
+  const designFields = fields.filter((field) => field && field.category === "design")
+  return { ...reqs, garmentType: layered.garmentType, fields: [...layered.fields, ...designFields] }
 }
 
 export function fallbackRequirements(garmentType, seed) {
@@ -434,6 +443,58 @@ export function reqsToParts(reqs) {
   return fields
     .filter((f) => f.category === "general" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim())
     .map((f) => ({ label: f.label, val: f.value }))
+}
+
+// Deterministic safety net for the design pass. The AI can discover nuanced
+// applications, but if it is down or returns an empty list we still collect
+// the minimum information a factory and illustrator need after the user said
+// that the garment has an application.
+export function fallbackDesignFields(reqs) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  const applications = fields.find((field) => field && field.key === "applications")
+  const value = String(applications && applications.value || "").toLowerCase()
+  if (!value || /sin\s+(aplicacion|aplicación|diseno|diseño|logo|arte)|ningun|ningún|no tiene/.test(value)) return []
+  return [
+    {
+      key: "application_name",
+      label: "Que aplicacion es",
+      category: "design",
+      designSlot: "application_1",
+      designField: "name",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Logo de marca", "Texto", "Grafica / ilustracion", "Parche / etiqueta"],
+      why: "identifica el arte que se debe producir",
+      layer: "Diseno y referencias",
+      example: "Ej.: logo Atelier Morfe, parche tejido o grafica trasera.",
+    },
+    {
+      key: "application_position",
+      label: "Ubicacion exacta",
+      category: "design",
+      designSlot: "application_1",
+      designField: "position",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Pecho izquierdo", "Centro de espalda", "Manga", "Bajo / etiqueta"],
+      why: "define la colocacion para patron y arte",
+      layer: "Diseno y referencias",
+      example: "Ej.: 90 mm bajo la punta de hombro, centrado al frente.",
+    },
+    {
+      key: "application_technique",
+      label: "Tecnica de aplicacion",
+      category: "design",
+      designSlot: "application_1",
+      designField: "technique",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Bordado", "Serigrafia", "DTF", "Parche cosido"],
+      why: "define proceso, archivo y control de calidad",
+      layer: "Diseno y referencias",
+      example: "Ej.: bordado plano de 65 mm o serigrafia a 2 tintas.",
+    },
+  ]
 }
 
 /**

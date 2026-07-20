@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from "react"
 import { DeepSeekError } from "../core/deepseekClient.js"
 import {
-  analyzeRequirements, analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
-  looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs,
+  analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
+  looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
   attachIllustrationBriefs, FIELD_STATUS, fallbackRequirements,
 } from "../core/techpackRequirements.js"
 import { downscaleImage, answerFieldFromImage } from "../core/visionExtract.js"
@@ -14,11 +14,10 @@ const hair = `1px solid ${C.ink.hex}`
 
 const OPENING = "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa, Jogger)"
 // Phase-aware "systemic thinking" intake (F3.1). Instead of a free-form
-// per-turn DeepSeek conversation, it makes ONE requirements call up front
-// (analyzeRequirements) and then WALKS the resulting field list locally:
-// skips what's standard/obvious, and asks only what genuinely defines the
-// product, one at a time, with numbered options. Cheap and predictable at
-// runtime no matter how long the intake gets.
+// per-turn DeepSeek conversation, it builds a deterministic requirements
+// contract up front and then WALKS that list locally. A model may enrich a
+// photo, answer a doubt, or identify a design later, but it is never a
+// dependency for publishing the first useful technical question.
 //
 // Phases: "naming" (ask what garment) -> "analyzing" (general requirements
 // call) -> "asking" (walk pending general fields) -> "designAnalyzing" (F3.2:
@@ -76,7 +75,6 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
-  const analysisRun = useRef(0)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -98,7 +96,10 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   }
 
   function questionText(field) {
-    return field.why ? field.label + " — " + field.why : field.label
+    const heading = field.layer ? field.layer.toUpperCase() + "\n" + field.label : field.label
+    const purpose = field.why ? "\nPara la ficha: " + field.why + "." : ""
+    const example = field.example ? "\n" + field.example : ""
+    return heading + purpose + example
   }
 
   function showStructuredStream(progressUpdate, action) {
@@ -149,42 +150,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     post("assistant", questionText(pending[0]))
   }
 
-  async function runAnalysis(garmentType) {
-    const runId = ++analysisRun.current
-    setSending(true)
+  function runAnalysis(garmentType) {
+    // Start from the local contract synchronously. This is deliberately not a
+    // degraded error path: it is the primary intake path, so a provider outage
+    // can never leave a non-expert staring at "Analizando la prenda".
+    const localReqs = fallbackRequirements(garmentType, seed || {})
     setError(null)
-    setLiveReply("Estoy construyendo las preguntas técnicas de esta prenda…")
-    try {
-      const analysis = await analyzeRequirements({
-          garmentType,
-          seed: seed || {},
-          tecs,
-          lang: "ES",
-          onStatus: setAIStatus,
-          onProgress: (p) => {
-            if (analysisRun.current === runId) showStructuredStream(p, "Ya identifiqué estas decisiones de producción:")
-          },
-        })
-      if (analysisRun.current !== runId) return
-      setReqs(analysis)
-      const assumed = analysis.fields.filter((f) => f.status === FIELD_STATUS.ASSUMED && String(f.value || "").trim())
-      if (assumed.length > 0) {
-        post("assistant", "Para una " + (analysis.garmentType || garmentType) + " doy por estándar: " + assumed.map((f) => f.label + " (" + f.value + ")").join(", ") + ". Si algo no aplica lo corregís después. Ahora, lo que define tu prenda:")
-      }
-      setPhase("asking")
-      askNext(analysis, "general")
-    } catch (e) {
-      analysisRun.current += 1 // ignore late progress from the timed-out IA call
-      const localReqs = fallbackRequirements(garmentType, seed || {})
-      setReqs(localReqs)
-      setPhase("asking")
-      setError(null)
-      post("assistant", "La IA está saturada o tardó demasiado, así que arranco con preguntas base para " + garmentType + " y seguimos sin bloquearnos.")
-      askNext(localReqs, "general")
-    } finally {
-      setSending(false)
-      setLiveReply("")
-    }
+    setAIStatus("Guia tecnica por capas lista")
+    setReqs(localReqs)
+    setPhase("asking")
+    post("assistant", "Voy a construir la ficha por capas: producto, materiales, calce, construccion, terminaciones, produccion y diseno. Empezamos por lo que mas condiciona el resultado.")
+    askNext(localReqs, "general")
   }
 
   // Second DeepSeek call (F3.2): reasons about which discrete elements of
@@ -204,15 +180,25 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           lang: "ES",
           onStatus: setAIStatus,
           onProgress: (p) => showStructuredStream(p, "Ya detecté estas especificaciones de diseño:"),
-        })
-      const merged = mergeDesignFields(generalReqs, designAnalysis.fields)
+      })
+      const fields = designAnalysis.fields.length > 0 ? designAnalysis.fields : fallbackDesignFields(generalReqs)
+      const merged = mergeDesignFields(generalReqs, fields)
       setReqs(merged)
       setPhase("designing")
       askNext(merged, "design")
     } catch (e) {
-      setError(e instanceof DeepSeekError ? e.message : "No se pudieron analizar los diseños. Podés continuar igual.")
-      post("assistant", "No pude analizar los diseños todavía, pero podés continuar igual y agregarlos después.")
-      finishIntake(generalReqs)
+      const fields = fallbackDesignFields(generalReqs)
+      if (fields.length > 0) {
+        const merged = mergeDesignFields(generalReqs, fields)
+        setReqs(merged)
+        setPhase("designing")
+        post("assistant", "No pude profundizar los diseños con IA, pero seguimos con las preguntas esenciales de esa aplicacion.")
+        askNext(merged, "design")
+      } else {
+        setError(null)
+        post("assistant", "No detecté aplicaciones que requieran una página propia. Podés agregar cualquier detalle al final.")
+        finishIntake(generalReqs)
+      }
     } finally {
       setSending(false)
       setLiveReply("")

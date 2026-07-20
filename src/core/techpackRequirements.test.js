@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, ensureMinimumGeneralQuestions, fallbackRequirements, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, ensureMinimumGeneralQuestions, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -61,7 +61,7 @@ describe("normalizeRequirements", () => {
 })
 
 describe("ensureMinimumGeneralQuestions", () => {
-  it("adds numbered-question fallback fields when a new typed garment has no general ask fields", () => {
+  it("builds the complete layered contract when a new typed garment has no usable questions", () => {
     const reqs = {
       garmentType: "polo",
       fields: [
@@ -72,17 +72,18 @@ describe("ensureMinimumGeneralQuestions", () => {
     const result = ensureMinimumGeneralQuestions(reqs, {})
     const asks = pendingFields(result, "general")
 
-    expect(asks.length).toBeGreaterThanOrEqual(6)
-    expect(asks[0].label).toBe("Tela principal")
-    expect(asks[0].options.length).toBeGreaterThan(1)
+    expect(asks.length).toBeGreaterThanOrEqual(10)
+    expect(asks[0].label).toBe("Uso principal")
+    expect(asks.every((field) => field.layer && field.example && field.options.length > 1)).toBe(true)
   })
 
-  it("does not add fallback fields when the model returned at least one general question", () => {
+  it("does not let a partial model answer remove factory-critical layers", () => {
     const reqs = {
       garmentType: "polo",
       fields: [{ key: "fabric", label: "Tela", category: "general", status: "ask", value: "", options: ["A", "B"], why: "" }],
     }
-    expect(ensureMinimumGeneralQuestions(reqs, {})).toBe(reqs)
+    const result = ensureMinimumGeneralQuestions(reqs, {})
+    expect(pendingFields(result, "general").map((field) => field.key)).toEqual(expect.arrayContaining(["fabric", "fit", "size_range", "production_notes", "collar", "placket"]))
   })
 
   it("keeps asking production decisions even when an initial seed has facts", () => {
@@ -96,8 +97,8 @@ describe("ensureMinimumGeneralQuestions", () => {
 
     expect(labels).toContain("Tela principal")
     expect(labels).toContain("Capucha")
-    expect(labels).toContain("Bolsillo")
-    expect(labels).toContain("Punos y bajo")
+    expect(labels).toContain("Bolsillos")
+    expect(labels).toContain("Terminaciones visibles")
   })
 })
 
@@ -118,6 +119,18 @@ describe("pendingFields", () => {
   it("filters to a single category when given", () => {
     expect(pendingFields(reqs, "design").map((f) => f.key)).toEqual(["c"])
     expect(pendingFields(reqs, "general").map((f) => f.key)).toEqual(["a"])
+  })
+})
+
+describe("fallbackDesignFields", () => {
+  it("collects a usable design brief when a selected application cannot be analyzed by AI", () => {
+    const fields = fallbackDesignFields({ fields: [{ key: "applications", value: "Logo / bordado" }] })
+    expect(fields.map((field) => field.designField)).toEqual(["name", "position", "technique"])
+    expect(fields.every((field) => field.category === "design" && field.options.length >= 2 && field.example)).toBe(true)
+  })
+
+  it("does not create a design page when the user confirmed there is no application", () => {
+    expect(fallbackDesignFields({ fields: [{ key: "applications", value: "Sin aplicacion" }] })).toEqual([])
   })
 })
 
@@ -302,7 +315,8 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(seen[0].lastLabel).toBe("Tela")
     expect(seen[1].completedLabels).toEqual(["Tela"])
     expect(result.garmentType).toBe("Camisa")
-    expect(result.fields[0].label).toBe("Tela")
+    expect(result.fields[0].label).toBe("Uso principal")
+    expect(result.fields.some((field) => field.key === "fabric")).toBe(true)
   })
 
   it("salvages a usable field list when the stream hit the token cap mid-JSON", async () => {
@@ -314,8 +328,8 @@ describe("analyzeRequirements onProgress wiring", () => {
 
     const result = await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [], onProgress: () => {} })
     expect(result.garmentType).toBe("Camisa")
-    expect(result.fields).toHaveLength(8)
-    expect(result.fields[7].key).toBe("f7")
+    expect(result.fields.length).toBeGreaterThanOrEqual(10)
+    expect(result.fields.some((field) => field.key === "fabric")).toBe(true)
   })
 })
 
