@@ -1,0 +1,1 @@
+import{a as t,c as s,j as e,R as a,A as o}from"./base-CoNQKcrr.js";t();document.documentElement.dataset.techpackMode="studio";s.createRoot(document.getElementById("root")).render(e.jsx(a.StrictMode,{children:e.jsx(o,{})}));
