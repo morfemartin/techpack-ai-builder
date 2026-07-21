@@ -168,6 +168,11 @@ export default function App() {
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
   const [documentPlanning, setDocumentPlanning] = useState(false)
   const [documentPlanStatus, setDocumentPlanStatus] = useState("")
+  // Positive "it is actually finished" signal. Without it the only cue was the
+  // progress text disappearing, which is indistinguishable from it never
+  // having started - and the preview already looks like a document while it is
+  // still being built.
+  const [documentReady, setDocumentReady] = useState(false)
   const [plannedPreviewPages, setPlannedPreviewPages] = useState(null)
   const [plannedPreviewKey, setPlannedPreviewKey] = useState("")
   const [plannedPreviewError, setPlannedPreviewError] = useState(null)
@@ -410,19 +415,38 @@ export default function App() {
     return String(raw).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "page_" + (i + 1)
   }
 
-  function placeholderSvg(page, i, total) {
+  // A page that is not finished must never look like one that is.
+  //
+  // The preview used to publish the fully rendered deterministic plan first,
+  // which reads as a completed tech pack - so the wait looked like the result,
+  // and there was no way to tell a real page from a placeholder. This draws an
+  // unmistakably in-progress sheet instead: the page's own title, what is
+  // happening to it right now, and how far the document as a whole has got.
+  function placeholderSvg(page, i, total, state) {
     var W = PAGE.width
     var H = PAGE.height
+    var status = (state && state.label) || "En cola"
+    var detail = (state && state.detail) || ""
+    var done = (state && state.done) || 0
     var title = svgSafeText((page && page.title) || "Pagina " + (i + 1))
-    var label = "Desarrollando pagina " + (i + 1) + " de " + total
+    var barX = 80
+    var barW = W - 160
+    var ratio = total > 0 ? Math.max(0, Math.min(1, done / total)) : 0
     return (
       "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + W + " " + H + "' width='" + PAGE.physicalWidth + "' height='" + PAGE.physicalHeight + "'>" +
       "<rect width='" + W + "' height='" + H + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1.5'/>" +
-      "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='" + GRID.span(8) + "' height='" + (H - GRID.margin * 2) + "' fill='" + C.white.hex + "' stroke='" + C.ink.hex + "' stroke-width='1'/>" +
+      // dashed frame = this sheet is still being built
+      "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='" + (W - GRID.margin * 2) + "' height='" + (H - GRID.margin * 2) + "' fill='none' stroke='#C6CAD2' stroke-width='1' stroke-dasharray='10 8'/>" +
       "<rect x='" + GRID.margin + "' y='" + GRID.margin + "' width='8' height='" + (H - GRID.margin * 2) + "' fill='" + role.highlight.fill + "'/>" +
-      "<text x='80' y='130' font-family='" + type.svgFonts.ui + "' font-size='28' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
-      "<text x='80' y='178' font-family='" + type.svgFonts.data + "' font-size='16' fill='" + role.priority.fill + "'>" + label + "</text>" +
-      "<text x='80' y='224' font-family='" + type.svgFonts.ui + "' font-size='14' fill='" + C.ink.hex + "'>La IA esta organizando contenido e instrucciones textiles.</text>" +
+      "<text x='80' y='120' font-family='" + type.svgFonts.data + "' font-size='13' fill='#8A909A'>PAGINA " + (i + 1) + " DE " + total + "</text>" +
+      "<text x='80' y='168' font-family='" + type.svgFonts.ui + "' font-size='28' font-weight='bold' fill='" + C.ink.hex + "'>" + title + "</text>" +
+      "<text x='80' y='214' font-family='" + type.svgFonts.data + "' font-size='16' fill='" + role.priority.fill + "'>" + svgSafeText(status) + "</text>" +
+      (detail ? "<text x='80' y='246' font-family='" + type.svgFonts.ui + "' font-size='14' fill='" + C.ink.hex + "'>" + svgSafeText(detail) + "</text>" : "") +
+      // document-level progress, so the wait has a visible end
+      "<rect x='" + barX + "' y='" + (H - 150) + "' width='" + barW + "' height='6' fill='#E6E8EC'/>" +
+      "<rect x='" + barX + "' y='" + (H - 150) + "' width='" + Math.round(barW * ratio) + "' height='6' fill='" + role.priority.fill + "'/>" +
+      "<text x='80' y='" + (H - 118) + "' font-family='" + type.svgFonts.data + "' font-size='13' fill='#8A909A'>" + done + " de " + total + " paginas resueltas</text>" +
+      "<text x='80' y='" + (H - 92) + "' font-family='" + type.svgFonts.ui + "' font-size='13' fill='#8A909A'>Esta hoja todavia no es definitiva.</text>" +
       "</svg>"
     )
   }
@@ -438,37 +462,75 @@ export default function App() {
       if (showModal) setSvgPages(pages)
     }
     setDocumentPlanning(true)
+    setDocumentReady(false)
     setDocumentPlanStatus("Estructurando el documento...")
     try {
       var baseContext = { garmentType, parts, designs, lang }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
       var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment }
-      publishPages(buildPlannedPages(provisionalPlan, ctx, { documentMode: "illustration-handoff", includeIndex: true }))
+      // Deliberately NOT publishing the rendered provisional plan here. It
+      // looks exactly like a finished document, so the preview showed a
+      // complete-looking tech pack while the AI had not started - the user
+      // could not tell the wait from the result. The plan itself still goes to
+      // the caller (the review gate needs something to diff against).
       if (onPlan) onPlan(provisionalPlan)
-      setDocumentPlanStatus("Usando plan base mientras la IA refina")
+
+      function drawWaiting(pages, state) {
+        publishPages(pages.map((page, i) => ({
+          name: plannedPageName(page, i),
+          svg: placeholderSvg(page, i, pages.length, typeof state === "function" ? state(i) : state),
+        })))
+      }
+
+      drawWaiting(provisionalOutline.pages, { label: "Analizando la prenda", detail: "Decidiendo que paginas necesita esta ficha.", done: 0 })
 
       var outline
       try {
-        outline = await planDocumentOutline(baseContext, { onStatus: setDocumentPlanStatus })
+        outline = await planDocumentOutline(baseContext, {
+          onStatus: (status) => {
+            setDocumentPlanStatus(status)
+            drawWaiting(provisionalOutline.pages, { label: "Estructurando el documento", detail: status, done: 0 })
+          },
+        })
       } catch {
         outline = provisionalOutline
       }
-      var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, outline.pages.length) }))
+      var total = outline.pages.length
+      var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, total, { label: "En cola", done: 0 }) }))
       publishPages(placeholders)
       var plannedPages = []
-      for (var i = 0; i < outline.pages.length; i++) {
+      for (var i = 0; i < total; i++) {
         var page = outline.pages[i]
-        setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + "...")
+        var human = "Desarrollando pagina " + (i + 1) + " de " + total
+        setDocumentPlanStatus(human + "...")
+        // Repaint the queue on every tick so the sheet being worked on says so,
+        // the ones already resolved show their real render, and the rest read
+        // "En cola" - the wait becomes legible instead of a frozen spinner.
+        var repaint = (function (index, detail) {
+          var resolved = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
+          publishPages(outline.pages.map(function (p, idx) {
+            if (idx < resolved.length) return resolved[idx]
+            var state = idx === index
+              ? { label: "Diseñando esta pagina", detail: detail, done: index }
+              : { label: "En cola", done: index }
+            return { name: plannedPageName(p, idx), svg: placeholderSvg(p, idx, total, state) }
+          }))
+        })
+        repaint(i, "La IA esta decidiendo bloques y jerarquia visual.")
         try {
           var planned = await planPageLayout(
               page,
               baseContext,
               {
                 onStatus: setDocumentPlanStatus,
-                onProgress: (progress) => {
-                  setDocumentPlanStatus("Desarrollando pagina " + (i + 1) + " de " + outline.pages.length + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
-                },
+                onProgress: (function (index, label) {
+                  return function (progress) {
+                    var detail = progress.lastLabel ? "Resolviendo bloque: " + progress.lastLabel : "La IA esta decidiendo bloques y jerarquia visual."
+                    setDocumentPlanStatus(label + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
+                    repaint(index, detail)
+                  }
+                })(i, human),
               },
             )
           plannedPages.push(planned)
@@ -476,13 +538,18 @@ export default function App() {
           plannedPages.push(fallbackPageLayout(page))
         }
         var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
-        publishPages(outline.pages.map((p, idx) => (idx < rendered.length ? rendered[idx] : placeholders[idx])))
+        publishPages(outline.pages.map(function (p, idx) {
+          if (idx < rendered.length) return rendered[idx]
+          return { name: plannedPageName(p, idx), svg: placeholderSvg(p, idx, total, { label: "En cola", done: rendered.length }) }
+        }))
       }
       // Hand the planned document (pages with their regions) to the caller so
       // the pre-download review can diff intake intent against what each page
       // actually carries.
       if (onPlan) onPlan({ pages: plannedPages })
-      return buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+      var finalPages = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+      setDocumentReady(true)
+      return finalPages
     } finally {
       setDocumentPlanning(false)
       setDocumentPlanStatus("")
@@ -1043,6 +1110,11 @@ export default function App() {
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
               {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
               {documentPlanning && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{documentPlanStatus || "Disenando documento..."}</span>}
+              {!documentPlanning && documentReady && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.priority.fill, fontWeight: 700 }}>
+                  <Icon name="check" size={14} color={role.priority.fill} /> Documento listo
+                </span>
+              )}
               {garmentId === "custom" && customGarment && (
                 <button
                   onClick={() => downloadGarmentFile(customGarment)}
