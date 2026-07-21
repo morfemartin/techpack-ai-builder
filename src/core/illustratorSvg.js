@@ -250,3 +250,145 @@ export function illustratorLayerReport(svg) {
     return { name, id, present: !!node, childCount: node ? Array.from(node.childNodes).filter((child) => child.nodeType === 1).length : 0 }
   })
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ONE FILE, EVERY PAGE — the single-document export.
+//
+// SVG has no native artboards; only .ai and PDF do. So a single .svg cannot
+// literally carry N artboards. What it CAN carry - and what both Illustrator
+// and Affinity read correctly - is every page laid out side by side on one
+// canvas, with the seven semantic layers hoisted to document level so each one
+// spans all pages (instead of seven layers repeated per page), plus one
+// explicit rectangle per page so the artboards can be created in a single
+// step: Illustrator "Object > Artboards > Convert to Artboards", Affinity
+// "Document > Add artboard from selection".
+//
+// Layer order and naming match the per-page contract exactly, so a document
+// assembled this way is indistinguishable, layer-wise, from the package the
+// JSX importer produces.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ARTBOARD_GAP = 80
+
+function pageViewBox(root) {
+  const raw = String(root.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number)
+  const width = Number.isFinite(raw[2]) && raw[2] > 0 ? raw[2] : 1188
+  const height = Number.isFinite(raw[3]) && raw[3] > 0 ? raw[3] : 840
+  return { width, height }
+}
+
+export function buildMultiArtboardSvg(pages, options = {}) {
+  const list = (Array.isArray(pages) ? pages : []).filter((page) => page && typeof page.svg === "string" && page.svg.trim())
+  if (list.length === 0) throw new Error("Single-file export requires at least one page")
+  const gap = Number.isFinite(options.gap) ? options.gap : ARTBOARD_GAP
+
+  const prepared = list.map((page, index) => {
+    const svg = prepareIllustratorSvg(page.svg, { ...page, pageNumber: index + 1, totalPages: list.length })
+    const doc = parseSvg(svg)
+    return { doc, root: doc.documentElement, page, index, size: pageViewBox(doc.documentElement) }
+  })
+
+  const pageWidth = Math.max(...prepared.map((item) => item.size.width))
+  const pageHeight = Math.max(...prepared.map((item) => item.size.height))
+  const totalWidth = prepared.length * pageWidth + (prepared.length - 1) * gap
+
+  const out = parseSvg(
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"" + XLINK_NS + "\" xmlns:inkscape=\"" + INKSCAPE_NS + "\"" +
+    " viewBox=\"0 0 " + totalWidth + " " + pageHeight + "\" width=\"" + totalWidth + "\" height=\"" + pageHeight + "\"" +
+    " version=\"1.1\" baseProfile=\"full\" xml:space=\"preserve\" data-export-profile=\"illustrator-2026-single-file\"></svg>"
+  )
+  const outRoot = out.documentElement
+
+  const title = out.createElementNS(SVG_NS, "title")
+  title.setAttribute("id", "DOCUMENT_TITLE")
+  title.appendChild(out.createTextNode(options.title || "Tech pack"))
+  outRoot.appendChild(title)
+
+  const metadata = out.createElementNS(SVG_NS, "metadata")
+  metadata.setAttribute("id", "TECHPACK_METADATA")
+  metadata.appendChild(out.createCDATASection(JSON.stringify({
+    schema: "techpack-ai-builder/illustrator-svg-single-file/v1",
+    totalPages: prepared.length,
+    pageSize: { width: pageWidth, height: pageHeight, physical: "297mm x 210mm" },
+    gap,
+    layers: ILLUSTRATOR_LAYERS,
+    artboards: prepared.map((item, i) => ({
+      index: i + 1,
+      id: "ARTBOARD_" + String(i + 1).padStart(2, "0"),
+      name: item.page.title || item.page.name || item.page.id || "Pagina " + (i + 1),
+      x: i * (pageWidth + gap),
+      y: 0,
+      width: pageWidth,
+      height: pageHeight,
+    })),
+  })))
+  outRoot.appendChild(metadata)
+
+  // Defs from every page are hoisted once, id-prefixed per page so gradients
+  // and patterns from different pages can never collide.
+  const defs = out.createElementNS(SVG_NS, "defs")
+  defs.setAttribute("id", "DOCUMENT_DEFS")
+  prepared.forEach((item) => {
+    collectElements(item.root, "defs").forEach((node) => {
+      Array.from(node.childNodes).forEach((child) => {
+        if (child.nodeType !== 1) return
+        const imported = out.importNode(child, true)
+        const id = imported.getAttribute && imported.getAttribute("id")
+        if (id) imported.setAttribute("id", "P" + String(item.index + 1).padStart(2, "0") + "_" + id)
+        defs.appendChild(imported)
+      })
+    })
+  })
+  if (defs.childNodes.length > 0) outRoot.appendChild(defs)
+
+  // One document-level layer per semantic role, holding that role's content
+  // from every page - this is what makes the whole document readable as seven
+  // layers instead of seven times N.
+  ILLUSTRATOR_LAYERS.forEach((name, layerIndex) => {
+    const layer = out.createElementNS(SVG_NS, "g")
+    const code = String(layerIndex + 1).padStart(2, "0")
+    layer.setAttribute("id", "LAYER_" + code + "_" + name)
+    layer.setAttribute("data-layer-name", name)
+    layer.setAttribute("inkscape:groupmode", "layer")
+    layer.setAttribute("inkscape:label", code + " " + name)
+
+    prepared.forEach((item) => {
+      const source = item.doc.getElementById("LAYER_" + code + "_" + name)
+      if (!source || !Array.from(source.childNodes).some((child) => child.nodeType === 1)) return
+      const holder = out.createElementNS(SVG_NS, "g")
+      const pageCode = "P" + String(item.index + 1).padStart(2, "0")
+      holder.setAttribute("id", pageCode + "_" + name)
+      holder.setAttribute("data-page", String(item.index + 1))
+      holder.setAttribute("transform", "translate(" + item.index * (pageWidth + gap) + " 0)")
+      Array.from(source.childNodes).forEach((child) => {
+        if (child.nodeType === 1) holder.appendChild(out.importNode(child, true))
+      })
+      layer.appendChild(holder)
+    })
+
+    if (layer.childNodes.length > 0) outRoot.appendChild(layer)
+  })
+
+  // Artboard guides, last so they sit on top and are easy to select.
+  const guides = out.createElementNS(SVG_NS, "g")
+  guides.setAttribute("id", "ARTBOARD_GUIDES")
+  guides.setAttribute("data-layer-name", "ARTBOARD_GUIDES")
+  guides.setAttribute("inkscape:groupmode", "layer")
+  guides.setAttribute("inkscape:label", "00 ARTBOARD_GUIDES")
+  prepared.forEach((item, i) => {
+    const rect = out.createElementNS(SVG_NS, "rect")
+    rect.setAttribute("id", "ARTBOARD_" + String(i + 1).padStart(2, "0"))
+    rect.setAttribute("data-artboard-name", item.page.title || item.page.name || item.page.id || "Pagina " + (i + 1))
+    rect.setAttribute("x", String(i * (pageWidth + gap)))
+    rect.setAttribute("y", "0")
+    rect.setAttribute("width", String(pageWidth))
+    rect.setAttribute("height", String(pageHeight))
+    rect.setAttribute("fill", "none")
+    rect.setAttribute("stroke", "none")
+    rect.setAttribute("pointer-events", "none")
+    guides.appendChild(rect)
+  })
+  outRoot.appendChild(guides)
+
+  return withXmlDeclaration(new XMLSerializer().serializeToString(out))
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ILLUSTRATOR_LAYERS, illustratorLayerReport, prepareIllustratorSvg, prepareIllustratorSvgWithAssets } from "./illustratorSvg.js"
+import { ILLUSTRATOR_LAYERS, buildMultiArtboardSvg, illustratorLayerReport, prepareIllustratorSvg, prepareIllustratorSvgWithAssets } from "./illustratorSvg.js"
 
 const SOURCE = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1188 840' width='297mm' height='210mm'>" +
   "<metadata>{}</metadata><rect width='1188' height='840' fill='#fff'/>" +
@@ -78,5 +78,45 @@ describe("XML declaration (Illustrator rejects a malformed prolog)", () => {
     const once = prepareIllustratorSvg(source, page)
     const twice = prepareIllustratorSvgWithAssets(once, page).svg
     expect(twice.match(/<\?xml/g)).toHaveLength(1)
+  })
+})
+
+describe("buildMultiArtboardSvg (one file, every page)", () => {
+  const page = (n) => ({
+    id: "p" + n,
+    title: "Pagina " + n,
+    svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1188 840'>" +
+      "<g id='TECH_DATA_" + n + "'><rect x='10' y='10' width='100' height='50'/></g>" +
+      "<g id='PAGE_CHROME_" + n + "'><rect x='0' y='0' width='60' height='20'/></g></svg>",
+  })
+  const pages = [page(1), page(2), page(3)]
+
+  it("lays the pages out side by side on one canvas", () => {
+    const svg = buildMultiArtboardSvg(pages, { gap: 80 })
+    // 3 pages of 1188 + 2 gaps of 80
+    expect(svg).toContain('viewBox="0 0 3724 840"')
+    expect(svg.match(/<\?xml/g)).toHaveLength(1)
+  })
+
+  it("hoists the semantic layers to document level, spanning every page", () => {
+    const report = illustratorLayerReport(buildMultiArtboardSvg(pages))
+    const techData = report.find((l) => l.name === "TECH_DATA")
+    // one holder group per page inside the single document-level layer
+    expect(techData.present).toBe(true)
+    expect(techData.childCount).toBe(3)
+    // and the layer appears once, not once per page
+    expect(report.filter((l) => l.name === "TECH_DATA")).toHaveLength(1)
+  })
+
+  it("offsets each page and emits one artboard rectangle per page", () => {
+    const svg = buildMultiArtboardSvg(pages, { gap: 80 })
+    expect(svg.match(/id="ARTBOARD_\d+"/g)).toHaveLength(3)
+    expect(svg).toContain('translate(0 0)')
+    expect(svg).toContain('translate(1268 0)')
+    expect(svg).toContain('translate(2536 0)')
+  })
+
+  it("refuses to build from nothing rather than emitting an empty document", () => {
+    expect(() => buildMultiArtboardSvg([])).toThrow(/at least one page/i)
   })
 })
