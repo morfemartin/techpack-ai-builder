@@ -262,7 +262,9 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     }
 
     designerCommunication += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
-    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES " + (brief && brief.slotCode ? brief.slotCode : "V" + viewNumber), PRINT.minFont, true, "start", "#7D8490")
+    // The view code already appears in this block's badge and heading, so the
+    // caption does not repeat it (see briefLines for the other two copies).
+    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES", PRINT.minFont, true, "start", "#7D8490")
     selectedLines.forEach(function (line, lineIndex) {
       var ly = textY + lineIndex * GRID.baseline
       if (line.pending) designerCommunication += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")

@@ -95,8 +95,11 @@ describe("briefLines (the illustrator-rail template)", () => {
   it("renders the full template: title, placement, must-mark checklist, measurement legend, factory note", () => {
     const lines = briefLines(full, "full")
     const text = lines.join("\n")
-    expect(text).toContain("FRENTE PLANO")
+    // The garment part is the one fact the block heading does not already
+    // show, so it is the identifying line - the view name is not repeated
+    // here (the badge and heading carry it).
     expect(text).toContain("Panel frontal")
+    expect(text).not.toContain("FRENTE PLANO")
     expect(text).toMatch(/Señalar/i)
     expect(text).toContain("logo bordado")
     expect(text).toMatch(/cota|medida/i) // measurement convention line
@@ -110,8 +113,7 @@ describe("briefLines (the illustrator-rail template)", () => {
     expect(checklist).not.toMatch(/F[aá]brica/i)
 
     const title = briefLines(full, "title")
-    expect(title.length).toBeLessThanOrEqual(2)
-    expect(title.join(" ")).toContain("FRENTE PLANO")
+    expect(title).toEqual(["Panel frontal"])
   })
 
   it("omits empty sections instead of rendering blank bullets", () => {

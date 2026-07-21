@@ -172,14 +172,16 @@ function coerceString(x) {
 export function briefLines(brief, mode) {
   const lines = [];
 
-  // Title lines always present in all modes
-  // The renderer already prints a "BRIEF PARA EL ILUSTRADOR" caption above,
-  // so the title line is just the view name (no repeated "BRIEF").
+  // One identifying line, not three. The block already carries its view code
+  // in a badge and the view name as its heading, and the renderer prints an
+  // "INSTRUCCIONES" caption - so restating "V1 · CUELLO PLANO" here said the
+  // same thing a third time and pushed the first useful instruction three rows
+  // down. Name the garment part being drawn (the one fact the heading does not
+  // give), and fall back to the view name only when there is no part.
   const viewUpper = typeof brief.view === 'string' ? brief.view.toUpperCase() : '';
-  lines.push((brief.slotCode ? brief.slotCode + ' · ' : '') + viewUpper);
-  if (brief.garmentPart && brief.garmentPart.length > 0) {
-    lines.push(brief.garmentPart);
-  }
+  const part = typeof brief.garmentPart === 'string' ? brief.garmentPart.trim() : '';
+  const heading = part || viewUpper;
+  if (heading) lines.push(heading);
 
   if (mode === 'title') {
     return lines;
