@@ -254,3 +254,27 @@ describe("CONTRACTS shape", () => {
     }
   })
 })
+
+// A design's colour/embroidery data belongs to that design's own page. It used
+// to leak onto construction pages: overview/structure/lining forbade nothing,
+// and selectedDesign falls back to designs[0] for any page without its own
+// design token - so a BOM page happily rendered the first design's specs as
+// "just another block", on page after page.
+describe("design data stays on the design's own page", () => {
+  const withDesignBlocks = [...chrome, { type: "partsList", weight: 10 }, { type: "colorSpecs", weight: 6 }, { type: "embSpecs", weight: 6 }, { type: "illustration", weight: 40 }, disclaimer]
+
+  it.each(["overview", "structure:shell-body", "lining"])("strips colorSpecs/embSpecs from a %s page", (purpose) => {
+    const repaired = repairPage({ id: "p", title: "T", purpose, regions: withDesignBlocks }, ctx).page
+    const types = repaired.regions.map((r) => r.type)
+    expect(types).not.toContain("colorSpecs")
+    expect(types).not.toContain("embSpecs")
+    // the construction content it does own is untouched
+    expect(types).toEqual(expect.arrayContaining(["partsList", "illustration"]))
+  })
+
+  it("keeps them on the design page they describe", () => {
+    const repaired = repairPage({ id: "d", title: "Chest Logo", purpose: "design:Chest Logo", regions: [...chrome, { type: "colorSpecs", weight: 6 }, { type: "embSpecs", weight: 6 }, { type: "illustration", weight: 40 }, disclaimer] }, ctx).page
+    const types = repaired.regions.map((r) => r.type)
+    expect(types).toEqual(expect.arrayContaining(["colorSpecs", "embSpecs"]))
+  })
+})

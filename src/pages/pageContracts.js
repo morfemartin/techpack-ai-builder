@@ -44,7 +44,7 @@ export const CONTRACTS = {
   },
   overview: {
     mandatory: ["header", "titleBar", "illustration", "partsList", "disclaimer"],
-    forbidden: [],
+    forbidden: ["colorSpecs", "embSpecs"],
     priorityRank: { illustration: 3, partsList: 2, note: 1 },
     illustrationShare: { min: 0.5, max: 0.72 },
     minIllustrationHeight: 320,
@@ -52,7 +52,7 @@ export const CONTRACTS = {
   },
   structure: {
     mandatory: ["header", "titleBar", "illustration", "partsList", "disclaimer"],
-    forbidden: [],
+    forbidden: ["colorSpecs", "embSpecs"],
     priorityRank: { illustration: 3, partsList: 2, note: 1 },
     illustrationShare: { min: 0.5, max: 0.72 },
     minIllustrationHeight: 320,
@@ -60,7 +60,7 @@ export const CONTRACTS = {
   },
   lining: {
     mandatory: ["header", "titleBar", "illustration", "partsList", "disclaimer"],
-    forbidden: [],
+    forbidden: ["colorSpecs", "embSpecs"],
     priorityRank: { illustration: 3, partsList: 2, note: 1 },
     illustrationShare: { min: 0.5, max: 0.72 },
     minIllustrationHeight: 320,
