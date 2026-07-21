@@ -91,11 +91,18 @@ describe("buildMultiArtboardSvg (one file, every page)", () => {
   })
   const pages = [page(1), page(2), page(3)]
 
-  it("lays the pages out side by side on one canvas", () => {
+  it("lays the pages out as a grid, not one long strip", () => {
+    // 3 pages -> 2 columns x 2 rows: 2*1188 + 80 wide, 2*840 + 80 tall.
+    // A single row of 11 pages is a 13868px canvas that opens unreadably
+    // zoomed out; a grid keeps a workable aspect ratio.
     const svg = buildMultiArtboardSvg(pages, { gap: 80 })
-    // 3 pages of 1188 + 2 gaps of 80
-    expect(svg).toContain('viewBox="0 0 3724 840"')
+    expect(svg).toContain('viewBox="0 0 2456 1760"')
     expect(svg.match(/<\?xml/g)).toHaveLength(1)
+  })
+
+  it("honours an explicit column count", () => {
+    const svg = buildMultiArtboardSvg(pages, { gap: 80, columns: 3 })
+    expect(svg).toContain('viewBox="0 0 3724 840"')
   })
 
   it("hoists the semantic layers to document level, spanning every page", () => {
@@ -108,12 +115,20 @@ describe("buildMultiArtboardSvg (one file, every page)", () => {
     expect(report.filter((l) => l.name === "TECH_DATA")).toHaveLength(1)
   })
 
-  it("offsets each page and emits one artboard rectangle per page", () => {
+  it("offsets each page into its grid cell and emits one artboard rectangle per page", () => {
     const svg = buildMultiArtboardSvg(pages, { gap: 80 })
     expect(svg.match(/id="ARTBOARD_\d+"/g)).toHaveLength(3)
-    expect(svg).toContain('translate(0 0)')
-    expect(svg).toContain('translate(1268 0)')
-    expect(svg).toContain('translate(2536 0)')
+    expect(svg).toContain('translate(0 0)')      // row 1, col 1
+    expect(svg).toContain('translate(1268 0)')   // row 1, col 2
+    expect(svg).toContain('translate(0 920)')    // row 2, col 1
+  })
+
+  it("keeps the artboard rectangles selectable so they can be converted", () => {
+    // fill:none would make them unpickable and "Convert to Artboards" would
+    // have nothing to act on.
+    const svg = buildMultiArtboardSvg(pages)
+    expect(svg).toMatch(/id="ARTBOARD_01"[^>]*fill="#FFFFFF"/)
+    expect(svg).toMatch(/id="ARTBOARD_01"[^>]*fill-opacity="0"/)
   })
 
   it("refuses to build from nothing rather than emitting an empty document", () => {

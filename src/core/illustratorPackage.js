@@ -1,4 +1,4 @@
-import { prepareIllustratorSvgWithAssets } from "./illustratorSvg.js"
+import { prepareIllustratorSvg } from "./illustratorSvg.js"
 
 function slug(value) {
   return String(value || "page")
@@ -14,54 +14,30 @@ export function illustratorPageFilename(page, index) {
   return "P" + number + "--" + slug(page.title || page.name || page.id) + ".svg"
 }
 
+// Techpack-Import-Illustrator.jsx opens each page as its OWN document (Adobe
+// scripting works off File/Folder objects, not a single in-memory document
+// with everything already merged) and fuses them into one .ai from inside
+// Illustrator - that fusion step is what promotes the seven id-tagged groups
+// to real native layers. Illustrator discards those ids on straight SVG
+// import (confirmed live: opening either the per-page or the single
+// multi-artboard SVG directly always collapses to one layer), so the script
+// is not an optional extra - it is the only path to native layers at all.
+//
+// The script needs exactly `pages/*.svg` (self-contained, one per page) plus
+// itself next to that folder - nothing else. The package used to also carry
+// a manifest.json, an assets/ folder and a .txt instructions file; none of
+// it was read by the script, so it was just clutter in the unzipped folder.
 export async function createIllustratorArchive(pages, importerScript) {
   if (!Array.isArray(pages) || pages.length === 0) throw new Error("Illustrator package requires at least one page")
   const { default: JSZip } = await import("jszip")
   const zip = new JSZip()
   const folder = zip.folder("pages")
-  const assetsFolder = zip.folder("assets")
-  const assetEntries = []
-  const entries = pages.map((page, index) => {
+  pages.forEach((page, index) => {
     const file = illustratorPageFilename(page, index)
-    const prepared = prepareIllustratorSvgWithAssets(page.svg, { ...page, pageNumber: index + 1, totalPages: pages.length }, {
-      assetPathPrefix: "../assets/",
-    })
-    folder.file(file, prepared.svg)
-    prepared.assets.forEach((asset) => {
-      assetsFolder.file(asset.filename, asset.base64, { base64: true })
-      assetEntries.push({
-        pageFile: "pages/" + file,
-        file: asset.file,
-        mime: asset.mime,
-      })
-    })
-    return {
-      file: "pages/" + file,
-      id: page.id,
-      title: page.title,
-      purpose: page.purpose,
-      pageNumber: index + 1,
-      totalPages: pages.length,
-    }
+    const prepared = prepareIllustratorSvg(page.svg, { ...page, pageNumber: index + 1, totalPages: pages.length })
+    folder.file(file, prepared)
   })
-  zip.file("manifest.json", JSON.stringify({
-    schema: "techpack-ai-builder/illustrator-package/v1",
-    artboardOrder: entries,
-    assets: assetEntries,
-    layersBottomToTop: ["PAGE_BACKGROUND", "ARTWORK", "REFERENCES", "TECH_DATA", "DESIGNER_COMMUNICATION", "CALLOUTS", "PAGE_CHROME"],
-  }, null, 2) + "\n")
   zip.file("Techpack-Import-Illustrator.jsx", importerScript)
-  zip.file("ABRIR-EN-ILLUSTRATOR.txt", [
-    "TECHPACK AI BUILDER - PAQUETE ILLUSTRATOR",
-    "",
-    "1. Descomprime este ZIP completo.",
-    "2. En Illustrator abre Archivo > Secuencias de comandos > Otra secuencia de comandos.",
-    "3. Selecciona Techpack-Import-Illustrator.jsx.",
-    "4. El script crea un solo AI con una mesa nombrada por pagina y siete capas semanticas.",
-    "5. Las imagenes se incluyen en assets/ con nombres legibles y el script las incrusta en el AI final.",
-    "",
-    "Affinity: abre los SVG desde pages/ manteniendo la carpeta assets/ al lado del ZIP descomprimido.",
-  ].join("\n"))
   return zip
 }
 

@@ -1,7 +1,8 @@
 import { useState } from "react"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
-import { buildMultiArtboardSvg } from "../core/illustratorSvg.js"
+import { buildIllustratorPackageBlob } from "../core/illustratorPackage.js"
+import illustratorImporter from "../../docs/illustrator-comparison/Techpack-Import-Illustrator.jsx?raw"
 
 const C = palette
 const hair = `1px solid ${C.ink.hex}`
@@ -9,6 +10,7 @@ const hair = `1px solid ${C.ink.hex}`
 export function SvgModal({ pages, onClose }) {
   const [selPage, setSelPage] = useState(0)
   const [packaging, setPackaging] = useState(false)
+  const [failed, setFailed] = useState("")
   if (!pages || !pages.length) return null
   var cur = pages[selPage]
   function download(content, mime, name) {
@@ -22,24 +24,31 @@ export function SvgModal({ pages, onClose }) {
     document.body.removeChild(a)
     URL.revokeObjectURL(uri)
   }
-  // One file, every page. Not a folder to unzip and not a script to run:
-  // the whole document on a single canvas, pages side by side, with the seven
-  // semantic layers hoisted to document level and one rectangle per page so
-  // the artboards are one command away in either app.
-  const [failed, setFailed] = useState("")
+
+  // Confirmed live, twice: Illustrator discards a plain SVG's group ids on
+  // import, so a single self-contained file - however it lays the pages out -
+  // always collapses to one flat layer. The importer script is not an
+  // optional extra; it is the only path to real native layers, because it
+  // works by opening each page as its OWN document and fusing them from
+  // inside Illustrator, which is where the seven groups get promoted to real
+  // layers. So the one download is this ZIP: `pages/*.svg` (self-contained,
+  // no external assets folder to lose) plus the script - nothing else, since
+  // nothing else is read by it. Running the script is the last step; its
+  // output is the single final .ai file with real layers and named artboards.
   async function downloadPackage() {
     if (packaging) return
     setPackaging(true)
     setFailed("")
     try {
-      const svg = buildMultiArtboardSvg(pages, { title: "Tech pack" })
-      download(svg, "image/svg+xml;charset=utf-8", "techpack-" + pages.length + "-mesas.svg")
+      const blob = await buildIllustratorPackageBlob(pages, illustratorImporter)
+      download(blob, "application/zip", "techpack-" + pages.length + "-paginas.zip")
     } catch (error) {
-      setFailed((error && error.message) || "No se pudo generar el archivo.")
+      setFailed((error && error.message) || "No se pudo generar el paquete.")
     } finally {
       setPackaging(false)
     }
   }
+
   const btn = (fill, on) => ({
     display: "inline-flex",
     alignItems: "center",
@@ -93,7 +102,9 @@ export function SvgModal({ pages, onClose }) {
           ))}
         </div>
         <div style={{ padding: `${space(2)}px ${space(4)}px`, background: C.canvas.hex, borderBottom: hair }}>
-          <span style={{ fontSize: type.size.xs, color: C.ink.hex }}>Un solo archivo con las {pages.length} páginas y las 7 capas semánticas. Illustrator: <b>Objeto &gt; Mesas de trabajo &gt; Convertir en mesas de trabajo</b>. Affinity: <b>Documento &gt; Añadir mesa desde selección</b>.</span>
+          <span style={{ fontSize: type.size.xs, color: C.ink.hex }}>
+            Descomprimí el ZIP y corré <b>Techpack-Import-Illustrator.jsx</b> (Archivo &gt; Secuencias de comandos &gt; Otra secuencia de comandos) — arma un solo <b>.ai</b> con las {pages.length} páginas como mesas de trabajo nombradas y las 7 capas nativas reales. Affinity: abrí cualquier SVG de <b>pages/</b> directamente, sin script.
+          </span>
         </div>
         <textarea
           id="svgta"
@@ -104,8 +115,8 @@ export function SvgModal({ pages, onClose }) {
         <div style={{ padding: `${space(3)}px ${space(4)}px`, borderTop: hair, display: "flex", gap: space(2), justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginRight: "auto" }}>{(cur.svg.length / 1024).toFixed(1)} KB</span>
           {failed && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{failed}</span>}
-          <button disabled={packaging} onClick={downloadPackage} style={{ ...btn(role.index.fill, role.index.on), opacity: packaging ? 0.55 : 1 }} title="Un unico SVG con todas las paginas como mesas y las 7 capas semanticas, para Illustrator o Affinity">
-            <Icon name="download" size={16} color={role.index.on} /> {packaging ? "Preparando..." : "Descargar ficha completa"}
+          <button disabled={packaging} onClick={downloadPackage} style={{ ...btn(role.index.fill, role.index.on), opacity: packaging ? 0.55 : 1 }} title="pages/*.svg + el script que las fusiona en un solo .ai con capas nativas">
+            <Icon name="folder_zip" size={16} color={role.index.on} /> {packaging ? "Preparando..." : "Descargar ficha completa"}
           </button>
         </div>
       </div>

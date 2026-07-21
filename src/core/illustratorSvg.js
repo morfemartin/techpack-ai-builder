@@ -290,11 +290,21 @@ export function buildMultiArtboardSvg(pages, options = {}) {
 
   const pageWidth = Math.max(...prepared.map((item) => item.size.width))
   const pageHeight = Math.max(...prepared.map((item) => item.size.height))
-  const totalWidth = prepared.length * pageWidth + (prepared.length - 1) * gap
+  // Grid, not a single strip. 11 pages in one row is a 13868px canvas that
+  // opens zoomed out to nothing; a grid keeps the document close to a normal
+  // aspect ratio and readable at fit-to-screen.
+  const columns = Math.max(1, Math.floor(Number(options.columns) || Math.ceil(Math.sqrt(prepared.length))))
+  const rows = Math.ceil(prepared.length / columns)
+  const cellAt = (index) => ({
+    x: (index % columns) * (pageWidth + gap),
+    y: Math.floor(index / columns) * (pageHeight + gap),
+  })
+  const totalWidth = columns * pageWidth + (columns - 1) * gap
+  const totalHeight = rows * pageHeight + (rows - 1) * gap
 
   const out = parseSvg(
     "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"" + XLINK_NS + "\" xmlns:inkscape=\"" + INKSCAPE_NS + "\"" +
-    " viewBox=\"0 0 " + totalWidth + " " + pageHeight + "\" width=\"" + totalWidth + "\" height=\"" + pageHeight + "\"" +
+    " viewBox=\"0 0 " + totalWidth + " " + totalHeight + "\" width=\"" + totalWidth + "\" height=\"" + totalHeight + "\"" +
     " version=\"1.1\" baseProfile=\"full\" xml:space=\"preserve\" data-export-profile=\"illustrator-2026-single-file\"></svg>"
   )
   const outRoot = out.documentElement
@@ -310,14 +320,15 @@ export function buildMultiArtboardSvg(pages, options = {}) {
     schema: "techpack-ai-builder/illustrator-svg-single-file/v1",
     totalPages: prepared.length,
     pageSize: { width: pageWidth, height: pageHeight, physical: "297mm x 210mm" },
+    grid: { columns, rows },
     gap,
     layers: ILLUSTRATOR_LAYERS,
     artboards: prepared.map((item, i) => ({
       index: i + 1,
       id: "ARTBOARD_" + String(i + 1).padStart(2, "0"),
       name: item.page.title || item.page.name || item.page.id || "Pagina " + (i + 1),
-      x: i * (pageWidth + gap),
-      y: 0,
+      x: cellAt(i).x,
+      y: cellAt(i).y,
       width: pageWidth,
       height: pageHeight,
     })),
@@ -359,7 +370,8 @@ export function buildMultiArtboardSvg(pages, options = {}) {
       const pageCode = "P" + String(item.index + 1).padStart(2, "0")
       holder.setAttribute("id", pageCode + "_" + name)
       holder.setAttribute("data-page", String(item.index + 1))
-      holder.setAttribute("transform", "translate(" + item.index * (pageWidth + gap) + " 0)")
+      const cell = cellAt(item.index)
+      holder.setAttribute("transform", "translate(" + cell.x + " " + cell.y + ")")
       Array.from(source.childNodes).forEach((child) => {
         if (child.nodeType === 1) holder.appendChild(out.importNode(child, true))
       })
@@ -379,13 +391,16 @@ export function buildMultiArtboardSvg(pages, options = {}) {
     const rect = out.createElementNS(SVG_NS, "rect")
     rect.setAttribute("id", "ARTBOARD_" + String(i + 1).padStart(2, "0"))
     rect.setAttribute("data-artboard-name", item.page.title || item.page.name || item.page.id || "Pagina " + (i + 1))
-    rect.setAttribute("x", String(i * (pageWidth + gap)))
-    rect.setAttribute("y", "0")
+    const cell = cellAt(i)
+    rect.setAttribute("x", String(cell.x))
+    rect.setAttribute("y", String(cell.y))
     rect.setAttribute("width", String(pageWidth))
     rect.setAttribute("height", String(pageHeight))
-    rect.setAttribute("fill", "none")
+    // Invisible but SELECTABLE: "none" would make these unpickable, and then
+    // "Convert to Artboards" would have nothing to convert.
+    rect.setAttribute("fill", "#FFFFFF")
+    rect.setAttribute("fill-opacity", "0")
     rect.setAttribute("stroke", "none")
-    rect.setAttribute("pointer-events", "none")
     guides.appendChild(rect)
   })
   outRoot.appendChild(guides)

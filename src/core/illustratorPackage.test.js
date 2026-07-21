@@ -10,30 +10,32 @@ describe("Illustrator package", () => {
     expect(illustratorPageFilename({ title: "Indice de producción" }, 1)).toBe("P02--indice-de-produccion.svg")
   })
 
-  it("contains every editable page, manifest and importer", async () => {
+  // Techpack-Import-Illustrator.jsx opens each page as its own document and
+  // fuses them from inside Illustrator - that is the only way the seven
+  // id-tagged groups become real native layers (Illustrator discards the ids
+  // on a plain SVG import). It needs exactly `pages/*.svg` next to itself;
+  // nothing else in the package is read by the script, so nothing else
+  // belongs in it.
+  it("contains only what the importer script needs: pages/*.svg and the script itself", async () => {
     const archive = await createIllustratorArchive([
       { id: "cover", title: "Portada", svg: SVG_WITH_IMAGE },
       { id: "index", title: "Indice", svg: SVG },
     ], "#target illustrator")
     const bytes = await archive.generateAsync({ type: "uint8array" })
     const loaded = await JSZip.loadAsync(bytes)
-    expect(Object.keys(loaded.files)).toEqual(expect.arrayContaining([
+    expect(Object.keys(loaded.files).sort()).toEqual([
+      "Techpack-Import-Illustrator.jsx",
+      "pages/",
       "pages/P01--portada.svg",
       "pages/P02--indice.svg",
-      "manifest.json",
-      "Techpack-Import-Illustrator.jsx",
-      "ABRIR-EN-ILLUSTRATOR.txt",
-      "assets/P01--portada--logo--brand-logo-01.png",
-    ]))
-    const manifest = JSON.parse(await loaded.file("manifest.json").async("string"))
-    expect(manifest.artboardOrder.map((entry) => entry.id)).toEqual(["cover", "index"])
-    expect(manifest.assets).toEqual([{
-      pageFile: "pages/P01--portada.svg",
-      file: "assets/P01--portada--logo--brand-logo-01.png",
-      mime: "image/png",
-    }])
+    ])
+  })
+
+  it("keeps each page self-contained - images embedded inline, no external assets folder to lose", async () => {
+    const archive = await createIllustratorArchive([{ id: "cover", title: "Portada", svg: SVG_WITH_IMAGE }], "#target illustrator")
+    const bytes = await archive.generateAsync({ type: "uint8array" })
+    const loaded = await JSZip.loadAsync(bytes)
     const pageSvg = await loaded.file("pages/P01--portada.svg").async("string")
-    expect(pageSvg).toContain("../assets/P01--portada--logo--brand-logo-01.png")
-    expect(pageSvg).not.toContain("data:image/png;base64")
+    expect(pageSvg).toContain("data:image/png;base64")
   })
 })
