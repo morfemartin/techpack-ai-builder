@@ -119,6 +119,25 @@ describe("ensureMinimumGeneralQuestions", () => {
     expect(asks.map((f) => f.key)).toContain("drawcord_tips")
   })
 
+  // The "todo se siente generico" report: coverage was guaranteed, but the
+  // model's garment-specific version of a layer was discarded in favour of the
+  // fixed template options, so a technical jacket got asked the same cotton-polo
+  // options as everything else. It must now TAILOR the layer in place.
+  it("lets the model tailor a layer's options to this garment instead of keeping the generic ones", () => {
+    const reqs = {
+      garmentType: "Campera con capucha",
+      fields: [
+        { key: "fabric", label: "Tela principal (shell)", category: "general", status: "ask", value: "", options: ["Softshell 3 capas", "Nylon ripstop", "Membrana impermeable"], why: "define impermeabilidad" },
+      ],
+    }
+    const result = ensureMinimumGeneralQuestions(reqs, {})
+    const fabric = pendingFields(result, "general").find((f) => f.key === "fabric")
+    expect(fabric.options).toEqual(["Softshell 3 capas", "Nylon ripstop", "Membrana impermeable"])
+    expect(fabric.tailored).toBe(true)
+    // and it is asked exactly once - not once tailored plus once appended
+    expect(pendingFields(result, "general").filter((f) => /tela principal/i.test(f.label))).toHaveLength(1)
+  })
+
   it("still drops a model field that duplicates a layer (by key) rather than asking it twice", () => {
     const reqs = {
       garmentType: "hoodie",
@@ -321,10 +340,47 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(deepseekChatStream).not.toHaveBeenCalled()
   })
 
-  it("guards against a zero-question analysis for a new typed garment", async () => {
-    deepseekChat.mockResolvedValue('{"garmentType":"polo","fields":[{"key":"tipo","label":"Tipo","category":"general","status":"assumed","value":"Polo clasico","why":"x"}]}')
-    const result = await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
-    expect(pendingFields(result, "general").map((f) => f.label)).toContain("Tela principal")
+  it("returns the model's own questionnaire, with no template layers padded in", async () => {
+    // The fixed layer floor used to be merged on top of every analysis. It
+    // assumes a torso garment, so a pair of socks got asked about its collar,
+    // sleeve and chest pocket. Coherence is the model's job now: what it
+    // reasoned is exactly what the user is asked, nothing bolted on.
+    const socks = '{"garmentType":"Medias","fields":[' + [
+      '{"key":"cuff","label":"Puno","category":"general","status":"ask","value":"","options":["Rib alto","Rib bajo"],"why":"x"}',
+      '{"key":"heel","label":"Talon","category":"general","status":"ask","value":"","options":["Reforzado","Simple"],"why":"x"}',
+      '{"key":"arch","label":"Soporte de arco","category":"general","status":"ask","value":"","options":["Con soporte","Sin soporte"],"why":"x"}',
+      '{"key":"toe","label":"Puntera","category":"general","status":"ask","value":"","options":["Costura plana","Costura simple"],"why":"x"}',
+      '{"key":"yarn","label":"Hilado","category":"general","status":"ask","value":"","options":["Algodon","Coolmax"],"why":"x"}',
+      '{"key":"height","label":"Altura","category":"general","status":"ask","value":"","options":["Tobillera","Media caña"],"why":"x"}',
+    ].join(",") + ']}'
+    deepseekChat.mockResolvedValue(socks)
+    const result = await analyzeRequirements({ garmentType: "Medias", seed: {}, tecs: [] })
+    const labels = result.fields.map((f) => f.label)
+    expect(labels).toEqual(["Puno", "Talon", "Soporte de arco", "Puntera", "Hilado", "Altura"])
+    expect(labels.some((l) => /cuello|manga|bolsillo/i.test(l))).toBe(false)
+  })
+
+  it("rejects a thin analysis instead of quietly padding it out", async () => {
+    // Under 6 real questions there is not enough to build a tech pack from.
+    // The validator must refuse it so the other provider gets a turn and a
+    // total failure surfaces - rather than the old behaviour of topping it up
+    // with template questions and looking like it worked.
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      const thin = '{"garmentType":"polo","fields":[{"key":"tipo","label":"Tipo","category":"general","status":"ask","value":"","options":["A","B"],"why":"x"}]}'
+      expect(validator(thin)).toBe(false)
+      return thin
+    })
+    await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
+  })
+
+  it("requires every question it shows to carry 2-4 numbered options", async () => {
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      const noOptions = '{"garmentType":"polo","fields":[' + Array.from({ length: 8 }, (_, i) =>
+        `{"key":"f${i}","label":"F${i}","category":"general","status":"ask","value":"","options":[],"why":"x"}`).join(",") + ']}'
+      expect(validator(noOptions)).toBe(false)
+      return noOptions
+    })
+    await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
   })
 
   it("streams completed technical fields when onProgress is given, still returning a valid result", async () => {
@@ -343,8 +399,7 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(seen[0].lastLabel).toBe("Tela")
     expect(seen[1].completedLabels).toEqual(["Tela"])
     expect(result.garmentType).toBe("Camisa")
-    expect(result.fields[0].label).toBe("Uso principal")
-    expect(result.fields.some((field) => field.key === "fabric")).toBe(true)
+    expect(result.fields.map((f) => f.label)).toEqual(["Tela"])
   })
 
   it("salvages a usable field list when the stream hit the token cap mid-JSON", async () => {
@@ -356,8 +411,8 @@ describe("analyzeRequirements onProgress wiring", () => {
 
     const result = await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [], onProgress: () => {} })
     expect(result.garmentType).toBe("Camisa")
-    expect(result.fields.length).toBeGreaterThanOrEqual(10)
-    expect(result.fields.some((field) => field.key === "fabric")).toBe(true)
+    // the 8 complete fields survive the cutoff; the truncated 9th is dropped
+    expect(result.fields.map((f) => f.key)).toEqual(["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"])
   })
 })
 

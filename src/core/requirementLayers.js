@@ -244,6 +244,89 @@ export function requiredLayers(garmentType) {
   return [...new Set(garmentTemplates(garmentType).map((template) => template.layer))]
 }
 
+// How strongly a model field answers the SAME question as a template layer.
+// Exact key/label beats an alias hit, which beats bare containment - so when
+// the model returns both "fabric" and "liningFabric", the main fabric layer
+// takes "fabric" (100) instead of whichever merely contained "tela" (~54).
+function matchScore(template, aliases, modelField) {
+  const key = normalize(modelField.key)
+  const label = normalize(modelField.label)
+  if (template && key && key === normalize(template.key)) return 100
+  if (template && label && label === normalize(template.label)) return 90
+  if (aliases.includes(key)) return 80
+  if (label && aliases.includes(label)) return 75
+  const name = (key + " " + label).trim()
+  let best = 0
+  for (const alias of aliases) {
+    if (!alias || alias.length <= 2) continue
+    if (name === alias) best = Math.max(best, 70)
+    else if (name.includes(alias)) best = Math.max(best, 50 + alias.length)
+  }
+  return best
+}
+
+const MIN_LAYER_MATCH = 50
+
+// Lets the model TAILOR a layer instead of only appending beside it.
+//
+// The layer template guarantees WHICH questions get asked (coverage); it has
+// no way to know that a technical shell jacket and a cotton polo need
+// completely different answers to "Tela principal". Before this, a model
+// question overlapping a layer was thrown away by mergeAdditionalGeneralAsk's
+// dedupe and the generic four options won - which is exactly why every
+// garment ended up reading like the same fixed checklist regardless of what
+// it actually was.
+//
+// So: the layer keeps its key/layer/status (coverage + walker identity stay
+// intact), but borrows the model's garment-specific options/label/why when
+// the model reasoned about that same datum. Only ASK layers are touched -
+// anything already KNOWN from vision/CSV/seed evidence is left exactly as is.
+// Returns the consumed model keys so the caller can exclude them from the
+// "genuinely new question" merge below and never ask the same thing twice.
+export function enrichLayersWithModel({ garmentType, layeredFields, modelFields = [] } = {}) {
+  const templateByKey = new Map(garmentTemplates(garmentType).map((template) => [template.key, template]))
+  const candidates = (modelFields || []).filter(
+    (field) => field && field.category === "general" && field.status === ASK && typeof field.key === "string" && field.key.trim()
+  )
+  const consumedKeys = new Set()
+
+  const fields = (layeredFields || []).map((field) => {
+    if (field.status !== ASK) return field
+    const template = templateByKey.get(field.key)
+    const aliases = (template ? [template.key, template.label, ...template.aliases] : [field.key, field.label])
+      .map(normalize)
+      .filter(Boolean)
+
+    let best = null
+    let bestScore = 0
+    for (const candidate of candidates) {
+      if (consumedKeys.has(candidate.key)) continue
+      const score = matchScore(template, aliases, candidate)
+      if (score > bestScore) {
+        best = candidate
+        bestScore = score
+      }
+    }
+    if (!best || bestScore < MIN_LAYER_MATCH) return field
+
+    const options = (Array.isArray(best.options) ? best.options : []).filter((option) => typeof option === "string" && option.trim())
+    if (options.length < 2) return field
+
+    consumedKeys.add(best.key)
+    return {
+      ...field,
+      label: typeof best.label === "string" && best.label.trim() ? best.label.trim() : field.label,
+      options: options.slice(0, 4),
+      why: typeof best.why === "string" && best.why.trim() ? best.why.trim() : field.why,
+      // Marks a layer whose wording/options came from the model reasoning
+      // about THIS garment, so the UI can show the intake actually studied it.
+      tailored: true,
+    }
+  })
+
+  return { fields, consumedKeys }
+}
+
 // Splices the model's genuinely NEW general "ask" questions on top of the
 // layered floor - the garment-specific depth ("¿el puño lleva cordón
 // interno?") that a fixed template can never anticipate. The floor is still

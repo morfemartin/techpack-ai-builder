@@ -23,13 +23,21 @@ import { HYBRID_TASKS } from "./hybridTasks.js"
 //     data instead of being limited to the fixed rule table.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Spanish contracts "de + el" into "del". The subjects below read
+// 'el diseño "X"' / 'la pieza "Y"', so a naive `"de " + subject` produced
+// "de el diseño" in every question that needed a genitive.
+function of(subject) {
+  const text = String(subject || "")
+  return text.startsWith("el ") ? "del " + text.slice(3) : "de " + text
+}
+
 const TECHNIQUE_RULES = [
   {
     id: "buttons",
     match: /boton|button/i,
     questions: (subject) => [
       { suffix: "count", label: "¿Cuántos botones lleva " + subject + "?", options: ["1-2", "3-4", "5 o más", "A definir con fábrica"], why: "define avíos y tiempo de máquina" },
-      { suffix: "spacing", label: "¿Qué distancia hay entre los botones de " + subject + "?", options: ["Equidistante", "Agrupados en pares", "Espaciado creciente hacia abajo", "A definir con fábrica"], why: "sin esto la fábrica improvisa el patrón de ojales" },
+      { suffix: "spacing", label: "¿Qué distancia hay entre los botones " + of(subject) + "?", options: ["Equidistante", "Agrupados en pares", "Espaciado creciente hacia abajo", "A definir con fábrica"], why: "sin esto la fábrica improvisa el patrón de ojales" },
       { suffix: "gendered_side", label: "¿La botonadura cambia de lado entre versión femenina y masculina?", options: ["Sí, cruce opuesto en femenino", "No, mismo lado siempre", "Solo hay una versión"], why: "un cruce incorrecto es un defecto de producción clásico" },
     ],
   },
@@ -45,36 +53,63 @@ const TECHNIQUE_RULES = [
     id: "closure-zipper",
     match: /zipper|cierre|cremallera/i,
     questions: (subject) => [
-      { suffix: "pull", label: "¿Qué tipo de tirador lleva el cierre de " + subject + "?", options: ["Estándar metálico", "Tirador de tela a juego", "Tirador con logo", "A definir con fábrica"], why: "el tirador es un punto de marca y de falla frecuente" },
-      { suffix: "length", label: "¿El largo del cierre de " + subject + " ya está confirmado?", options: ["Sí, medido", "Aproximado, a confirmar en fitting", "A definir con fábrica"], why: "un cierre mal medido no cierra bien la prenda" },
+      { suffix: "pull", label: "¿Qué tipo de tirador lleva el cierre " + of(subject) + "?", options: ["Estándar metálico", "Tirador de tela a juego", "Tirador con logo", "A definir con fábrica"], why: "el tirador es un punto de marca y de falla frecuente" },
+      { suffix: "length", label: "¿El largo del cierre " + of(subject) + " ya está confirmado?", options: ["Sí, medido", "Aproximado, a confirmar en fitting", "A definir con fábrica"], why: "un cierre mal medido no cierra bien la prenda" },
     ],
   },
   {
     id: "pocket",
     match: /bolsill|pocket/i,
     questions: (subject) => [
-      { suffix: "depth", label: "¿La profundidad del bolsillo de " + subject + " está definida?", options: ["Sí, medida exacta", "Proporcional a la prenda", "A definir con fábrica"], why: "un bolsillo muy chico o grande cambia la funcionalidad" },
+      { suffix: "depth", label: "¿La profundidad del bolsillo " + of(subject) + " está definida?", options: ["Sí, medida exacta", "Proporcional a la prenda", "A definir con fábrica"], why: "un bolsillo muy chico o grande cambia la funcionalidad" },
       { suffix: "bartack", label: "¿Lleva refuerzo (bartack) en las esquinas del bolsillo?", options: ["Sí", "No", "A definir con fábrica"], why: "sin refuerzo el bolsillo se rasga en uso" },
     ],
   },
   {
     id: "hem",
-    match: /dobladillo|\bbajo\b|hem/i,
+    // No bare "bajo" (Spanish for "below/under") - it false-matched ordinary
+    // position language like "80mm bajo costura de hombro" (a logo's
+    // posDetail, nothing to do with a hem), tying a hem question to whatever
+    // design happened to mention a placement below something.
+    match: /dobladillo|\bruedo\b|\bbastilla\b|\bhem\b/i,
     questions: (subject) => [
-      { suffix: "width", label: "¿El ancho del dobladillo de " + subject + " está definido?", options: ["Estándar (2-3 cm)", "Angosto", "Ancho / doble puntada", "A definir con fábrica"], why: "cambia el consumo de tela y la máquina a usar" },
+      { suffix: "width", label: "¿El ancho del dobladillo " + of(subject) + " está definido?", options: ["Estándar (2-3 cm)", "Angosto", "Ancho / doble puntada", "A definir con fábrica"], why: "cambia el consumo de tela y la máquina a usar" },
+    ],
+  },
+  {
+    id: "print",
+    match: /serigraf|estampad|sublimac|dtf|impresion|print/i,
+    questions: (subject) => [
+      { suffix: "color_count", label: "¿Cuántos colores/tintas lleva la estampa " + of(subject) + "?", options: ["1 color", "2-3 colores", "4 o más (proceso)", "A definir con fábrica"], why: "cada color extra es una pantalla/pasada mas y sube el costo" },
+      { suffix: "wash_durability", label: "¿Que durabilidad al lavado necesita la estampa " + of(subject) + "?", options: ["Estandar (uso normal)", "Alta (industrial/deportivo)", "A definir con fábrica"], why: "define la tinta y el curado; una estampa mal curada se agrieta" },
+    ],
+  },
+  {
+    id: "patch",
+    match: /parche|patch/i,
+    questions: (subject) => [
+      { suffix: "attachment", label: "¿Cómo se fija el parche " + of(subject) + " a la prenda?", options: ["Cosido perimetral", "Termosellado", "Velcro (removible)", "A definir con fábrica"], why: "el método de fijación cambia el proceso y si el parche es removible" },
+      { suffix: "edge_finish", label: "¿Qué terminación de borde lleva el parche " + of(subject) + "?", options: ["Borde termosellado", "Bordado overlock", "Borde crudo", "A definir con fábrica"], why: "sin esto el borde del parche se deshilacha en uso" },
     ],
   },
 ]
 
+// Designs first on purpose: they are the specific, named elements, so when a
+// rule fires for both a design and a construction part the design wins (see
+// the dedupe in fallbackProductionQuestions).
 function subjectsFrom({ parts, designs }) {
   const subjects = []
   ;(designs || []).forEach((d) => {
     if (!d) return
-    subjects.push({ key: "design:" + (d.name || ""), label: "el diseño \"" + (d.name || "sin nombre") + "\"", text: [d.name, d.tec, d.posDetail, d.notes].filter(Boolean).join(" ") })
+    subjects.push({ kind: "design", key: "design:" + (d.name || ""), label: "el diseño \"" + (d.name || "sin nombre") + "\"", text: [d.name, d.tec, d.posDetail, d.notes].filter(Boolean).join(" ") })
   })
   ;(parts || []).forEach((p) => {
     if (!p || p.on === false) return
-    subjects.push({ key: "part:" + (p.id || ""), label: "la pieza \"" + (p.id || "") + "\"", text: String(p.val || "") })
+    // Prefer a human label when the caller has one (the intake passes the
+    // question label, e.g. "Cierre / botonadura"); fall back to the raw id,
+    // which downstream is often just a BOM row number.
+    const name = String((p.label || p.id) ?? "").trim()
+    subjects.push({ kind: "part", key: "part:" + (p.id ?? name), label: "la pieza \"" + name + "\"", text: String(p.val || "") })
   })
   return subjects
 }
@@ -85,13 +120,27 @@ export function fallbackProductionQuestions({ parts, designs } = {}) {
   const subjects = subjectsFrom({ parts, designs })
   const fields = []
   const seenTopics = new Set()
+  const rulesCoveredByADesign = new Set()
+  const seenLabels = new Set()
+
   for (const subject of subjects) {
     for (const rule of TECHNIQUE_RULES) {
       if (!rule.match.test(subject.text)) continue
+      // A construction part must not re-ask what a named design already
+      // covers. Observed live: a "Cierre: Botones" part and a design literally
+      // named "Botones" are the same physical placket, and the walk asked
+      // "¿Cuántos botones...?" twice in a row, which reads like a bug.
+      if (subject.kind === "part" && rulesCoveredByADesign.has(rule.id)) continue
       const topicKey = rule.id + ":" + subject.key
       if (seenTopics.has(topicKey)) continue
       seenTopics.add(topicKey)
+      if (subject.kind === "design") rulesCoveredByADesign.add(rule.id)
       for (const q of rule.questions(subject.label)) {
+        // Garment-level questions (the gendered placket side, a pocket's
+        // bartack) word themselves without a subject, so two subjects hitting
+        // the same rule would otherwise emit the identical sentence twice.
+        if (seenLabels.has(q.label)) continue
+        seenLabels.add(q.label)
         fields.push({
           key: "production:" + rule.id + ":" + subject.key + ":" + q.suffix,
           label: q.label,
@@ -156,12 +205,23 @@ export async function authorProductionQuestions({ hdr, parts, designs } = {}) {
   return questions
     .filter((q) => q && typeof q.key === "string" && typeof q.label === "string" && Array.isArray(q.options) && q.options.length >= 2)
     .slice(0, 8)
-    .map((q) => ({
-      key: "production:ai:" + q.key.trim(),
-      label: q.label,
-      category: "production",
-      status: "ask",
-      options: q.options.filter((o) => typeof o === "string" && o.trim()).slice(0, 4),
-      why: q.why || "detalle de producción identificado en la revisión final",
-    }))
+    .map((q) => {
+      const trimmedKey = q.key.trim()
+      // A key that already carries the "production:<rule>:design|part:<name>:<suffix>"
+      // shape came straight from `fallback` above (the hybrid call fell through
+      // to it and it round-tripped through JSON unchanged) - keep it as-is so
+      // applyReviewAnswers() can still route it to the right part/design.
+      // Only a genuinely freeform AI-authored key (no fixed subject) gets the
+      // "ai:" tag; re-prefixing an already-qualified key here would silently
+      // break that routing and dump every answer onto the first design.
+      const key = trimmedKey.startsWith("production:") ? trimmedKey : "production:ai:" + trimmedKey
+      return {
+        key,
+        label: q.label,
+        category: "production",
+        status: "ask",
+        options: q.options.filter((o) => typeof o === "string" && o.trim()).slice(0, 4),
+        why: q.why || "detalle de producción identificado en la revisión final",
+      }
+    })
 }

@@ -3,9 +3,10 @@ import { DeepSeekError } from "../core/deepseekClient.js"
 import {
   analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
   looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
-  attachIllustrationBriefs, FIELD_STATUS, fallbackRequirements, analyzeRequirements,
+  attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements,
 } from "../core/techpackRequirements.js"
 import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
+import { authorProductionQuestions } from "../core/productionReview.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -75,27 +76,20 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
-  // Mirror `phase`/`reqs` for the background AI-depth splice in runAnalysis()
-  // below - that promise resolves well after the render that started it, so
-  // it needs refs (not the closed-over state values) to check whether the
-  // general walk is STILL live, and to compute additions synchronously
-  // instead of via a setReqs updater (whose body React runs on its own
-  // schedule - reading a variable it assigns, right after calling setReqs,
-  // reads the STALE pre-update value; this bit a live status-line count).
-  const phaseRef = useRef(phase)
-  const reqsRef = useRef(reqs)
+  // Monotonic id for the layer-1 investigation. Only the newest run may write
+  // its result, so a slow call that lands after the user rewound the garment
+  // name can never overwrite the analysis that replaced it.
+  const analysisRun = useRef(0)
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [history, sending, currentField])
 
-  useEffect(() => {
-    phaseRef.current = phase
-  }, [phase])
-
-  useEffect(() => {
-    reqsRef.current = reqs
-  }, [reqs])
+  // The three question-walking phases: layer 1 (construction), layer 2
+  // (designs), layer 3 (production refinement). They all drive the same
+  // numbered-options walker, so everything that gates on "is the user
+  // answering a question right now" keys off this instead of re-listing them.
+  const isWalking = phase === "asking" || phase === "designing" || phase === "refining"
 
   // Kick off the up-front analysis when a garment type is known (either passed
   // in by a seed door, or once the user names it). Guarded so it runs once per
@@ -153,13 +147,18 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         post("assistant", "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…")
         setPhase("designAnalyzing")
         runDesignAnalysis(nextReqs)
+      } else if (category === "production") {
+        // Layer 3 finished - nothing else to investigate.
+        finishIntake(nextReqs)
       } else if (reqsToDesigns(nextReqs).length > 0) {
         post("assistant", "Ya tengo los diseños. Ahora redacto la instrucción de ilustración para cada página…")
         setPhase("briefing")
         runBriefAuthoring(nextReqs)
       } else {
-        post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha. Podés continuar.")
-        finishIntake(nextReqs)
+        // No design elements, but the construction answers can still hide
+        // production decisions worth pinning down (a zipper's pull, a hem's
+        // width), so layer 3 runs here too instead of ending the intake.
+        startRefinement(nextReqs)
       }
       return
     }
@@ -167,43 +166,69 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     post("assistant", questionText(pending[0]))
   }
 
-  function runAnalysis(garmentType) {
-    // Start from the local contract synchronously. This is deliberately not a
-    // degraded error path: it is the primary intake path, so a provider outage
-    // can never leave a non-expert staring at "Analizando la prenda".
-    const localReqs = fallbackRequirements(garmentType, seed || {})
+  // LAYER 1 - investigate, THEN ask.
+  //
+  // This waits for the model to study the garment before publishing a single
+  // question, and that order is the whole point: it is what makes the intake
+  // feel like it looked at YOUR garment instead of reciting a checklist.
+  //
+  // An earlier revision inverted it - the fixed layer template was published
+  // instantly and the model's findings were spliced in afterwards. That reads
+  // well on paper (nothing ever stalls) but in practice the questions are
+  // answered faster than the model returns, and since an answered question is
+  // never rewritten underneath the user, the whole intake ended up generic:
+  // the deterministic template was, in effect, the only thing anyone saw.
+  //
+  // There is no template underneath any more. The fixed layer floor assumed a
+  // torso garment, so it asked a pair of socks about its collar, sleeve and
+  // chest pocket - incoherent questions presented as if the analysis had gone
+  // fine. Coherence is now the model's job at every layer, and when the model
+  // cannot deliver we SAY SO (see the catch) instead of quietly substituting a
+  // questionnaire that does not belong to this garment.
+  async function runAnalysis(garmentType) {
+    const runId = ++analysisRun.current
+    setSending(true)
     setError(null)
-    setAIStatus("Guia tecnica por capas lista · profundizando con IA…")
-    setReqs(localReqs)
-    setPhase("asking")
-    post("assistant", "Voy a construir la ficha por capas: producto, materiales, calce, construccion, terminaciones, produccion y diseno. Empezamos por lo que mas condiciona el resultado.")
-    askNext(localReqs, "general")
+    setLiveReply("Estoy estudiando esta prenda: qué lleva y qué necesita la ficha…")
+    try {
+      const analysis = await analyzeRequirements({
+        garmentType,
+        seed: seed || {},
+        tecs,
+        lang: "ES",
+        onStatus: setAIStatus,
+        onProgress: (p) => {
+          if (analysisRun.current === runId) showStructuredStream(p, "Ya identifiqué estas decisiones de producción:")
+        },
+      })
+      // A newer analysis (or a rewound garment name) supersedes this one.
+      if (analysisRun.current !== runId) return
 
-    // Deepen in the background (NVIDIA+Qwen hybrid, HYBRID_TASKS.INTAKE): the
-    // IA reasons about THIS specific garment and may surface construction
-    // questions the fixed layer template can't anticipate. Never blocks the
-    // walk above. If it resolves while the user is still on the general
-    // questions, the new ones splice onto the end of the live queue; if the
-    // walk already moved on (or the call fails/times out), nothing is lost -
-    // the layer floor already asked everything factory-critical.
-    analyzeRequirements({ garmentType, seed: seed || {}, tecs })
-      .then((aiReqs) => {
-        if (phaseRef.current !== "asking") return
-        const currentReqs = reqsRef.current
-        if (!currentReqs) return
-        // Computed synchronously off reqsRef (not a setReqs updater's `prev`
-        // param, which React doesn't invoke inline - see the ref comment
-        // above) so the status line below always reflects what was ACTUALLY
-        // added, not a stale closure value.
-        const aiGeneralAsk = (aiReqs.fields || []).filter((f) => f.category === "general" && f.status === FIELD_STATUS.ASK)
-        const existingKeys = new Set(currentReqs.fields.map((f) => f.key))
-        const additions = aiGeneralAsk.filter((f) => !existingKeys.has(f.key))
-        if (additions.length > 0) setReqs({ ...currentReqs, fields: [...currentReqs.fields, ...additions] })
-        setAIStatus(additions.length > 0 ? "Guia tecnica por capas lista · +" + additions.length + " pregunta" + (additions.length > 1 ? "s" : "") + " especifica" + (additions.length > 1 ? "s" : "") + " de IA" : "Guia tecnica por capas lista")
-      })
-      .catch(() => {
-        if (phaseRef.current === "asking") setAIStatus("Guia tecnica por capas lista")
-      })
+      setReqs(analysis)
+
+      // Saying out loud what it already settled is the visible proof that it
+      // investigated - and it spares the user a pile of questions whose answer
+      // is standard for this garment anyway.
+      const assumed = analysis.fields.filter((f) => f.status === FIELD_STATUS.ASSUMED && String(f.value || "").trim())
+      if (assumed.length > 0) {
+        post("assistant", "Para una " + (analysis.garmentType || garmentType) + " doy por estandar: " + assumed.map((f) => f.label + " (" + f.value + ")").join(", ") + ". Si algo no aplica lo corregis despues. Ahora, lo que define tu prenda:")
+      }
+      setPhase("asking")
+      askNext(analysis, "general")
+    } catch (e) {
+      analysisRun.current += 1 // ignore late progress from the timed-out call
+      // Fail visibly. Substituting a generic questionnaire here would read as
+      // success and quietly put questions in the tech pack that were never
+      // reasoned about - worse than no questions at all.
+      setReqs(null)
+      setCurrentField(null)
+      setPhase("analysisFailed")
+      setError(e instanceof DeepSeekError ? e.message : "No se pudo analizar la prenda.")
+      post("assistant", "No pude analizar esta prenda: " + (e instanceof DeepSeekError ? e.message : "los modelos no respondieron a tiempo") + ".\n\nNo voy a inventar preguntas genericas para disimularlo. Proba de nuevo, o revisa que la IA este disponible.")
+    } finally {
+      setSending(false)
+      setLiveReply("")
+    }
   }
 
   // Second DeepSeek call (F3.2): reasons about which discrete elements of
@@ -239,8 +264,8 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         askNext(merged, "design")
       } else {
         setError(null)
-        post("assistant", "No detecté aplicaciones que requieran una página propia. Podés agregar cualquier detalle al final.")
-        finishIntake(generalReqs)
+        post("assistant", "No detecté aplicaciones que requieran una página propia.")
+        await startRefinement(generalReqs)
       }
     } finally {
       setSending(false)
@@ -269,12 +294,69 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           onProgress: (p) => showStructuredStream(p, "Ya quedaron definidos estos elementos:"),
         })
       setBriefs(authored)
-      post("assistant", "Listo, ya tengo todo lo necesario para armar la ficha, con instrucciones de ilustración incluidas. Podés continuar.")
-      finishIntake(finalReqs)
+      // Awaited so this function's `finally` cannot clear `sending` out from
+      // under layer 3's own in-progress indicator.
+      await startRefinement(finalReqs)
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : "No se pudieron redactar los briefs de ilustración. Podés continuar igual.")
       post("assistant", "No pude redactar las instrucciones de ilustración todavía, pero podés continuar igual.")
-      finishIntake(finalReqs)
+      await startRefinement(finalReqs)
+    } finally {
+      setSending(false)
+      setLiveReply("")
+    }
+  }
+
+  // LAYER 3 (F3.4) - production refinement. The first two layers establish
+  // WHAT the garment is (construction) and WHAT goes on it (designs). This
+  // third pass rereads both together and thinks like a technical designer:
+  // given a placket of buttons and an embroidered chest logo, how many
+  // buttons, at what spacing, does the closure flip side by gender, what
+  // backing does the embroidery need - the questions that are only askable
+  // once material, technique and position are already decided, and that the
+  // factory would otherwise have to invent.
+  //
+  // Shares the walker field shape, so pendingFields/applyAnswer/askNext need
+  // no special casing beyond the "production" category. Backed by the same
+  // deterministic per-technique checklist as the final review, so it still
+  // asks something useful with zero AI availability - and it never blocks:
+  // any failure just ends the intake normally.
+  async function startRefinement(baseReqs) {
+    setPhase("refining")
+    setSending(true)
+    setError(null)
+    setLiveReply("Estoy revisando los detalles de producción propios de esta prenda…")
+    try {
+      const questions = await authorProductionQuestions({
+        hdr: {},
+        // reqsToParts yields {label, val}; productionReview keys subjects off
+        // id/label, so pass the human question label as the part's identity -
+        // otherwise every question reads 'la pieza ""'.
+        parts: reqsToParts(baseReqs).map((part) => ({ id: part.label, label: part.label, val: part.val, on: true })),
+        designs: reqsToDesigns(baseReqs),
+      })
+      const fields = (questions || [])
+        .filter((q) => q && typeof q.key === "string" && q.key.trim() && Array.isArray(q.options) && q.options.length >= 2)
+        .map((q) => ({
+          key: q.key.trim(),
+          label: q.label,
+          category: "production",
+          layer: "Detalles de produccion",
+          status: FIELD_STATUS.ASK,
+          value: "",
+          options: q.options.slice(0, 4),
+          why: q.why || "",
+        }))
+      if (fields.length === 0) {
+        finishIntake(baseReqs)
+        return
+      }
+      const merged = { ...baseReqs, fields: [...baseReqs.fields, ...fields] }
+      setReqs(merged)
+      post("assistant", "Último repaso, pensando como diseñador técnico: los detalles que la fábrica tendría que adivinar si no los definimos.")
+      askNext(merged, "production")
+    } catch {
+      finishIntake(baseReqs)
     } finally {
       setSending(false)
       setLiveReply("")
@@ -423,12 +505,22 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     if (!value || sending) return
     setInput("")
     if (phase === "naming") return submitName(value)
-    if ((phase === "asking" || phase === "designing") && currentField && looksLikeQuestion(value)) return submitTangentQuestion(value)
-    if (phase === "asking" || phase === "designing") return submitAnswer(value)
+    if (isWalking && currentField && looksLikeQuestion(value)) return submitTangentQuestion(value)
+    if (isWalking) return submitAnswer(value)
     if (phase === "finalCheck") return submitExtraNotes(value)
   }
 
   function buildDraft() {
+    // Layer 3's answers live in the "production" category, which neither
+    // reqsToParts (general) nor reqsToDesigns (design) reads - without this
+    // they would be collected in the chat and then silently dropped before
+    // ever reaching the tech pack. They ride along as notes, the same channel
+    // the finalCheck free text already uses.
+    const productionNotes = (reqs && Array.isArray(reqs.fields) ? reqs.fields : [])
+      .filter((f) => f.category === "production" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim())
+      .map((f) => f.label + ": " + f.value)
+      .join("\n")
+
     return {
       id: garmentLabel,
       label: garmentLabel,
@@ -439,15 +531,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       // already defaults those to "" (same as any other unmatched design), so
       // this degrades exactly like a normal brief-authoring failure, not a crash.
       designs: attachIllustrationBriefs(reqsToDesigns(reqs), briefs),
-      notes: extraNotes,
+      notes: [productionNotes, extraNotes].filter(Boolean).join("\n"),
     }
   }
 
-  const inputActive = phase === "naming" || phase === "asking" || phase === "designing" || phase === "finalCheck"
-  const backAvailable = answerStack.length > 0 && answerStack[answerStack.length - 1].phase === phase && (phase === "asking" || phase === "designing")
+  const inputActive = isWalking || phase === "naming" || phase === "finalCheck"
+  const backAvailable = answerStack.length > 0 && answerStack[answerStack.length - 1].phase === phase && isWalking
   const knownParts = reqs ? reqsToParts(reqs) : []
   const designsSoFar = reqs ? reqsToDesigns(reqs) : []
-  const pendingCategory = phase === "designAnalyzing" || phase === "designing" ? "design" : "general"
+  const pendingCategory = phase === "refining" ? "production" : phase === "designAnalyzing" || phase === "designing" ? "design" : "general"
   const pendingCount = reqs ? pendingFields(reqs, pendingCategory).length : 0
   const designGroupFields = reqs && currentField && currentField.category === "design" && currentField.designSlot
     ? reqs.fields.filter((f) => f.category === "design" && f.designSlot === currentField.designSlot)
@@ -494,7 +586,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             </div>
           )}
           {/* Numbered option chips for the current question - click to answer, or type your own. */}
-          {(phase === "asking" || phase === "designing") && currentField && currentField.options && currentField.options.length > 0 && !sending && (
+          {isWalking && currentField && currentField.options && currentField.options.length > 0 && !sending && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), alignSelf: "flex-start", maxWidth: "90%" }}>
               {currentField.optional && (
                 <button
@@ -561,7 +653,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               disabled={sending}
               style={{ flex: 1, padding: space(3), border: "none", outline: "none", fontFamily: type.fonts.ui, fontSize: type.size.base, background: sending ? "#F7F7F8" : C.white.hex }}
             />
-            {(phase === "asking" || phase === "designing") && currentField && (
+            {isWalking && currentField && (
               <label
                 title="Responder esta pregunta con una foto"
                 style={{ display: "inline-flex", alignItems: "center", padding: `0 ${space(3)}px`, borderLeft: hair, cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.5 : 1 }}
@@ -596,6 +688,21 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(3)}px`, background: C.white.hex, color: C.ink.hex, border: hair, fontFamily: type.fonts.ui, fontWeight: 700, fontSize: type.size.xs, textTransform: "uppercase", letterSpacing: "0.04em", cursor: sending ? "not-allowed" : "pointer" }}
             >
               Nada más, continuar <Icon name="arrow_forward" size={16} color={C.ink.hex} />
+            </button>
+          </div>
+        )}
+        {phase === "analysisFailed" && (
+          <div style={{ padding: `${space(2)}px ${space(3)}px`, borderTop: hair, display: "flex", justifyContent: "flex-end" }}>
+            <button
+              onClick={() => {
+                analyzedFor.current = null
+                setError(null)
+                setPhase("analyzing")
+              }}
+              disabled={sending}
+              style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on, border: "none", fontFamily: type.fonts.ui, fontWeight: 700, fontSize: type.size.xs, textTransform: "uppercase", letterSpacing: "0.04em", cursor: sending ? "not-allowed" : "pointer" }}
+            >
+              <Icon name="undo" size={16} color={C.white.hex} /> Reintentar analisis
             </button>
           </div>
         )}

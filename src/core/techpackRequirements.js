@@ -14,7 +14,7 @@
 import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
-import { buildLayeredRequirements, mergeAdditionalGeneralAsk } from "./requirementLayers.js"
+import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk } from "./requirementLayers.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
@@ -96,11 +96,19 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
     "Tecnicas de aplicacion validas (por si aplican): " + (tecs || []).join(", ") + ".\n\n" +
     "Para cada campo 'ask', incluye 'options': entre 2 y 4 etiquetas CORTAS (2-4 palabras cada una) " +
     "(el usuario podra elegir una numerada o escribir la suya). Para 'assumed'/'known' no hacen falta options.\n" +
-    "Enfocate en campos de construccion GENERAL de la prenda (tela, cuello, manga, cierre, bajo, forro, etc.), NO en " +
-    "disenos/estampados/bordados todavia - eso se define despues.\n\n" +
-    "IMPORTANTE - se conciso para que quepa la respuesta: devolve solo los 6 a 10 campos MAS decisivos (no todos los " +
-    "imaginables), 'why' de maximo 10 palabras, y usa la categoria \"general\" para todos los campos de construccion. " +
-    "El campo 'category' solo puede ser \"general\" o \"design\".\n\n" +
+    "REGLA CLAVE - las options tienen que ser propias de ESTE tipo de prenda, no de ropa en general: nombra materiales, " +
+    "construcciones y avios que se usan REALMENTE en una '" + garmentType + "'. Ejemplo de lo que NO sirve: ofrecer " +
+    "'Algodon pique / Jersey' como tela de una campera impermeable, o 'Cuello polo' en un pantalon. Si una pregunta no " +
+    "admite opciones especificas de esta prenda, es señal de que no vale la pena preguntarla.\n" +
+    "Cubri la construccion GENERAL de la prenda (tela, cuello, manga, cierre, bajo, forro, etc.), NO disenos/" +
+    "estampados/bordados todavia - eso se define despues. Incluí TAMBIEN, con opciones propias de esta prenda, el uso " +
+    "principal, el calce/silueta y el rango de talles: para una campera de montana el uso son opciones como " +
+    "'Montanismo tecnico' o 'Trekking', no 'Casual / Uniforme'. Si dejas esas tres genericas, la ficha se siente de " +
+    "catalogo y no de esta prenda.\n\n" +
+    "COBERTURA: devolve entre 8 y 14 campos, cubriendo todas las areas de construccion que esta prenda realmente tiene " +
+    "(no inventes areas que no aplican: una remera no lleva capucha). Marca como 'assumed' lo que para esta prenda es " +
+    "estandar de fabrica, asi no se lo preguntamos al cliente al pedo. 'why' de maximo 10 palabras. Usa la categoria " +
+    "\"general\" para todos los campos de construccion; 'category' solo puede ser \"general\" o \"design\".\n\n" +
     "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
     '{"garmentType": "' + garmentType + '", "fields": [' +
     '{"key": "identificadorEnIngles", "label": "Etiqueta en espanol", "category": "general", ' +
@@ -108,19 +116,32 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
 
   const hybrid = {
     task: HYBRID_TASKS.INTAKE,
-    // The deterministic layer floor (below) already guarantees >=8 general
-    // asks regardless of what the model returns, so this validator no longer
-    // needs to (and must not) enforce a count - an upper bound here fed the
-    // hybrid circuit breaker every time a thorough model answer legitimately
-    // exceeded it, which was a real contributor to NVIDIA getting starved.
-    // It only checks basic shape: unique keys, and any "ask" field the model
-    // proposed has a well-formed 2-4 option list.
+    // The questionnaire is the model's own reasoning about THIS garment - the
+    // fixed layer template is no longer folded in on top of it. That template
+    // assumes a torso garment, so it asked a pair of socks about its collar,
+    // sleeve and chest pocket: incoherent questions dressed up as coverage.
+    //
+    // With no template underneath, this validator is what guarantees quality:
+    // a thin or malformed answer is REJECTED (the other provider then tries,
+    // and if nobody can answer the call fails loudly) instead of being quietly
+    // padded out. Rejections are tagged contractViolation upstream, so they
+    // never count against the provider's circuit breaker.
     validator: (content) => {
-      const value = ensureMinimumGeneralQuestions(normalizeRequirements(parseJSONOrRepair(content, "invalid intake"), garmentType), seed)
-      const asked = value.fields.filter((field) => field.category === "general" && field.status === FIELD_STATUS.ASK)
-      return new Set(value.fields.map((field) => field.key)).size === value.fields.length && asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
+      const value = normalizeRequirements(parseJSONOrRepair(content, "invalid intake"), garmentType)
+      const general = value.fields.filter((field) => field.category === "general")
+      const asked = general.filter((field) => field.status === FIELD_STATUS.ASK)
+      return (
+        new Set(value.fields.map((field) => field.key)).size === value.fields.length &&
+        // enough substance to actually build a tech pack from
+        asked.length >= 6 &&
+        // every question the user will see must offer numbered choices
+        asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
+      )
     },
-    fallback: () => JSON.stringify(fallbackRequirements(garmentType, seed)),
+    // Deliberately no `fallback`: if neither provider can reason about this
+    // garment, runHybridAI throws and the caller surfaces a real failure. A
+    // generic questionnaire here would look like success and quietly poison
+    // the tech pack with questions that do not belong to this garment.
     onStatus,
     signal,
   }
@@ -139,7 +160,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         ...hybrid,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de requisitos valido.")
-  return ensureMinimumGeneralQuestions(normalizeRequirements(parsed, garmentType), seed)
+  return normalizeRequirements(parsed, garmentType)
 }
 
 // Defensive shaping so the walker helpers can trust the structure regardless
@@ -371,14 +392,23 @@ export function ensureMinimumGeneralQuestions(reqs, seed) {
   // construction decision as "assumed" instead of asking it.
   const layered = buildLayeredRequirements({ garmentType, seed, modelFields: generalFields })
 
-  // Coverage is guaranteed above; this is pure ADDITION on top of it. A model
-  // that reasoned about THIS specific garment may have surfaced a genuinely
-  // new question the fixed layer template can't anticipate (a particular
-  // trim, a construction variant) - splice those in instead of discarding
-  // them, so the chat keeps the layer guarantee AND the model's depth.
-  const extra = mergeAdditionalGeneralAsk({ garmentType, layeredFields: layered.fields, modelFields: generalFields })
+  // Coverage is settled above; depth happens in the two steps below.
+  //
+  // 1) TAILOR the layers themselves. A fixed template cannot know that a
+  //    shell jacket and a cotton polo need different answers to "Tela
+  //    principal", so where the model reasoned about the same datum, the
+  //    layer borrows its garment-specific options/wording. Without this the
+  //    model's better version was dropped by the dedupe below and every
+  //    garment read like the same generic checklist.
+  const { fields: tailored, consumedKeys } = enrichLayersWithModel({ garmentType, layeredFields: layered.fields, modelFields: generalFields })
 
-  return { ...reqs, garmentType: layered.garmentType, fields: [...layered.fields, ...extra, ...designFields] }
+  // 2) ADD what the template could not anticipate at all (a particular trim,
+  //    a construction variant). Anything already consumed as a layer tailor
+  //    is excluded so the same datum is never asked twice.
+  const remainingModelFields = generalFields.filter((field) => !consumedKeys.has(field.key))
+  const extra = mergeAdditionalGeneralAsk({ garmentType, layeredFields: tailored, modelFields: remainingModelFields })
+
+  return { ...reqs, garmentType: layered.garmentType, fields: [...tailored, ...extra, ...designFields] }
 }
 
 export function fallbackRequirements(garmentType, seed) {
@@ -534,8 +564,10 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "cosas con su propio arte/referencia, un link de Drive, o una especificacion de bordado/estampado/parche/etiqueta/herraje personalizado. " +
     "NO preguntes de nuevo por atributos de construccion planos (esos ya estan).\n\n" +
     "Para cada elemento de diseno, pensalo como un GRUPO de 2 a 4 campos relacionados que juntos describen ESE elemento. " +
-    "Todos los campos de un mismo grupo comparten un mismo 'designSlot': un identificador corto, url-safe, en ingles y lowercase (ej: 'logo_pecho', 'botones', 'etiqueta_interior').\n" +
-    "Cada campo del grupo debe incluir 'designField', que es uno de exactamente: 'name' (nombre humano del elemento, ej: 'Logo bordado pecho'), " +
+    "Todos los campos de un mismo grupo comparten un mismo 'designSlot': un identificador corto, url-safe, en ingles y lowercase, " +
+    "derivado del elemento REAL de esta prenda (por ejemplo 'main_logo', 'woven_label', 'buttons').\n" +
+    "Cada campo del grupo debe incluir 'designField', que es uno de exactamente: 'name' (nombre humano del elemento, nombrando la " +
+    "ubicacion real en ESTA prenda), " +
     "'position' (donde va en la prenda), 'technique' (tecnica de aplicacion, DEBE ser una de esta lista exacta si aplica: " + (tecs || []).join(", ") + "), " +
     "'driveLink' (URL de Drive si el usuario menciona una - normalmente solo si es plausible que exista, la mayoria de elementos no necesitan este campo), " +
     "o 'detail' (cualquier otro atributo relevante para ese elemento especifico, ej: para botones 'cuantos huecos tiene, que material'). " +
@@ -546,6 +578,10 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "Sub-preguntas condicionales: si el elemento implica detalles tecnicos que cambian produccion, agrega campos 'detail' especificos. " +
     "Ejemplos: capucha de dos caras -> archivo dividido, union y margen de seguridad; cierre personalizado -> troquel vs archivo existente; diseno diferente frente/espalda -> archivo por lado. " +
     "Cuando una sub-pregunta sea util pero no obligatoria, marca optional:true (boolean). Si es necesaria para fabricar bien, optional:false u omitido.\n\n" +
+    "ANATOMIA - regla dura: solo podes nombrar ubicaciones que existan FISICAMENTE en una '" + garmentType + "'. " +
+    "Antes de escribir una posicion, preguntate si esa parte existe en esta prenda. Unas medias no tienen pecho ni " +
+    "espalda: sus ubicaciones son puno, tobillo, empeine, talon, planta. Un pantalon no tiene manga ni cuello. " +
+    "Nombrar una parte que la prenda no tiene invalida la ficha entera.\n" +
     "IMPORTANTE - se conciso: una prenda tipica tiene 1 a 4 elementos de diseno reales que merecen su propia pagina. " +
     "No inventes elementos que no tengan sentido para esta prenda especifica y los campos generales ya definidos. " +
     "Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +
