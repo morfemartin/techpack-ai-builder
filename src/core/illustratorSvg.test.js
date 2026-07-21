@@ -57,3 +57,26 @@ describe("prepareIllustratorSvg", () => {
     expect(result.svg).not.toContain("data:image/png;base64")
   })
 })
+
+describe("XML declaration (Illustrator rejects a malformed prolog)", () => {
+  const page = { id: "p1", title: "Pagina", pageNumber: 1, totalPages: 1 }
+  const source = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><g id='TECH_DATA_X'><rect x='1' y='1' width='2' height='2'/></g></svg>"
+
+  it("emits exactly one declaration, at the very start", () => {
+    for (const svg of [prepareIllustratorSvg(source, page), prepareIllustratorSvgWithAssets(source, page).svg]) {
+      expect(svg.match(/<\?xml/g)).toHaveLength(1)
+      expect(svg.startsWith("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")).toBe(true)
+    }
+  })
+
+  // The regression itself: prepareIllustratorSvgWithAssets re-parses the
+  // output of prepareIllustratorSvg, which already declares. Keeping the
+  // inherited declaration AND prepending a new one produced
+  // "<?xml?><?xml?><svg>", which is not well-formed - Illustrator refused
+  // every page of the export package with a flat "invalid SVG".
+  it("does not inherit a second declaration when re-preparing prepared output", () => {
+    const once = prepareIllustratorSvg(source, page)
+    const twice = prepareIllustratorSvgWithAssets(once, page).svg
+    expect(twice.match(/<\?xml/g)).toHaveLength(1)
+  })
+})

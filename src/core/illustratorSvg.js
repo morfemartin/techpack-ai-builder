@@ -52,6 +52,19 @@ function extensionForMime(mime) {
   return "png"
 }
 
+// Exactly one XML declaration, always at the very start of the file.
+//
+// prepareIllustratorSvgWithAssets re-parses prepareIllustratorSvg's output,
+// which already carries a declaration; the serializer kept it and the caller
+// prepended a second one. Two declarations is not well-formed XML, so
+// Illustrator refused every page in the export package with a flat "invalid
+// SVG" - while the single-file path, which only declares once, opened fine.
+const XML_DECLARATION = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+
+function withXmlDeclaration(serialized) {
+  return XML_DECLARATION + String(serialized).replace(/^\s*(?:<\?xml[^>]*\?>\s*)+/i, "")
+}
+
 function parseSvg(svg) {
   const errors = []
   const doc = new DOMParser({
@@ -174,7 +187,7 @@ export function prepareIllustratorSvg(svg, page = {}) {
     }
   })
 
-  return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + new XMLSerializer().serializeToString(doc)
+  return withXmlDeclaration(new XMLSerializer().serializeToString(doc))
 }
 
 export function prepareIllustratorSvgWithAssets(svg, page = {}, options = {}) {
@@ -224,7 +237,7 @@ export function prepareIllustratorSvgWithAssets(svg, page = {}, options = {}) {
   }
 
   return {
-    svg: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + new XMLSerializer().serializeToString(doc),
+    svg: withXmlDeclaration(new XMLSerializer().serializeToString(doc)),
     assets,
   }
 }
