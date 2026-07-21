@@ -23,8 +23,26 @@ function allowedHost(host) {
   return /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host || "")
 }
 
+// Vite's dev port drifts (auto-increments to 3001+ whenever 3000 is already
+// taken by another process) - a STRICT allowlist pinned to :3000 silently
+// rejects the browser's Origin the moment that happens, and the failure is
+// invisible to the user: qwenAvailable() just reports the local model as
+// unreachable, so the app looks like it's ignoring a running, healthy Qwen
+// bridge. allowedHost() below already trusts ANY port on localhost/127.0.0.1/
+// [::1] for the request's Host header - the Origin check should trust the
+// same local ports for the same reason (this bridge only ever binds to
+// 127.0.0.1, so a local origin cannot be spoofed from outside the machine).
+function isLocalOrigin(origin) {
+  try {
+    const url = new URL(origin)
+    return (url.protocol === "http:" || url.protocol === "https:") && /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 export function isAllowedOrigin(origin, allowedOrigins = DEFAULT_ALLOWED_ORIGINS) {
-  return !origin || allowedOrigins.includes(origin)
+  return !origin || allowedOrigins.includes(origin) || isLocalOrigin(origin)
 }
 
 function setCors(req, res, allowedOrigins) {

@@ -7,6 +7,17 @@ describe("studio AI bridge security", () => {
     expect(isAllowedOrigin("https://attacker.example")).toBe(false)
   })
 
+  it("trusts any local dev port, not just the pinned :3000 default", () => {
+    // Vite auto-increments past :3000 whenever it's already taken, silently
+    // breaking this bridge for the browser (Origin no longer in the strict
+    // allowlist) even though it only ever binds to 127.0.0.1 - not a real
+    // cross-origin risk, just a dev-port mismatch that looked like "Qwen is
+    // unreachable" from the app's side.
+    expect(isAllowedOrigin("http://localhost:3001")).toBe(true)
+    expect(isAllowedOrigin("http://127.0.0.1:5173")).toBe(true)
+    expect(isAllowedOrigin("https://attacker.example")).toBe(false)
+  })
+
   it("forces the configured local model and caps tokens", () => {
     const payload = sanitizeCompletionPayload({
       model: "attacker/model",

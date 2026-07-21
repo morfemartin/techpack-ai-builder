@@ -3,9 +3,15 @@ import { TASK_POLICIES } from "./hybridTasks.js"
 export { HYBRID_TASKS, TASK_POLICIES } from "./hybridTasks.js"
 
 const NVIDIA_MODEL = "deepseek-ai/deepseek-v4-pro"
-const CIRCUIT_FAILURES = 2
+// Circuit breaker tuned to only trip on REAL availability failures (5xx /
+// network / timeout), never on a contract-violation (NVIDIA answered, the
+// content just failed a strict task validator - see recordProviderOutcome).
+// 4 genuine failures in a 60s window opens it for 20s (was 2 / 60s, which
+// combined with miscounted contract-misses left NVIDIA starved and every
+// task collapsing to the deterministic fallback - the "casi inútil" report).
+const CIRCUIT_FAILURES = 4
 const CIRCUIT_WINDOW_MS = 60000
-const CIRCUIT_OPEN_MS = 60000
+const CIRCUIT_OPEN_MS = 20000
 const HEALTH_TTL_MS = 30000
 const TELEMETRY_KEY = "techpack.hybridAI.telemetry"
 const inflight = new Map()
@@ -89,8 +95,35 @@ function enqueueQwen(work) {
 function validateContent(validator, content) {
   if (!validator) return content
   const validated = validator(content)
-  if (validated === false || validated == null) throw new DeepSeekError("La respuesta no cumple el contrato de la tarea.")
+  if (validated === false || validated == null) {
+    // The provider DID answer - the content just didn't satisfy this task's
+    // contract. Tagged so recordProviderOutcome never counts it as an NVIDIA
+    // availability failure (a strict validator must not open the circuit).
+    const error = new DeepSeekError("La respuesta no cumple el contrato de la tarea.")
+    error.contractViolation = true
+    throw error
+  }
   return validated === true ? content : validated
+}
+
+// A failure that reflects NVIDIA being unavailable/unusable (worth counting
+// toward the circuit breaker) vs. one that merely means "this answer didn't
+// pass the contract" (must NOT count). Real availability failures are HTTP
+// 5xx / 429 rate-limit / capacity / network drops / our own fetch timeout
+// aborts. 429 was missing here (only >=500 counted): observed live, once
+// NVIDIA starts rate-limiting it returns 429 on every single call, but since
+// that never counted as a failure the circuit never opened - every task kept
+// re-trying a provider that was consistently refusing, burning ~12s each time
+// it could have skipped straight to Qwen/fallback instead.
+function isAvailabilityFailure(error) {
+  if (!error || error.contractViolation) return false
+  if (typeof error.status === "number" && (error.status >= 500 || error.status === 429)) return true
+  if (error.networkError || error.timedOut) return true
+  // fetchWithTimeout aborts via its OWN controller and surfaces an AbortError;
+  // that's a real "NVIDIA took too long" signal (distinct from the winner
+  // aborting the loser, which is caught earlier via controller.signal.aborted).
+  if (error.name === "AbortError") return true
+  return false
 }
 
 function logTelemetry(entry) {
@@ -121,7 +154,7 @@ async function providerAttempt(provider, options, controller, deadline) {
       return { content, provider, model: response.model || model, latencyMs: Date.now() - started, degraded: provider !== "nvidia", fallbackReason: provider === "local" ? "deepseek_slow_or_invalid" : null }
     } catch (error) {
       if (controller.signal.aborted) throw error
-      if (provider === "nvidia") recordNvidiaFailure()
+      if (provider === "nvidia" && isAvailabilityFailure(error)) recordNvidiaFailure()
       if (!retryableCapacityError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
       await delay(Math.min(500, remaining), controller.signal)
     }
@@ -154,7 +187,7 @@ async function streamProviderAttempt(provider, options, controller, deadline, on
       }
     } catch (error) {
       if (controller.signal.aborted) throw error
-      if (provider === "nvidia") recordNvidiaFailure()
+      if (provider === "nvidia" && isAvailabilityFailure(error)) recordNvidiaFailure()
       if (!retryableCapacityError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
       await delay(500, controller.signal)
     }
