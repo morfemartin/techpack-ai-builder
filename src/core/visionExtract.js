@@ -6,15 +6,51 @@
 // the proxy already forwards both verbatim - no architecture change needed.
 
 import { deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
+import {
+  buildFocusedVisionPrompt,
+  buildGarmentVisionPrompt,
+  mergeFocusedVisionAnswers,
+  mergeVisionAnalyses,
+  normalizeVisionAnalysis,
+  parseFocusedVisionAnswer,
+  parseVisionJSON,
+  visionAnalysisToSeed,
+} from "./visionContract.js"
 
 // Overridable via env for live A/B testing between vision model sizes
 // without a code change (same pattern as VITE_DEEPSEEK_PROXY_URL).
-const DEFAULT_VISION_MODEL = import.meta.env.VITE_NVIDIA_VISION_MODEL || "meta/llama-3.2-90b-vision-instruct"
+const DEFAULT_VISION_MODEL = import.meta.env.VITE_NVIDIA_VISION_MODEL || "meta/llama-3.2-11b-vision-instruct"
 
 // Keeps a multi-photo request well under Vercel's ~4.5MB body cap.
 const MAX_DOWNSCALE_DIM = 1024
 const MAX_VISION_CONCURRENCY = 3
 let currentVisionConcurrency = MAX_VISION_CONCURRENCY
+
+// Resilience/rate-limit tuning (the vision fan-out was a top contributor to
+// NVIDIA rate-limit exhaustion - see the hybrid budget/circuit-breaker fixes):
+//  · VISION_MAX_ATTEMPTS 2 = one capacity-only retry (503/504) with the
+//    client's built-in 1.5s backoff, instead of dropping a pass on the first
+//    transient rate-limit hit.
+//  · VISION_MAX_QUADRANTS 2 = process at most the first two detail crops per
+//    photo (quadrants only ADD low-rank detail the full passes couldn't
+//    resolve - mergeVisionAnalyses ranks them lowest - so halving them barely
+//    moves coverage while cutting calls). Tunable; validate with
+//    `npm run benchmark:vision` before trusting a lower value.
+// Rate is kept in check by the ≤3 concurrency cap (which self-drops to 1 on a
+// 503), the capacity-only retry with backoff, and the ~40% fewer calls per
+// photo - no global start-pacing (it would serialize the concurrency model).
+const VISION_MAX_ATTEMPTS = 2
+const VISION_MAX_QUADRANTS = 2
+
+// `currentVisionConcurrency` self-drops to 1 on a 503 and, by design, STAYS
+// there for the rest of the session - that is the point of the back-off. In a
+// test file that makes it leak across cases: one test simulating a 503 leaves
+// every later test running serialized, which silently changed both the call
+// count and which images got processed. Mirrors resetHybridAIForTests()
+// (hybridAI.js), which exists for exactly this reason.
+export function resetVisionConcurrencyForTests() {
+  currentVisionConcurrency = MAX_VISION_CONCURRENCY
+}
 
 // Pure: the largest {width, height} that fits within maxDim on its longest
 // side while keeping the original aspect ratio. Never upscales.
@@ -163,20 +199,8 @@ async function mapWithConcurrency(items, limit, worker) {
   return results
 }
 
-function buildVisionMessages(base64, { kind, quadrantLabel } = {}) {
-  const isQuadrant = kind === "quadrant"
-  const text = isQuadrant
-    ? "Sos un tecnico textil experto mirando UN RECORTE/ACERCAMIENTO (" + (quadrantLabel || "detalle") + ") de una foto MAS GRANDE de una prenda real - " +
-      "no estas viendo la prenda completa, solo esta porcion ampliada. Enfocate en el MAXIMO DETALLE visible en este recorte especifico: " +
-      "costuras, textura de tela, hardware, botones, cierres, texto/etiquetas, terminaciones. Extrae SOLO los atributos que se ven con certeza " +
-      "EN ESTE RECORTE - no inventes nada que no se vea con claridad, y no adivines el tipo de prenda completo desde un recorte parcial " +
-      "(dejá \"garmentType\" vacio). Devolve SOLO un objeto JSON con esta forma exacta, sin markdown: " +
-      '{"garmentType": "", "seed": {"Atributo": "valor visible en este recorte"}}'
-    : "Sos un tecnico textil experto mirando una foto de una prenda real. Identifica que tipo de prenda es " +
-      "y extrae SOLO los atributos que se ven con certeza en la foto: color, tela aparente, cuello, " +
-      "manga, cierre, bolsillos, costuras visibles, etc. No inventes nada que no se vea con claridad. " +
-      "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown: " +
-      '{"garmentType": "nombre de la prenda en espanol", "seed": {"Atributo": "valor visible"}}'
+export function buildVisionMessages(base64, { kind, quadrantLabel, pass, garmentType } = {}) {
+  const text = buildGarmentVisionPrompt({ kind, quadrantLabel, pass, garmentType })
   return [
     {
       role: "user",
@@ -204,26 +228,38 @@ function buildVisionMessages(base64, { kind, quadrantLabel } = {}) {
 // keeps the full+4 pass detailed without creating a synchronized retry
 // stampede against NVIDIA's fragile free-tier capacity, and still preserves
 // merge order: photo 1/full first, then its quadrants, then later photos.
-export async function extractGarmentFromImages(images, { lang = "ES", model, onProgress } = {}) {
+export async function extractDetailedGarmentFromImages(images, { lang = "ES", model, onProgress } = {}) {
   if (!Array.isArray(images) || images.length === 0) {
     throw new DeepSeekError("No hay imagenes para analizar.", { images })
   }
 
-  function callFor(img, i) {
+  function callFor(img, i, promptOptions = {}) {
     const photoIndex = img.photoIndex !== undefined ? img.photoIndex : i
     const photoTotal = img.photoTotal !== undefined ? img.photoTotal : images.length
     const kind = img.kind || "full"
-    const label = kind === "quadrant"
+    const label = promptOptions.pass === "artwork"
+      ? "Revisando disenos visibles de la foto " + (photoIndex + 1) + " de " + photoTotal + "..."
+      : promptOptions.pass === "surface"
+      ? "Revisando arte y acabados de la foto " + (photoIndex + 1) + " de " + photoTotal + "..."
+      : promptOptions.pass === "orientation"
+      ? "Confirmando orientacion de la foto " + (photoIndex + 1) + " de " + photoTotal + "..."
+      : promptOptions.pass === "classification"
+      ? "Confirmando tipo de prenda en la foto " + (photoIndex + 1) + " de " + photoTotal + "..."
+      : promptOptions.pass === "verification"
+      ? "Validando detalles criticos de la foto " + (photoIndex + 1) + " de " + photoTotal + "..."
+      : promptOptions.pass === "construction"
+      ? "Verificando construccion de la foto " + (photoIndex + 1) + " de " + photoTotal + "..."
+      : kind === "quadrant"
       ? "Analizando foto " + (photoIndex + 1) + " de " + photoTotal + " - detalle " + (img.quadrantLabel || "") + "..."
       : "Analizando foto " + (photoIndex + 1) + " de " + photoTotal + "..."
     return deepseekChatStream({
-      messages: buildVisionMessages(img.base64, { kind, quadrantLabel: img.quadrantLabel }),
+      messages: buildVisionMessages(img.base64, { kind, quadrantLabel: img.quadrantLabel, ...promptOptions }),
       model: model || DEFAULT_VISION_MODEL,
-      maxTokens: 1200,
-      temperature: 0.2,
+      maxTokens: promptOptions.pass === "construction" ? 600 : ["verification", "surface", "artwork"].includes(promptOptions.pass) ? 400 : ["classification", "orientation"].includes(promptOptions.pass) ? 220 : 900,
+      temperature: promptOptions.pass === "identity" ? 0.1 : 0,
       provider: "nvidia",
-      timeoutMs: 30000,
-      maxAttempts: 2,
+      timeoutMs: kind === "quadrant" ? 15000 : 30000,
+      maxAttempts: VISION_MAX_ATTEMPTS,
       retryCapacityOnly: true,
       onEvent: onProgress
         ? ({ contentSoFar, deltaText, tokensSoFar }) => {
@@ -234,6 +270,7 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
               photoIndex,
               photoTotal,
               kind,
+              pass: promptOptions.pass || (kind === "quadrant" ? "detail" : "identity"),
               label,
               partialText: summarizeVisionProgress(contentSoFar),
               contentSoFar,
@@ -242,7 +279,7 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
             })
           }
         : undefined,
-    }).then(parseVisionSeed).catch((error) => {
+    }).then((raw) => normalizeVisionAnalysis(parseVisionJSON(raw), { kind, quadrantLabel: img.quadrantLabel, pass: promptOptions.pass })).catch((error) => {
       if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
       throw error
     })
@@ -255,7 +292,9 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
     })
     const results = settled.filter((item) => item.ok).map((item) => item.value)
     if (results.length === 0) throw settled[0].error
-    return mergeVisionSeeds(results)
+    const analysis = mergeVisionAnalyses(results)
+    const seed = Object.keys(analysis.legacySeed || {}).length > 0 ? analysis.legacySeed : visionAnalysisToSeed(analysis)
+    return { garmentType: analysis.garmentType, seed, analysis }
   }
 
   const groups = new Map()
@@ -268,14 +307,54 @@ export async function extractGarmentFromImages(images, { lang = "ES", model, onP
   for (const key of [...groups.keys()].sort((a, b) => a - b)) {
     const entries = groups.get(key)
     const full = entries.find(([img]) => (img.kind || "full") === "full")
-    if (full) results.push(await callFor(full[0], full[1]))
-    const details = entries.filter((entry) => entry !== full)
+    if (full) {
+      const identity = await callFor(full[0], full[1], { pass: "identity" })
+      results.push(identity)
+      let family = identity.garmentType
+      if (!family) {
+        try {
+          const classification = await callFor(full[0], full[1], { pass: "classification" })
+          results.push(classification)
+          family = classification.garmentType
+        } catch {}
+      }
+      try {
+        results.push(await callFor(full[0], full[1], { pass: "orientation", garmentType: family }))
+      } catch {}
+      try {
+        results.push(await callFor(full[0], full[1], { pass: "construction", garmentType: family }))
+      } catch (error) {
+        if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
+      }
+      try {
+        results.push(await callFor(full[0], full[1], { pass: "verification", garmentType: family }))
+      } catch (error) {
+        if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
+      }
+      // `surface` dropped: its signal (fit/shoulder/cuffs/hem + artwork) is
+      // already covered by the construction pass + the artwork pass, so it was
+      // a near-duplicate call against the rate limit.
+      try {
+        results.push(await callFor(full[0], full[1], { pass: "artwork", garmentType: family }))
+      } catch {}
+    }
+    // Cap detail crops per photo - quadrants only add low-rank supplementary
+    // detail, so processing the first VISION_MAX_QUADRANTS keeps coverage while
+    // roughly halving the detail calls against NVIDIA's rate limit.
+    const details = entries.filter((entry) => entry !== full).slice(0, VISION_MAX_QUADRANTS)
     const settled = await mapWithConcurrency(details, currentVisionConcurrency, async ([img, i]) => {
       try { return await callFor(img, i) } catch { return null }
     })
     results.push(...settled.filter(Boolean))
   }
-  return mergeVisionSeeds(results)
+  const analysis = mergeVisionAnalyses(results)
+  const seed = Object.keys(analysis.legacySeed || {}).length > 0 ? analysis.legacySeed : visionAnalysisToSeed(analysis)
+  return { garmentType: analysis.garmentType, seed, analysis }
+}
+
+export async function extractGarmentFromImages(images, options = {}) {
+  const result = await extractDetailedGarmentFromImages(images, options)
+  return { garmentType: result.garmentType, seed: result.seed }
 }
 
 // Single targeted vision call (deliberately NOT quadrant-split - this answers
@@ -309,11 +388,68 @@ export async function answerFieldFromImage({ field, garmentType, imageBase64, la
     temperature: 0.2,
     provider: "nvidia",
     timeoutMs: 30000,
-    maxAttempts: 2,
+    maxAttempts: VISION_MAX_ATTEMPTS,
     retryCapacityOnly: true,
     onEvent: onProgress
       ? ({ contentSoFar, tokensSoFar }) => onProgress({ partialText: summarizeVisionProgress(contentSoFar), tokensSoFar })
       : undefined,
   })
   return raw.replace(/```/g, "").trim()
+}
+
+async function focusedSegmentCall({ field, garmentType, segment, index, total, onProgress }) {
+  const raw = await deepseekChatStream({
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: buildFocusedVisionPrompt(field, garmentType, segment) },
+        { type: "image_url", image_url: { url: "data:image/jpeg;base64," + segment.base64 } },
+      ],
+    }],
+    model: DEFAULT_VISION_MODEL,
+    maxTokens: 320,
+    temperature: 0.1,
+    provider: "nvidia",
+    timeoutMs: segment.kind === "quadrant" ? 15000 : 30000,
+    maxAttempts: VISION_MAX_ATTEMPTS,
+    retryCapacityOnly: true,
+    onEvent: onProgress
+      ? ({ contentSoFar, tokensSoFar }) => onProgress({
+          segmentIndex: index,
+          segmentNumber: index + 1,
+          totalSegments: total,
+          kind: segment.kind || "full",
+          quadrantLabel: segment.quadrantLabel || "",
+          label: segment.kind === "quadrant" ? "Detalle " + segment.quadrantLabel : "Vista completa",
+          partialText: summarizeVisionProgress(contentSoFar),
+          tokensSoFar,
+        })
+      : undefined,
+  })
+  return parseFocusedVisionAnswer(raw, segment)
+}
+
+// High-fidelity mid-chat analysis: the current field is evaluated against the
+// full photo first, then up to VISION_MAX_QUADRANTS independently cropped
+// quadrants. A deterministic reducer selects the strongest visible answer; it
+// never auto-submits it.
+export async function answerFieldFromImageSegments({ field, garmentType, segments, onProgress }) {
+  const safe = Array.isArray(segments) ? segments.filter((segment) => segment && segment.base64) : []
+  if (safe.length === 0) throw new DeepSeekError("No hay segmentos de imagen para analizar.")
+  const fullIndex = safe.findIndex((segment) => (segment.kind || "full") === "full")
+  const full = fullIndex >= 0 ? safe[fullIndex] : safe[0]
+  const details = safe.map((segment, index) => ({ segment, index })).filter(({ segment }) => segment !== full).slice(0, VISION_MAX_QUADRANTS)
+  // total reflects what will ACTUALLY be processed (full + capped details), so
+  // the progress read-out ("segmento X de N") matches reality.
+  const total = 1 + details.length
+  const fullResult = await focusedSegmentCall({ field, garmentType, segment: full, index: fullIndex >= 0 ? fullIndex : 0, total, onProgress })
+  const detailResults = await mapWithConcurrency(details, currentVisionConcurrency, async ({ segment, index }) => {
+    try {
+      return await focusedSegmentCall({ field, garmentType, segment, index, total, onProgress })
+    } catch (error) {
+      if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
+      return null
+    }
+  })
+  return mergeFocusedVisionAnswers([fullResult, ...detailResults.filter(Boolean)])
 }

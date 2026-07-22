@@ -6,7 +6,25 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChatStream } from "./deepseekClient.js"
-import { computeDownscaleDims, parseVisionSeed, mergeVisionSeeds, summarizeVisionProgress, extractGarmentFromImages, quadrantRects, answerFieldFromImage } from "./visionExtract.js"
+import { computeDownscaleDims, parseVisionSeed, mergeVisionSeeds, summarizeVisionProgress, extractGarmentFromImages, quadrantRects, answerFieldFromImage, answerFieldFromImageSegments, resetVisionConcurrencyForTests } from "./visionExtract.js"
+
+// Two pieces of state leak between cases in this file, and both changed
+// results silently rather than failing where the bug was:
+//
+//  1. vi.clearAllMocks() (used in the describe-level hooks) resets recorded
+//     CALLS but not queued one-shot implementations. A case that queues more
+//     mockImplementationOnce values than the run actually consumes leaves the
+//     surplus in the queue, and the NEXT case silently eats it as its first
+//     reply. That is what broke the two photo-grouped cases: one inherited a
+//     stray reply and lost its own last seed, the other inherited a truthy
+//     garmentType, which skips the classification pass and drops the call
+//     count from 8 to 7.
+//  2. currentVisionConcurrency self-drops to 1 on a 503 and stays there by
+//     design, so whichever case simulates a 503 serialized every case after it.
+beforeEach(() => {
+  deepseekChatStream.mockReset()
+  resetVisionConcurrencyForTests()
+})
 
 describe("computeDownscaleDims", () => {
   it("passes through an image already within the max dimension", () => {
@@ -162,8 +180,12 @@ describe("extractGarmentFromImages", () => {
     it("processes photo groups in order, full-before-quadrants within a photo, and merges everything", async () => {
       deepseekChatStream
         .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}') // photo 0 full
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 construction audit
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 verification
         .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble pespunte"}}') // photo 0 quadrant
         .mockResolvedValueOnce('{"garmentType":"","seed":{"Cierre":"Metal"}}') // photo 1 full (no type - shouldn't matter, photo 0 already won)
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 construction audit
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 verification
 
       const images = [
         { fileName: "a.jpg", base64: "AAA", photoIndex: 0, photoTotal: 2, kind: "full" },
@@ -173,7 +195,11 @@ describe("extractGarmentFromImages", () => {
       const result = await extractGarmentFromImages(images)
 
       expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble pespunte", Cierre: "Metal" } })
-      expect(deepseekChatStream).toHaveBeenCalledTimes(3)
+      // photo 0 (type from identity, 1 quadrant): identity+orientation+
+      // construction+verification+artwork + 1 quadrant = 6; photo 1 (no type,
+      // no quadrant): identity+classification+orientation+construction+
+      // verification+artwork = 6. Total 12 (was 14 before dropping `surface`).
+      expect(deepseekChatStream).toHaveBeenCalledTimes(12)
     })
 
     it("labels progress relative to the PHOTO, not the flat array index, and includes the quadrant name", async () => {
@@ -187,6 +213,26 @@ describe("extractGarmentFromImages", () => {
           onEvent({ contentSoFar: "", tokensSoFar: 1 })
           return '{"garmentType":"","seed":{}}'
         })
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"","seed":{}}'
+        })
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"","seed":{}}'
+        })
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"","seed":{}}'
+        })
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"","seed":{}}'
+        })
+        .mockImplementationOnce(async ({ onEvent }) => {
+          onEvent({ contentSoFar: "", tokensSoFar: 1 })
+          return '{"garmentType":"","seed":{}}'
+        })
 
       const images = [
         { fileName: "a.jpg", base64: "AAA", photoIndex: 0, photoTotal: 1, kind: "full" },
@@ -195,7 +241,11 @@ describe("extractGarmentFromImages", () => {
       await extractGarmentFromImages(images, { onProgress: (e) => events.push(e) })
 
       expect(events[0].label).toBe("Analizando foto 1 de 1...")
-      expect(events[1].label).toBe("Analizando foto 1 de 1 - detalle superior izquierdo...")
+      expect(events[1].label).toBe("Confirmando orientacion de la foto 1 de 1...")
+      expect(events[2].label).toBe("Verificando construccion de la foto 1 de 1...")
+      expect(events[3].label).toBe("Validando detalles criticos de la foto 1 de 1...")
+      expect(events[4].label).toBe("Revisando disenos visibles de la foto 1 de 1...")
+      expect(events[5].label).toBe("Analizando foto 1 de 1 - detalle superior izquierdo...")
     })
 
     it("still behaves exactly as the flat/legacy path when no image carries a photoIndex", async () => {
@@ -226,7 +276,11 @@ describe("extractGarmentFromImages", () => {
       ]
       await extractGarmentFromImages(images)
 
-      expect(deepseekChatStream).toHaveBeenCalledTimes(5)
+      // identity returns a type here (mock default has garmentType "") → so
+      // classification also runs: identity+classification+orientation+
+      // construction+verification+artwork = 6 full, + 2 quadrants (4 provided,
+      // capped to VISION_MAX_QUADRANTS) = 8 (was 11).
+      expect(deepseekChatStream).toHaveBeenCalledTimes(8)
       expect(maxActive).toBeLessThanOrEqual(3)
     })
 
@@ -252,14 +306,16 @@ describe("extractGarmentFromImages", () => {
       deepseekChatStream
         .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}')
         .mockRejectedValueOnce(Object.assign(new Error("capacity"), { status: 503 }))
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}')
         .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble"}}')
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}')
       const result = await extractGarmentFromImages([
         { fileName: "a.jpg", base64: "full", photoIndex: 0, photoTotal: 1, kind: "full" },
         { fileName: "a.jpg", base64: "q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
         { fileName: "a.jpg", base64: "q2", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior derecho" },
       ])
       expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble" } })
-      expect(deepseekChatStream.mock.calls.every(([options]) => options.provider === "nvidia" && options.timeoutMs === 30000)).toBe(true)
+      expect(deepseekChatStream.mock.calls.every(([options]) => options.provider === "nvidia" && [15000, 30000].includes(options.timeoutMs))).toBe(true)
     })
   })
 })
@@ -337,5 +393,68 @@ describe("answerFieldFromImage", () => {
     expect(prompt).toContain("Nunca inventes peso/GSM, costo")
     expect(prompt).toContain("No se puede determinar con certeza desde la foto.")
     expect(prompt).toContain("Algodon felpado, French terry")
+  })
+})
+
+describe("answerFieldFromImageSegments", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("runs a full pass plus two capped quadrant passes and returns the strongest answer", async () => {
+    let active = 0
+    let maxActive = 0
+    deepseekChatStream.mockImplementation(async ({ messages }) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 3))
+      active -= 1
+      const image = messages[0].content[1].image_url.url
+      if (image.includes("Q2")) return '{"answer":"Pana acanalada azul marino aparente","evidence":["canales verticales visibles"],"certainty":"high"}'
+      return '{"answer":"No se puede determinar con certeza desde la foto.","evidence":[],"certainty":"low"}'
+    })
+
+    const answer = await answerFieldFromImageSegments({
+      field: { label: "Tela principal", options: ["Pana", "Denim"] },
+      garmentType: "Pantalon",
+      segments: [
+        { kind: "full", base64: "FULL" },
+        { kind: "quadrant", quadrantLabel: "superior izquierdo", base64: "Q1" },
+        { kind: "quadrant", quadrantLabel: "superior derecho", base64: "Q2" },
+        { kind: "quadrant", quadrantLabel: "inferior izquierdo", base64: "Q3" },
+        { kind: "quadrant", quadrantLabel: "inferior derecho", base64: "Q4" },
+      ],
+    })
+
+    // full + first 2 quadrants (VISION_MAX_QUADRANTS) = 3 calls; the strong
+    // answer sits in Q2, within the cap.
+    expect(answer).toBe("Pana acanalada azul marino aparente")
+    expect(deepseekChatStream).toHaveBeenCalledTimes(3)
+    expect(maxActive).toBeLessThanOrEqual(3)
+    expect(deepseekChatStream.mock.calls.every(([options]) => options.provider === "nvidia")).toBe(true)
+  })
+
+  it("reports which segment is currently streaming", async () => {
+    const events = []
+    deepseekChatStream.mockImplementation(async ({ onEvent }) => {
+      onEvent({ contentSoFar: "{", tokensSoFar: 1 })
+      return '{"answer":"No se puede determinar con certeza desde la foto.","evidence":[],"certainty":"low"}'
+    })
+    await answerFieldFromImageSegments({
+      field: { label: "Cierre" },
+      garmentType: "Hoodie",
+      segments: [
+        { kind: "full", base64: "FULL" },
+        { kind: "quadrant", quadrantLabel: "superior izquierdo", base64: "Q1" },
+        { kind: "quadrant", quadrantLabel: "superior derecho", base64: "Q2" },
+        { kind: "quadrant", quadrantLabel: "inferior izquierdo", base64: "Q3" },
+        { kind: "quadrant", quadrantLabel: "inferior derecho", base64: "Q4" },
+      ],
+      onProgress: (event) => events.push(event),
+    })
+    // full + 2 capped quadrants = 3 processed segments
+    expect(events).toHaveLength(3)
+    expect(events[0]).toMatchObject({ label: "Vista completa", segmentNumber: 1, totalSegments: 3 })
+    expect(events.some((event) => event.label === "Detalle superior izquierdo")).toBe(true)
   })
 })

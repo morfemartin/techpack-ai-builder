@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "techpack-vision-ground-truth/v1",
+  "minimumAffinity": 0.8,
+  "datasetRootHint": "/Users/martinmorfe/Documents/Dataset-Imagenes para techack",
+  "items": [
+    {
+      "id": "speedo-boardshort-front",
+      "fileName": "2007 TROPIK MAILLOTS (84) speedo NATATION CANADA.jpeg",
+      "expertSummary": "Vista frontal parcial de un boardshort de natacion, largo cercano a rodilla, base blanca con grafica floral negra y azul claro de gran escala. Pretina plana con cierre frontal de cordon y ojales; no se puede confirmar composicion, GSM, bolsillos ni construccion trasera.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["boardshort", "short de bano", "banador", "short de natacion", "swim trunks"] },
+        { "id": "view", "weight": 1, "terms": ["vista frontal", "frente", "frontal", "front"] },
+        { "id": "color", "weight": 1, "terms": ["blanco", "base blanca", "white"] },
+        { "id": "print", "weight": 2, "terms": ["floral", "estampado", "grafica"] },
+        { "id": "print-colors", "weight": 1, "terms": ["negro", "azul claro", "celeste", "black", "light blue"] },
+        { "id": "waist", "weight": 2, "terms": ["cordon", "ajuste frontal", "pretina plana", "ojales", "drawstring", "eyelet"] },
+        { "id": "length", "weight": 1, "terms": ["rodilla", "largo", "knee", "long"] }
+      ],
+      "forbiddenClaims": ["100% poliester", "gsm", "gramos por metro", "bolsillo trasero", "logo speedo aplicado en la prenda"]
+    },
+    {
+      "id": "brown-plaid-slacker-shorts-back",
+      "fileName": "Slacker Check Shorts.jpeg",
+      "expertSummary": "Vista trasera de short largo y holgado en tejido a cuadros marron y beige. Tiene trabillas de cinturon, dos bolsillos traseros de parche con pespunte, posible bolsillo utilitario lateral y gran aplicacion de texto contorneado blanco en la parte superior trasera. Frente, cierre y fibra no son visibles.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["short", "bermuda"] },
+        { "id": "view", "weight": 1, "terms": ["vista trasera", "espalda", "posterior", "back"] },
+        { "id": "pattern", "weight": 2, "terms": ["cuadros", "plaid", "tartan", "checkered"] },
+        { "id": "color", "weight": 1, "terms": ["marron", "cafe", "beige", "brown", "tan"] },
+        { "id": "pockets", "weight": 2, "terms": ["dos bolsillos traseros", "bolsillos de parche", "bolsillo parche", "back patch pocket", "rear patch pocket", "back pocket", "rear pocket"] },
+        { "id": "loops", "weight": 1, "terms": ["trabillas", "pasadores", "belt loop"] },
+        { "id": "artwork", "weight": 2, "terms": ["texto", "bordado", "aplicacion", "contorno blanco", "lettering", "white outline", "artwork", "embroidered", "ambush"] }
+      ],
+      "forbiddenClaims": ["100% algodon", "gsm", "cierre frontal visible", "bragueta visible"]
+    },
+    {
+      "id": "brown-faux-fur-jacket-front",
+      "fileName": "Palace.jpeg",
+      "expertSummary": "Vista frontal de chaqueta corta y holgada de pelo sintetico marron, con cuello alto envolvente, manga larga, cierre central oculto o poco visible, bolsillos laterales para manos y bajo recto. No hay capucha visible ni datos suficientes para afirmar fibra, forro o tipo exacto de cierre.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["chaqueta", "jacket", "abrigo corto"] },
+        { "id": "view", "weight": 1, "terms": ["vista frontal", "frente", "frontal", "front"] },
+        { "id": "material", "weight": 3, "terms": ["pelo sintetico", "piel sintetica", "faux fur", "pelo largo", "shaggy", "fuzzy", "fur"] },
+        { "id": "color", "weight": 1, "terms": ["marron", "cafe", "brown"] },
+        { "id": "collar", "weight": 2, "terms": ["cuello alto", "cuello envolvente", "cuello levantado", "high collar", "stand collar", "turtleneck"] },
+        { "id": "pockets", "weight": 1, "terms": ["bolsillos laterales", "bolsillo lateral", "bolsillos para manos", "side pocket", "hand pocket", "slant"] },
+        { "id": "fit", "weight": 1, "terms": ["holgada", "relajada", "oversized", "boxy", "relaxed"] }
+      ],
+      "forbiddenClaims": ["capucha", "hood present", "100% poliester", "gsm", "cierre ykk", "forro de satin", "zipper"]
+    },
+    {
+      "id": "brown-faux-fur-hoodie-back",
+      "fileName": "@hellbentrecs.jpeg",
+      "expertSummary": "Vista trasera de hoodie o chaqueta con capucha en pelo sintetico marron. Silueta oversized con hombro caido, manga larga y bajo recogido. Lleva una gran aplicacion de lettering negro tono oscuro en espalda. Frente, bolsillo y sistema de apertura no se pueden confirmar.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["hoodie", "sudadera con capucha", "chaqueta con capucha"] },
+        { "id": "view", "weight": 1, "terms": ["vista trasera", "espalda", "posterior", "back"] },
+        { "id": "material", "weight": 3, "terms": ["pelo sintetico", "piel sintetica", "faux fur", "pelo largo", "shaggy", "fuzzy"] },
+        { "id": "hood", "weight": 2, "terms": ["capucha", "hood", "present"] },
+        { "id": "fit", "weight": 1, "terms": ["oversized", "holgada", "hombro caido", "relaxed", "drop shoulder"] },
+        { "id": "artwork", "weight": 2, "terms": ["lettering", "texto", "aplicacion", "bordado", "graphic", "text", "hellbent"] },
+        { "id": "hem", "weight": 1, "terms": ["bajo recogido", "bajo elastico", "bajo ajustado", "elastic hem", "gathered hem", "cuffed", "ribbed hem"] }
+      ],
+      "forbiddenClaims": ["bolsillo canguro visible", "cierre frontal visible", "100% poliester", "gsm", "forro de satin"]
+    },
+    {
+      "id": "navy-corduroy-barrel-trouser-front",
+      "fileName": "Pantalon long casual ample en velours côtelé à plis et poches, couleur unie, pour l'automne et l'hiver.jpeg",
+      "expertSummary": "Vista frontal de pantalon largo azul marino de pana acanalada, talle alto, pretina fija con boton y bragueta, dos pliegues profundos por lado, bolsillos laterales inclinados y pierna muy amplia tipo barrel. No se debe afirmar composicion, peso ni construccion trasera.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["pantalon", "trouser", "pants"] },
+        { "id": "view", "weight": 1, "terms": ["vista frontal", "frente", "frontal", "front"] },
+        { "id": "material", "weight": 3, "terms": ["pana", "corduroy", "acanalado", "ribbed texture", "ribbed"] },
+        { "id": "color", "weight": 1, "terms": ["azul marino", "navy", "azul oscuro", "dark blue", "blue"] },
+        { "id": "pleats", "weight": 2, "terms": ["pliegues", "pinzas profundas", "doble pinza", "pleat"] },
+        { "id": "pockets", "weight": 1, "terms": ["bolsillos inclinados", "bolsillos laterales", "slant pocket", "side pocket"] },
+        { "id": "silhouette", "weight": 2, "terms": ["pierna amplia", "barrel", "globo", "wide leg", "voluminous"] },
+        { "id": "closure", "weight": 1, "terms": ["boton", "bragueta", "button", "fly"] }
+      ],
+      "forbiddenClaims": ["100% algodon", "gsm", "bolsillos traseros", "elastico en cintura"]
+    },
+    {
+      "id": "washed-black-pullover-hoodie-front",
+      "fileName": "_.jpeg",
+      "expertSummary": "Flat lay frontal de hoodie pullover negro lavado, silueta oversized con hombro caido. Capucha de apariencia doble o forrada, bolsillo canguro, puno y bajo de rib, manga larga y ausencia de zipper frontal. La imagen no demuestra composicion ni GSM.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["hoodie", "sudadera con capucha"] },
+        { "id": "view", "weight": 1, "terms": ["vista frontal", "frente", "flat lay", "front"] },
+        { "id": "color", "weight": 2, "terms": ["negro lavado", "negro desgastado", "gris antracita", "black", "washed black", "charcoal", "dark gray"] },
+        { "id": "hood", "weight": 2, "terms": ["capucha doble", "capucha forrada", "capucha", "hood", "single apparent", "double lined apparent"] },
+        { "id": "pocket", "weight": 2, "terms": ["bolsillo canguro", "canguro", "kangaroo"] },
+        { "id": "finish", "weight": 2, "terms": ["rib", "canale", "puno", "bajo acanalado", "ribbed cuff", "ribbed hem"] },
+        { "id": "fit", "weight": 1, "terms": ["oversized", "hombro caido", "holgada", "relaxed", "drop shoulder"] },
+        { "id": "closure", "weight": 1, "terms": ["pullover", "sin zipper", "sin cierre", "no front opening"] }
+      ],
+      "forbiddenClaims": ["300 gsm", "350 gsm", "100% algodon", "cierre frontal", "zipper frontal"]
+    },
+    {
+      "id": "blue-plaid-elastic-shorts-back",
+      "fileName": "Gramicci Men's Lagoon Shorts Denim Plaid - Indigo Checkered Plaid - S.jpeg",
+      "expertSummary": "Vista trasera parcial de short holgado azul con patron de cuadros. Pretina completamente elastizada, etiqueta tejida centrada en cintura y bolsillos traseros de vivo; el derecho incorpora etiqueta rectangular de marca. No son visibles el frente, el cierre ni la composicion exacta del tejido.",
+      "expectedClaims": [
+        { "id": "type", "weight": 3, "terms": ["short", "bermuda"] },
+        { "id": "view", "weight": 1, "terms": ["vista trasera", "espalda", "posterior", "back"] },
+        { "id": "pattern", "weight": 2, "terms": ["cuadros", "plaid", "tartan", "checkered"] },
+        { "id": "color", "weight": 1, "terms": ["azul", "indigo", "blue"] },
+        { "id": "waist", "weight": 3, "terms": ["pretina elastica", "cintura elastizada", "elastico", "elastic waistband", "elastic"] },
+        { "id": "pockets", "weight": 2, "terms": ["bolsillos traseros de vivo", "bolsillo de vivo", "bolsillo trasero", "back welt pocket", "rear welt pocket", "back pocket", "rear pocket"] },
+        { "id": "labels", "weight": 1, "terms": ["etiqueta tejida", "etiqueta de marca", "label", "woven label", "brand patch"] }
+      ],
+      "forbiddenClaims": ["100% denim", "100% algodon", "gsm", "boton frontal", "bragueta visible"]
+    }
+  ]
+}

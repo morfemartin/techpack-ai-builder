@@ -5,7 +5,7 @@ import {
   looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
   attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements,
 } from "../core/techpackRequirements.js"
-import { downscaleImage, answerFieldFromImage } from "../core/visionExtract.js"
+import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
 import { authorProductionQuestions } from "../core/productionReview.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
@@ -458,9 +458,11 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     post("assistant", "Listo, ya tengo todo. Podés continuar.")
   }
 
-  // Mid-chat photo upload: answers the current field from one downscaled pass.
-  // The suggestion still only PRE-FILLS the input, so visual evidence can
-  // never lock itself in silently.
+  // Mid-chat photo upload: answers the current field from one full-image pass
+  // plus native-resolution quadrant close-ups (each cropped BEFORE downscaling,
+  // so a quadrant keeps ~2x the effective detail of the same crop taken from
+  // the already-shrunk photo). The merged answer still only PRE-FILLS the
+  // input, so visual evidence can never lock itself in silently.
   //
   // Posts TWO things to history so the photo actually reads as part of the
   // conversation instead of a silent background action: the photo itself (a
@@ -480,12 +482,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setImageProgress(null)
     setError(null)
     try {
-      const downscaled = await downscaleImage(file)
-      post("user", <img src={"data:image/jpeg;base64," + downscaled.base64} alt="Foto adjunta" style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
-      const suggestion = await answerFieldFromImage({
+      const segmented = await splitImageIntoQuadrants(file)
+      const segments = [segmented.full, ...segmented.quadrants]
+      post("user", <img src={"data:image/jpeg;base64," + segmented.full.base64} alt="Foto adjunta" style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
+      const suggestion = await answerFieldFromImageSegments({
         field: fieldAsked,
         garmentType: garmentLabel || (reqs && reqs.garmentType),
-        imageBase64: downscaled.base64,
+        segments,
         onProgress: (p) => setImageProgress(p),
       })
       post("assistant", "Según la foto: " + suggestion)
@@ -611,7 +614,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           {sending && (
             <Bubble role="assistant">
               {imageAnalyzing
-                ? (imageProgress && imageProgress.partialText ? "Analizando la foto: " + imageProgress.partialText + "…" : "Analizando la foto…")
+                ? (imageProgress
+                    ? `${imageProgress.label || "Analizando foto"} · ${imageProgress.segmentNumber || 1}/${imageProgress.totalSegments || 3}${imageProgress.partialText ? "\n" + imageProgress.partialText : ""}`
+                    : "Preparando vista completa y detalles…")
                 : (liveReply || aiStatus || "Estoy procesando la información…")}
               <span aria-hidden="true"> ▍</span>
             </Bubble>
