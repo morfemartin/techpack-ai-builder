@@ -1203,9 +1203,18 @@ export default function App() {
             <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.white.hex }}>TechPack AI Builder</h1>
             <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.white.hex, opacity: 0.55 }}>por Morfe · Generador Open Source de Fichas Técnicas · v0.2</p>
           </div>
-          <span style={{ marginLeft: "auto", padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${localAIStatus === "ready" ? role.highlight.fill : C.white.hex}`, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase" }}>
+          {/* The badge already says WHICH build you are in, so it doubles as
+              the way to reach the other one - studio.html was deployed but
+              unreachable, with no link to it anywhere. BASE_URL keeps this
+              correct under the repo-name base path on Pages and at '/' in dev. */}
+          <a
+            href={import.meta.env.BASE_URL + (textAIProvider === "local" ? "index.html" : "studio.html")}
+            title={textAIProvider === "local" ? "Ir a la version publica (NVIDIA)" : "Ir a la version estudio (Qwen local, privado)"}
+            style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${localAIStatus === "ready" ? role.highlight.fill : C.white.hex}`, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", textDecoration: "none" }}
+          >
             {textAIProvider === "local" ? `Studio AI · ${localAIStatus === "ready" ? "Qwen listo" : localAIStatus === "offline" ? "servicio apagado" : "cargando"}` : "AI · NVIDIA"}
-          </span>
+            <span style={{ opacity: 0.55 }}>{textAIProvider === "local" ? "→ publica" : "→ studio"}</span>
+          </a>
         </div>
         {/* Stepper — red index numbers (enumeration seen first), blue underline = active */}
         <div style={{ display: "flex", border: hair, background: C.white.hex }}>
