@@ -167,15 +167,20 @@ export async function authorProductionQuestions({ hdr, parts, designs } = {}) {
 
   const prompt =
     "Sos un disenador tecnico senior haciendo la ULTIMA revision de produccion antes de mandar esta ficha a fabrica. " +
-    "Ya se decidio todo lo general (tela, calce, construccion) y el detalle de cada diseno (tecnica, posicion, colores). " +
-    "Tu trabajo es pensar, SOLO a partir de estos datos ya conocidos, que detalles de PRODUCCION todavia faltan para que la fabrica " +
-    "no tenga que inventar nada y el resultado sea fiel a la intencion del cliente. Pensa en terminos de: cantidad exacta de elementos " +
-    "repetidos (botones, ojales, remaches), distancias/espaciados entre ellos, si algo cambia entre version femenina y masculina o entre " +
-    "talles, colores exactos de hilos/herrajes, y tolerancias de fabricacion. NO repreguntes nada que ya este en los datos - solo lo que falta.\n\n" +
+    "Ya se decidio todo lo general (tela, calce, construccion) y el detalle de cada diseno (tecnica, posicion, colores).\n\n" +
     "Header: " + JSON.stringify(hdr || {}) + "\n" +
     "Piezas activas: " + JSON.stringify(activeParts) + "\n" +
     "Disenos: " + JSON.stringify(activeDesigns) + "\n\n" +
-    "Devolve SOLO JSON valido, sin markdown, con esta forma exacta (maximo 8 preguntas, las MAS criticas primero):\n" +
+    "REGLA 1 - solo sobre lo que EXISTE. Cada pregunta tiene que referirse a un elemento que aparece EN LOS DATOS de arriba. " +
+    "Si la ficha dice 'Sin cierre', la prenda no tiene botones ni remaches y preguntar por ellos es un error grave. " +
+    "Antes de escribir una pregunta, verifica en que linea de los datos aparece ese elemento. Si no aparece, no lo preguntes.\n" +
+    "REGLA 2 - solo lo que FALTA. Si el dato ya esta resuelto arriba, no lo repreguntes ni pidas confirmarlo.\n" +
+    "REGLA 3 - si no falta nada critico, devolve \"questions\": []. Una lista vacia es una respuesta correcta y esperada; " +
+    "es MUCHO mejor que inventar preguntas de relleno. No completes hasta un numero.\n\n" +
+    "Que cuenta como pregunta valida: un detalle de fabricacion que la fabrica tendria que ADIVINAR para producir esta prenda " +
+    "concreta, y que no se puede deducir de los datos - cantidades y espaciados de elementos que la ficha ya dice que existen, " +
+    "colores exactos de hilos o herrajes que ya estan nombrados, tolerancias, o variaciones entre talles.\n\n" +
+    "Devolve SOLO JSON valido, sin markdown, con esta forma exacta (maximo 8 preguntas, las MAS criticas primero, o [] si no falta nada):\n" +
     '{"questions":[{"key":"identificador_corto","label":"Pregunta en espanol","options":["Opcion A","Opcion B"],"why":"por que importa (breve)"}]}'
 
   const raw = await deepseekChat({
@@ -183,10 +188,15 @@ export async function authorProductionQuestions({ hdr, parts, designs } = {}) {
     maxTokens: 1800,
     temperature: 0.2,
     task: HYBRID_TASKS.REVIEW,
+    // An EMPTY list is a valid answer - "nothing critical is missing" is the
+    // right call on a simple garment, and rejecting it (as this used to) left
+    // the model structurally unable to say so: the empty answer was thrown
+    // away and the deterministic checklist ran instead, which is exactly the
+    // filler this round is supposed to avoid.
     validator: (content) => {
       try {
         const value = JSON.parse(content.replace(/```json|```/g, "").trim())
-        return Array.isArray(value.questions) && value.questions.length > 0 && value.questions.every((q) => q && typeof q.key === "string" && typeof q.label === "string" && Array.isArray(q.options) && q.options.length >= 2)
+        return Array.isArray(value.questions) && value.questions.every((q) => q && typeof q.key === "string" && typeof q.label === "string" && Array.isArray(q.options) && q.options.length >= 2)
       } catch {
         return false
       }
@@ -201,7 +211,10 @@ export async function authorProductionQuestions({ hdr, parts, designs } = {}) {
     return fallback
   }
   const questions = Array.isArray(parsed.questions) ? parsed.questions : []
-  if (questions.length === 0) return fallback
+  // A deliberate empty list is respected, not overridden. Falling back here
+  // would mean the reviewer can never conclude "nothing is missing" - the
+  // only way to get no questions would be for the whole call to fail.
+  if (questions.length === 0) return []
   return questions
     .filter((q) => q && typeof q.key === "string" && typeof q.label === "string" && Array.isArray(q.options) && q.options.length >= 2)
     .slice(0, 8)

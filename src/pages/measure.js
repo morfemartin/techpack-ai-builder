@@ -25,10 +25,19 @@ import { hasEmbSpecs } from "../core/helpers.js"
 import { effectiveParts, partsTableMetrics } from "./tableMetrics.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
-// wins, then the page's first `covers` entry, then the first design. Moved
-// here from interpretPlan.js (which now imports it) so measure and render
-// select THE SAME design - a mismatch would make the measure pass size a
-// block for one design's data while the renderer draws another's.
+// wins, then the page's first `covers` entry. Moved here from
+// interpretPlan.js (which now imports it) so measure and render select THE
+// SAME design - a mismatch would make the measure pass size a block for one
+// design's data while the renderer draws another's.
+//
+// A page with NEITHER is about no design at all, and returns null. It used to
+// fall back to designs[0], which meant every construction page silently
+// "had" a design: whenever the AI planner put a design-ish block on a BOM or
+// structure page, that page cheerfully rendered the first design's artwork
+// and specs. Forbidding those blocks per purpose (pageContracts) fixed the
+// deterministic path, but the planner can still propose an illustration
+// carrying design briefs - so the ownership question has to be answered
+// here, at the source, not block by block downstream.
 export function selectedDesign(page, ctx) {
   const designs = ctx && Array.isArray(ctx.designs) ? ctx.designs : []
   if (designs.length === 0) return null
@@ -36,7 +45,7 @@ export function selectedDesign(page, ctx) {
   const token = purpose.startsWith("design:") ? purpose.slice("design:".length).trim() : ""
   const cover = page && Array.isArray(page.covers) && page.covers.length > 0 ? String(page.covers[0]).trim() : ""
   const key = token || cover
-  if (!key) return designs[0]
+  if (!key) return null
 
   const numeric = Number(key)
   if (Number.isInteger(numeric)) {
@@ -45,6 +54,9 @@ export function selectedDesign(page, ctx) {
   }
 
   const needle = key.toLowerCase()
+  // Named but unmatched still falls back to the first design: the page IS
+  // about a design, we just could not resolve which - better to draw one
+  // than to blank a page that exists to show it.
   return designs.find((d) => d && typeof d.name === "string" && d.name.toLowerCase() === needle) || designs[0]
 }
 

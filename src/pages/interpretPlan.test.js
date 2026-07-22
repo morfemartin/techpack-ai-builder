@@ -280,8 +280,12 @@ describe("split composition (2D layout)", () => {
   })
 
   it("places one short color band below when that preserves more illustration area", () => {
+    // Deliberately a design page: colour specs belong to the design they
+    // describe, and selectedDesign() now returns null for a page that claims
+    // no design - so an "overview" page carrying colorSpecs (the old fixture
+    // here) has no colours to size a band from, by design.
     const root = interpretPagePlan(
-      { id: "p", title: "P", purpose: "overview", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
+      { id: "p", title: "P", purpose: "design:Chest Logo", regions: [{ type: "header", weight: 10 }, { type: "split", weight: 80, regions: [{ type: "colorSpecs", weight: 30 }, { type: "illustration", weight: 70, slots: 1 }] }, { type: "disclaimer", weight: 10 }] },
       ctx
     )
     expect(root.children).toHaveLength(3)

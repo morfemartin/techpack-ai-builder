@@ -16,6 +16,7 @@
 // contract; reviewed and integrated.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { formatDimensions } from '../core/units.js';
 
 /**
  * Normalize briefs for all slots in a region.
@@ -57,16 +58,16 @@ export function normalizeSlotBriefs(region, page, ctx) {
   const defaultPlacementLandmark = design && typeof design.posDetail === 'string' ? design.posDetail.trim() : '';
   // Just the technique name - the template already prefixes "Fábrica: ".
   const defaultFactoryNote = design && typeof design.tec === 'string' && design.tec.trim() ? design.tec.trim() : '';
+  // Dimensions print in the unit this tech pack is set to, converted from the
+  // unit they were typed in - the factory reads one unit, whoever fills the
+  // form uses whatever they measured with. formatDimensions returns '' when
+  // either side is missing, so a half-filled design prints no dimension line
+  // rather than "Ancho 80mm x Alto ".
   const defaultMeasurements = [];
-  if (design && typeof design.w !== 'undefined' && typeof design.h !== 'undefined') {
-    const w = String(design.w).trim();
-    const h = String(design.h).trim();
-    if (w && h) {
-      defaultMeasurements.push({
-        label: 'Ancho ' + w + 'mm x Alto ' + h + 'mm',
-        perSize: false
-      });
-    }
+  if (design) {
+    const outputUnit = (ctx && ctx.dimensionUnit) || design.unit;
+    const label = formatDimensions(design.w, design.h, design.unit, outputUnit);
+    if (label) defaultMeasurements.push({ label, perSize: false });
   }
 
   // Ensure briefs array exists

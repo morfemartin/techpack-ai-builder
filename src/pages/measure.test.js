@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { measureRegion } from "./measure.js"
+import { measureRegion, selectedDesign } from "./measure.js"
 import { ROW } from "../design/metrics.js"
 
 // Contract for the measure registry used by Layout Engine v3:
@@ -93,5 +93,41 @@ describe("measureRegion", () => {
     const m = measureRegion({ type: "bogus" }, page, ctx, 400)
     expect(m.natural).toBe(0)
     expect(m.canAbsorb).toBe(false)
+  })
+})
+
+// Design ownership. This used to fall back to designs[0] for ANY page without
+// its own design token, so every construction page silently "had" a design -
+// and whenever the planner put a design-ish block on one, that page rendered
+// the first design's artwork and specs as if it belonged there.
+describe("selectedDesign", () => {
+  const ctx = {
+    designs: [
+      { name: "Chest Logo", colors: [{ name: "Blue", hex: "#003DA5" }] },
+      { name: "Back Print", colors: [] },
+    ],
+  }
+
+  it("resolves the design named by the page purpose", () => {
+    expect(selectedDesign({ purpose: "design:Back Print" }, ctx).name).toBe("Back Print")
+  })
+
+  it("resolves it from `covers` when the purpose carries no token", () => {
+    expect(selectedDesign({ purpose: "label", covers: ["Chest Logo"] }, ctx).name).toBe("Chest Logo")
+  })
+
+  it.each(["overview", "structure:shell-body", "lining", "cover", "index"])(
+    "claims no design at all on a %s page", (purpose) => {
+      expect(selectedDesign({ purpose }, ctx)).toBe(null)
+    })
+
+  it("still draws something on a design page whose name cannot be matched", () => {
+    // The page exists to show A design - better to render the first one than
+    // to blank a page whose whole purpose is the artwork.
+    expect(selectedDesign({ purpose: "design:Typo Here" }, ctx).name).toBe("Chest Logo")
+  })
+
+  it("returns null when the project has no designs", () => {
+    expect(selectedDesign({ purpose: "design:Chest Logo" }, { designs: [] })).toBe(null)
   })
 })

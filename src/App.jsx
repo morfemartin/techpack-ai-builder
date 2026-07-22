@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { uid } from "./core/idGen.js"
 import { T } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
+import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
@@ -121,7 +122,9 @@ function iconBtn(color) {
 
 function newDesign() {
   return {
-    id: uid(), name: "Nuevo Diseno", pos: "", posDetail: "", w: "", h: "", tec: "Bordado 3D",
+    // `unit` is the unit w/h were TYPED in - not what the sheet prints (that
+    // is the document-level dimensionUnit, converted at print time).
+    id: uid(), name: "Nuevo Diseno", pos: "", posDetail: "", w: "", h: "", unit: DEFAULT_UNIT, tec: "Bordado 3D",
     colors: [], fileName: "", driveLink: "", imageData: null, imageType: null, imgNatW: null, imgNatH: null,
     illustrationBrief: "",
     emb: Object.assign({}, EMPTY_EMB, { stopSeq: [] }),
@@ -166,6 +169,9 @@ export default function App() {
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
   const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
+  // The unit the printed tech pack uses. Per-design `unit` records what was
+  // TYPED; this is what the factory reads. Conversion happens at print time.
+  const [dimensionUnit, setDimensionUnit] = useState(DEFAULT_UNIT)
   const [documentPlanning, setDocumentPlanning] = useState(false)
   const [documentPlanStatus, setDocumentPlanStatus] = useState("")
   // Positive "it is actually finished" signal. Without it the only cue was the
@@ -468,7 +474,7 @@ export default function App() {
       var baseContext = { garmentType, parts, designs, lang }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
-      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment }
+      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment, dimensionUnit }
       // Deliberately NOT publishing the rendered provisional plan here. It
       // looks exactly like a finished document, so the preview showed a
       // complete-looking tech pack while the AI had not started - the user
@@ -645,6 +651,7 @@ export default function App() {
         logo,
         txData: pending.tx,
         garment,
+        dimensionUnit,
       }
       const rendered = buildPlannedPages(revisedPlan, renderCtx, { documentMode: "illustration-handoff", includeIndex: true })
 
@@ -1017,14 +1024,33 @@ export default function App() {
                       <div />
                     )}
                     {!isWhole && (
-                      <Fld lbl="Ancho (mm)">
+                      <Fld lbl={"Ancho (" + normalizeUnit(d.unit) + ")"}>
                         <Inp v={d.w || ""} ch={(v) => updDesign(d.id, "w", v)} ph="Ej: 111.6" mono={true} />
                       </Fld>
                     )}
                     {!isWhole && (
-                      <Fld lbl="Alto (mm)">
+                      <Fld lbl={"Alto (" + normalizeUnit(d.unit) + ")"}>
                         <Inp v={d.h || ""} ch={(v) => updDesign(d.id, "h", v)} ph="Ej: 59.1" mono={true} />
                       </Fld>
+                    )}
+                    {/* The unit the numbers were TYPED in. Switching it never
+                        rewrites what was entered - retyping a converted value
+                        back into the field is how rounding error accumulates.
+                        Conversion happens once, at print time. */}
+                    {!isWhole && (
+                      <Fld lbl="Unidad medida">
+                        <Sel v={normalizeUnit(d.unit)} ch={(v) => updDesign(d.id, "unit", v)} opts={UNITS} />
+                      </Fld>
+                    )}
+                    {!isWhole && (
+                      <Fld lbl="Imprimir en">
+                        <Sel v={normalizeUnit(dimensionUnit)} ch={setDimensionUnit} opts={UNITS} />
+                      </Fld>
+                    )}
+                    {!isWhole && normalizeUnit(d.unit) !== normalizeUnit(dimensionUnit) && formatDimensions(d.w, d.h, d.unit, dimensionUnit) && (
+                      <div style={{ gridColumn: "span 2", padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: `1px solid ${role.highlight.keyline}`, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex }}>
+                        En la ficha saldrá: {formatDimensions(d.w, d.h, d.unit, dimensionUnit)}
+                      </div>
                     )}
                     {isWhole && (
                       <div style={{ gridColumn: "span 2", display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(3)}px`, background: C.white.hex, border: `1px solid ${role.highlight.keyline}`, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, fontSize: type.size.sm, color: C.ink.hex }}>

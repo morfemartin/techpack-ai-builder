@@ -161,3 +161,52 @@ describe("authorProductionQuestions (AI half, hybrid + deterministic fallback)",
     expect(result.every((f) => f.options.length >= 2)).toBe(true)
   })
 })
+
+// "Que no ponga por poner": the reviewer must be able to conclude that
+// nothing is missing. It previously could not - the validator rejected an
+// empty list and the caller replaced it with the deterministic checklist, so
+// a simple garment always got filler questions. Live symptom: a t-shirt whose
+// data said "Sin cierre" was asked how many rivet buttons it needed.
+describe("authorProductionQuestions - empty is a valid verdict", () => {
+  beforeEach(() => { deepseekChat.mockReset() })
+
+  it("accepts an empty question list as a valid answer", async () => {
+    let seen
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      seen = validator('{"questions":[]}')
+      return '{"questions":[]}'
+    })
+    const result = await authorProductionQuestions({
+      hdr: {},
+      parts: [{ id: "cierre", label: "Tipo de cierre", val: "Sin cierre", on: true }],
+      designs: [],
+    })
+    expect(seen).toBe(true)
+    expect(result).toEqual([])
+  })
+
+  it("does not substitute the checklist when the model says nothing is missing", async () => {
+    // A garment that WOULD trigger the deterministic buttons rule: proving the
+    // model's "nothing missing" wins over the keyword checklist.
+    deepseekChat.mockResolvedValue('{"questions":[]}')
+    const result = await authorProductionQuestions({
+      hdr: {},
+      parts: [{ id: "cierre", label: "Cierre", val: "Botones", on: true }],
+      designs: [],
+    })
+    expect(result).toEqual([])
+  })
+
+  it("still falls back to the checklist when the call itself fails", async () => {
+    // Distinct from an empty answer: unparseable means we learned nothing, so
+    // the deterministic floor is the right thing to ship.
+    deepseekChat.mockResolvedValue("not json at all")
+    const result = await authorProductionQuestions({
+      hdr: {},
+      parts: [{ id: "cierre", label: "Cierre", val: "Botones", on: true }],
+      designs: [],
+    })
+    expect(result.length).toBeGreaterThan(0)
+    expect(result.every((f) => f.category === "production")).toBe(true)
+  })
+})
