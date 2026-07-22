@@ -49,6 +49,23 @@ function composeAbort(parent) {
   return { controller, dispose: () => parent && parent.removeEventListener("abort", abort) }
 }
 
+// The local model gets its own window, measured from the moment it actually
+// STARTS - not whatever is left of the shared budget.
+//
+// It joins late on purpose (qwenDelayMs, so the stronger hosted model gets
+// first shot), and it inherited the global deadline. With intake's 30s delay
+// against a 45s budget that left it 15s to answer a call that measurably
+// takes 30-80s: it could never finish, so when the hosted model was also
+// down BOTH failed and the user got an error instead of a slower answer.
+//
+// It is local: no cost, no rate limit, and by the time it runs it is the last
+// thing standing between the user and a failure - so it is worth the wait.
+const LOCAL_MIN_WINDOW_MS = 90000
+
+function localDeadline(sharedDeadline) {
+  return Math.max(sharedDeadline, Date.now() + LOCAL_MIN_WINDOW_MS)
+}
+
 function retryableCapacityError(error) {
   return error && (error.status === 503 || error.status === 504)
 }
@@ -257,7 +274,7 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
       await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
       if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
       onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando Qwen local…" : "Consultando Qwen local…")
-      return enqueueQwen(() => providerAttempt("local", options, qwen.controller, deadline)).then(accept)
+      return enqueueQwen(() => providerAttempt("local", options, qwen.controller, localDeadline(deadline))).then(accept)
     })().catch((error) => { failures.push(error); throw error }) : null
     if (localCandidate) candidates.push(localCandidate)
 
@@ -332,7 +349,7 @@ export async function runHybridAIStream({ task, messages, validator, fallback, o
         await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
         if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
         onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando Qwen local…" : "Consultando Qwen local…")
-        return enqueueQwen(() => streamProviderAttempt("local", options, qwen.controller, deadline, onEvent)).then(accept)
+        return enqueueQwen(() => streamProviderAttempt("local", options, qwen.controller, localDeadline(deadline), onEvent)).then(accept)
       })().catch((error) => { failures.push(error); throw error }))
     }
     try {

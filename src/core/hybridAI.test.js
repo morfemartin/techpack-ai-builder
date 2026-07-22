@@ -160,3 +160,51 @@ describe("runHybridAI", () => {
     expect(events[1]).toMatchObject({ provider: "nvidia", tokensSoFar: 2 })
   })
 })
+
+// Regression: the local model joins late on purpose, but it used to inherit
+// the SHARED deadline. For intake (qwenDelayMs 30s, budgetMs 45s) that left it
+// 15s to answer a call that measurably takes 30-80s, so it could never finish
+// - and when the hosted model was also down, BOTH failed and the user saw an
+// error instead of a slower answer. Observed live as "El asistente de IA local
+// tardo demasiado en responder".
+describe("local model timeout window", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+    resetHybridAIForTests()
+    getLocalAIHealth.mockResolvedValue({ status: "ok", model: "qwen" })
+  })
+
+  it("gives the local model a full window measured from when it starts", async () => {
+    let localTimeout = null
+    requestAIOnce.mockImplementation(({ provider, signal, timeoutMs }) => {
+      if (provider === "nvidia") return waitForAbort(signal)
+      localTimeout = timeoutMs
+      return Promise.resolve({ content: '{"ok":true}', provider, model: "qwen" })
+    })
+
+    // intake: local joins at 30s against a 45s shared budget
+    const promise = runHybridAI({ task: "intake", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback" })
+    await vi.advanceTimersByTimeAsync(30000)
+    await promise
+
+    // The remaining shared budget at that point is only ~15s - far too short.
+    expect(localTimeout).toBeGreaterThan(15000)
+    expect(localTimeout).toBeGreaterThanOrEqual(89000)
+  })
+
+  it("never shortens a shared budget that is already generous", async () => {
+    let localTimeout = null
+    requestAIOnce.mockImplementation(({ provider, signal, timeoutMs }) => {
+      if (provider === "nvidia") return waitForAbort(signal)
+      localTimeout = timeoutMs
+      return Promise.resolve({ content: '{"ok":true}', provider, model: "qwen" })
+    })
+
+    // outline: 50s budget, local joins at 32s
+    const promise = runHybridAI({ task: "outline", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback" })
+    await vi.advanceTimersByTimeAsync(32000)
+    await promise
+    expect(localTimeout).toBeGreaterThanOrEqual(89000)
+  })
+})
