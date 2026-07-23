@@ -737,7 +737,12 @@ export function reqsToDesigns(reqs) {
     else if (df === "technique") group.tec = val
     else if (df === "driveLink") group.driveLink = val
     else if (df === "detail") {
-      if (!group.posDetail) group.posDetail = val
+      // A bare number ("25") is a measurement, not a place - promoting it to
+      // posDetail makes the design page print "Ubicación: 25" and invent a
+      // location nobody stated. Only prose describes an actual location, so
+      // only prose is eligible; the number itself is never lost, it stays in
+      // `details` under its real label ("Distancia al hombro: 25").
+      if (!group.posDetail && !/^\d+([.,]\d+)?$/.test(val)) group.posDetail = val
       group.details.push((f.label || "") + ": " + val)
     }
   }

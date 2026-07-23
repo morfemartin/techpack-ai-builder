@@ -148,6 +148,18 @@ export function normalizeSlotBriefs(region, page, ctx) {
     });
   }
 
+  // NOTE: this used to also collapse slots whose full body (everything but
+  // the view name) came out identical - meant as a defensive backstop for the
+  // "V1 Colocación / V2 Detalle de ejecución" duplicate design page. Reverted:
+  // this function's documented contract is "never returns fewer entries than
+  // slots" (see the test file's header comment and "survives garbage input"/
+  // "pads missing slots" tests), and a caller that explicitly asks for N
+  // slots - an AI-authored plan naming N real views, say - is entitled to get
+  // N briefs even if today's deterministic defaults can't tell them apart yet.
+  // The actual duplicate-view bug was the DEFAULT of two views with no caller
+  // request behind them; that is fixed at the source in semanticOutline.js
+  // (designPages() now defaults to a single view), so no caller hits this
+  // case unless it genuinely asked for multiple views.
   return result;
 }
 
@@ -162,6 +174,15 @@ function coerceString(x) {
     return t.length > 0 ? t : '';
   }
   return '';
+}
+
+// A placementLandmark that is just a bare number ("25") is a measurement that
+// got mislabeled as a location upstream (see reqsToDesigns in
+// techpackRequirements.js) - printing "Ubicación: 25" invents a location that
+// was never said. The real fact still reaches the page through `details`/
+// `measurements`, so this only suppresses the wrongly-labeled line.
+function isBareNumber(value) {
+  return /^\d+([.,]\d+)?$/.test(String(value || '').trim());
 }
 
 /**
@@ -201,7 +222,7 @@ export function briefLines(brief, mode) {
   }
 
   // Full mode adds remaining sections
-  if (brief.placementLandmark && brief.placementLandmark.length > 0) {
+  if (brief.placementLandmark && brief.placementLandmark.length > 0 && !isBareNumber(brief.placementLandmark)) {
     lines.push('Ubicación: ' + brief.placementLandmark);
   }
 

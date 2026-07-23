@@ -123,4 +123,19 @@ describe("briefLines (the illustrator-rail template)", () => {
     expect(text).not.toMatch(/Señalar/i)
     expect(text).not.toMatch(/F[aá]brica/i)
   })
+
+  it("never prints 'Ubicación: <bare number>' - a measurement mislabeled as a place", () => {
+    // reqsToDesigns() (techpackRequirements.js) keeps a numeric detail answer
+    // out of posDetail for this exact reason, but placementLandmark can still
+    // reach here from other callers - this is the render-side backstop.
+    const numeric = { ...full, placementLandmark: "25" }
+    expect(briefLines(numeric, "full").join("\n")).not.toMatch(/Ubicaci[oó]n/i)
+
+    const decimal = { ...full, placementLandmark: "25,5" }
+    expect(briefLines(decimal, "full").join("\n")).not.toMatch(/Ubicaci[oó]n/i)
+
+    // Prose still prints normally, even when it starts with a number.
+    const prose = { ...full, placementLandmark: "25mm bajo costura de hombro" }
+    expect(briefLines(prose, "full").join("\n")).toMatch(/Ubicaci[oó]n: 25mm bajo costura de hombro/i)
+  })
 })

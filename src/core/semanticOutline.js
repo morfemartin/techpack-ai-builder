@@ -190,7 +190,7 @@ function designPages(designs) {
     purpose: "design:" + clean(design.name),
     objective: "Definir colocacion, tecnica, color y archivo del diseno D" + (index + 1) + ".",
     covers: [clean(design.name)],
-    views: Array.isArray(design.views) && design.views.length ? design.views.slice(0, 4) : ["Colocacion", "Detalle de ejecucion"],
+    views: Array.isArray(design.views) && design.views.length ? design.views.slice(0, 4) : ["Colocacion"],
     briefs: Array.isArray(design.briefs) ? design.briefs : undefined,
   }))
 }

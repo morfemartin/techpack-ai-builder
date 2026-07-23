@@ -58,6 +58,31 @@ describe("semantic document architecture", () => {
     plan.pages.find((page) => page.purpose.startsWith("design:")).pieces = [context.parts[0].id]
     expect(auditSemanticCoverage(plan, context.parts).duplicated).toEqual([])
   })
+
+  it("gives a design page ONE honest view by default, not two duplicate-content boxes", () => {
+    // Used to default to ["Colocacion", "Detalle de ejecucion"] - two boxes
+    // whose brief bodies are built from the same single design object, so
+    // they said the exact same thing under two different titles. A design
+    // with no explicit `views` (the common case: chat-built garments never
+    // set one) must get exactly one honest box.
+    const outline = buildSemanticOutline({
+      garmentType: "Hoodie",
+      parts: [],
+      designs: [{ name: "Chest Logo" }],
+    })
+    const designPage = outline.pages.find((page) => page.purpose.startsWith("design:"))
+    expect(designPage.views).toEqual(["Colocacion"])
+  })
+
+  it("still honors an explicit multi-view design instead of collapsing it", () => {
+    const outline = buildSemanticOutline({
+      garmentType: "Hoodie",
+      parts: [],
+      designs: [{ name: "Chest Logo", views: ["Frente", "Detalle bordado"] }],
+    })
+    const designPage = outline.pages.find((page) => page.purpose.startsWith("design:"))
+    expect(designPage.views).toEqual(["Frente", "Detalle bordado"])
+  })
 })
 
 describe("system titles name only the aspects a page actually contains", () => {

@@ -559,7 +559,24 @@ describe("reqsToDesigns", () => {
     }
     const designs = reqsToDesigns(reqs)
     expect(designs[0].notes).toBe("Cantidad: 4, Material: Nacar")
-    expect(designs[0].posDetail).toBe("4")
+    // "4" is a bare quantity, not a place - promoting it to posDetail would
+    // print "Ubicación: 4" on the design page and invent a location nobody
+    // said. It stays out of posDetail (though it's still in notes above);
+    // the first PROSE detail ("Nacar") is what a location line can honestly
+    // show.
+    expect(designs[0].posDetail).toBe("Nacar")
+  })
+
+  it("never promotes a bare-number detail to posDetail, even when it is the only detail", () => {
+    const reqs = {
+      fields: [
+        { key: "botones_cantidad", label: "Cantidad", category: "design", status: "known", value: "25", options: [], why: "", designSlot: "botones", designField: "detail" },
+        { key: "botones_nombre", label: "Nombre", category: "design", status: "known", value: "Botones", options: [], why: "", designSlot: "botones", designField: "name" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs[0].posDetail).toBe("")
+    expect(designs[0].notes).toBe("Cantidad: 25")
   })
 
   it("ignores fields with missing/unrecognized designSlot or designField without throwing", () => {
