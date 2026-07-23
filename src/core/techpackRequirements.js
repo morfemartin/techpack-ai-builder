@@ -160,7 +160,46 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         ...hybrid,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de requisitos valido.")
-  return normalizeRequirements(parsed, garmentType)
+  return answerFromSeed(normalizeRequirements(parsed, garmentType), seed)
+}
+
+// Stopwords in a field label that carry no subject - so "Tipo de cuello" and
+// "Cuello visible" both reduce to the token {cuello}.
+const LABEL_STOPWORDS = new Set([
+  "tipo", "clase", "estilo", "construccion", "diseno", "detalle", "forma", "principal",
+  "visible", "aparente", "de", "del", "la", "el", "los", "las", "y", "o", "con", "para",
+])
+
+function subjectTokens(label) {
+  return new Set(
+    String(label || "")
+      .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 4 && !LABEL_STOPWORDS.has(word))
+  )
+}
+
+// The photo already answered some of these. The vision seed arrives as
+// {"Cierre visible": "sin cierre", "Cuello visible": "redondo", ...}; a weak
+// model is told not to re-ask what the seed covers but often does anyway. So
+// after the model responds, any ASK field whose subject a seed entry names is
+// switched to KNOWN with the observed value - the user confirms it later in
+// the parts step, they are just not interrogated about what the camera saw.
+// Conservative on purpose: matches only on a shared content word (>=4 chars),
+// never touches design fields, and never overrides a value the model set.
+export function answerFromSeed(reqs, seed) {
+  const entries = Object.entries(seed || {}).filter(([, v]) => String(v || "").trim())
+  if (entries.length === 0) return reqs
+  const seedSubjects = entries.map(([label, value]) => ({ tokens: subjectTokens(label), value: String(value).trim() }))
+  const fields = (reqs.fields || []).map((field) => {
+    if (field.category !== "general" || field.status !== FIELD_STATUS.ASK) return field
+    const tokens = subjectTokens(field.label)
+    if (tokens.size === 0) return field
+    const hit = seedSubjects.find((s) => [...s.tokens].some((t) => tokens.has(t)))
+    if (!hit) return field
+    return { ...field, status: FIELD_STATUS.KNOWN, value: hit.value }
+  })
+  return { ...reqs, fields }
 }
 
 // Defensive shaping so the walker helpers can trust the structure regardless

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, ensureMinimumGeneralQuestions, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, answerFromSeed, ensureMinimumGeneralQuestions, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -14,6 +14,37 @@ vi.mock("./deepseekClient.js", () => ({
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
 import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, answerFieldQuestion, analyzeAdditionalNotes } from "./techpackRequirements.js"
+
+describe("answerFromSeed (photo already answered it)", () => {
+  const reqs = () => ({
+    garmentType: "franela",
+    fields: [
+      { key: "cuello", label: "Tipo de cuello", category: "general", status: "ask", value: "", options: ["A", "B"] },
+      { key: "cierre", label: "Cierre frontal", category: "general", status: "ask", value: "", options: ["A", "B"] },
+      { key: "talles", label: "Rango de talles", category: "general", status: "ask", value: "", options: ["A", "B"] },
+    ],
+  })
+
+  it("marks a question KNOWN when a seed entry names the same subject", () => {
+    const out = answerFromSeed(reqs(), { "Cuello visible": "Redondo rib", "Cierre visible": "Sin cierre" })
+    const cuello = out.fields.find((f) => f.key === "cuello")
+    expect(cuello.status).toBe("known")
+    expect(cuello.value).toBe("Redondo rib")
+    // a subject the photo did not cover is still asked
+    expect(out.fields.find((f) => f.key === "talles").status).toBe("ask")
+  })
+
+  it("ignores empty seed values and does nothing without a seed", () => {
+    expect(answerFromSeed(reqs(), { "Cuello visible": "  " }).fields.find((f) => f.key === "cuello").status).toBe("ask")
+    expect(answerFromSeed(reqs(), {}).fields.every((f) => f.status === "ask")).toBe(true)
+  })
+
+  it("does not match on stopwords alone (no false positives from 'tipo'/'visible')", () => {
+    // "Tipo visible" shares only stopwords with "Tipo de cuello" - must NOT match
+    const out = answerFromSeed(reqs(), { "Tipo visible": "algo" })
+    expect(out.fields.every((f) => f.status === "ask")).toBe(true)
+  })
+})
 
 describe("normalizeRequirements dedup", () => {
   it("collapses two general fields that ask the same thing under different wording", () => {
