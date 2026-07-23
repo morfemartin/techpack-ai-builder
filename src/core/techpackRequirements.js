@@ -192,7 +192,38 @@ export function normalizeRequirements(parsed, garmentType) {
       if (DESIGN_FIELD_KINDS.has(f.designField)) base.designField = f.designField
       return base
     })
-  return { garmentType: (parsed && parsed.garmentType) || garmentType, fields }
+  return { garmentType: (parsed && parsed.garmentType) || garmentType, fields: dedupeFields(fields) }
+}
+
+// A weaker model asks the same thing twice under different wording ("Cuello" +
+// "Tipo de cuello", "Manga" + "Construccion de manga"). With no template
+// floor to absorb the overlap, both used to reach the walk verbatim. Collapse
+// on a normalized key AND a normalized label, keeping the first occurrence -
+// design-category fields are exempt (they legitimately repeat a slot across
+// name/position/technique sub-fields).
+function labelKey(label) {
+  return String(label || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    // strip leading qualifiers that do not change what is being asked
+    .replace(/^(tipo|clase|estilo|construccion|diseno|detalle|forma)\s+(de\s+(la\s+|el\s+|los\s+|las\s+)?)?/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim()
+}
+
+function dedupeFields(fields) {
+  const seenKeys = new Set()
+  const seenLabels = new Set()
+  const out = []
+  for (const field of fields) {
+    if (field.category === "design") { out.push(field); continue }
+    const k = String(field.key || "").toLowerCase()
+    const l = labelKey(field.label)
+    if (seenKeys.has(k) || (l && seenLabels.has(l))) continue
+    seenKeys.add(k)
+    if (l) seenLabels.add(l)
+    out.push(field)
+  }
+  return out
 }
 
 function hasGeneralAsk(fields) {

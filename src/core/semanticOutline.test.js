@@ -59,3 +59,35 @@ describe("semantic document architecture", () => {
     expect(auditSemanticCoverage(plan, context.parts).duplicated).toEqual([])
   })
 })
+
+describe("system titles name only the aspects a page actually contains", () => {
+  it("does not title a plain t-shirt's neck page 'Capucha y cuello'", () => {
+    // A crew-neck tee has a collar and no hood - the page used to be headed
+    // "Capucha y cuello" regardless, naming a hood the garment lacks.
+    const pages = partitionPartsBySystem([
+      { id: "tela", label: "Tela principal", val: "Jersey de algodon", on: true },
+      { id: "cuello", label: "Cuello", val: "Redondo rib", on: true },
+      { id: "manga", label: "Manga", val: "Corta", on: true },
+    ])
+    const titles = pages.map((p) => p.title)
+    expect(titles.some((t) => /Cuello/.test(t) && !/Capucha/.test(t))).toBe(true)
+    expect(titles.some((t) => /Capucha/.test(t))).toBe(false)
+    // and the sleeve page does not invent cuffs/armholes
+    expect(titles.some((t) => /puno|sisa/i.test(t))).toBe(false)
+  })
+
+  it("names capucha and puno when the parts actually have them", () => {
+    const pages = partitionPartsBySystem([
+      { id: "capucha", label: "Capucha", val: "Con visera", on: true },
+      { id: "manga", label: "Manga", val: "Con puno rib", on: true },
+    ])
+    const titles = pages.map((p) => p.title).join(" | ")
+    expect(titles).toMatch(/Capucha/)
+    expect(titles).toMatch(/Puno/)
+  })
+
+  it("keeps the stable Sistema NN production index", () => {
+    const pages = partitionPartsBySystem([{ id: "cuello", label: "Cuello", val: "Redondo", on: true }])
+    expect(pages.every((p) => /^Sistema \d\d · /.test(p.title))).toBe(true)
+  })
+})

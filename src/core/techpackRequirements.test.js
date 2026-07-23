@@ -15,6 +15,46 @@ vi.mock("./deepseekClient.js", () => ({
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
 import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, answerFieldQuestion, analyzeAdditionalNotes } from "./techpackRequirements.js"
 
+describe("normalizeRequirements dedup", () => {
+  it("collapses two general fields that ask the same thing under different wording", () => {
+    // A weak model asks "Cuello" and "Tipo de cuello" - the same question. No
+    // template floor absorbs the overlap now, so the normalizer must.
+    const result = normalizeRequirements({
+      garmentType: "franela",
+      fields: [
+        { key: "cuello", label: "Cuello", category: "general", status: "ask", options: ["A", "B"] },
+        { key: "tipo_cuello", label: "Tipo de cuello", category: "general", status: "ask", options: ["C", "D"] },
+        { key: "manga", label: "Manga", category: "general", status: "ask", options: ["E", "F"] },
+        { key: "construccion_manga", label: "Construccion de manga", category: "general", status: "ask", options: ["G", "H"] },
+      ],
+    }, "franela")
+    expect(result.fields.map((f) => f.label)).toEqual(["Cuello", "Manga"])
+  })
+
+  it("drops an exact duplicate key, keeping the first", () => {
+    const result = normalizeRequirements({
+      garmentType: "x",
+      fields: [
+        { key: "tela", label: "Tela", category: "general", status: "ask", options: ["A", "B"], value: "first" },
+        { key: "tela", label: "Material", category: "general", status: "known", value: "second" },
+      ],
+    }, "x")
+    expect(result.fields).toHaveLength(1)
+    expect(result.fields[0].value).toBe("first")
+  })
+
+  it("never dedups design-category fields - they repeat a slot on purpose", () => {
+    const result = normalizeRequirements({
+      garmentType: "x",
+      fields: [
+        { key: "logo_name", label: "Nombre", category: "design", designSlot: "logo", designField: "name", status: "ask", options: ["A", "B"] },
+        { key: "logo_pos", label: "Nombre", category: "design", designSlot: "logo", designField: "position", status: "ask", options: ["A", "B"] },
+      ],
+    }, "x")
+    expect(result.fields).toHaveLength(2)
+  })
+})
+
 describe("normalizeRequirements", () => {
   it("drops fields with no valid key and applies defaults", () => {
     const parsed = {

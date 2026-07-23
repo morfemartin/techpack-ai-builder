@@ -1,61 +1,111 @@
+// Each system is a family of related parts. Its title used to be a fixed
+// string sized for a technical parka - so a plain t-shirt whose only neck part
+// is a crew collar still got a page headed "Capucha y cuello", and its sleeve
+// got "Mangas, sisas y punos", naming a hood, armholes and cuffs it does not
+// have. The fix: a system declares ASPECTS (a label + the tokens that signal
+// it), and a page names only the aspects its actual parts trigger. `tokens`
+// is the union, still used for classification.
 const SYSTEMS = [
   {
     id: "shell-body",
-    title: "Sistema 01 · Cuerpo exterior y sellado",
-    tokens: ["shell", "body", "front", "back", "yoke", "side", "seam", "tape", "cuerpo", "frente", "espalda", "canesu", "costura", "sellad"],
+    theme: "Cuerpo exterior y sellado",
+    aspects: [
+      { label: "Cuerpo", tokens: ["shell", "body", "front", "back", "yoke", "side", "cuerpo", "frente", "espalda", "canesu"] },
+      { label: "Sellado de costuras", tokens: ["seam", "tape", "costura", "sellad"] },
+    ],
     views: ["Frente exterior", "Espalda exterior"],
-    garmentPart: "Cuerpo exterior",
     mustMark: ["uniones de panel", "sentido de hilo", "recorrido de cinta de sellado"],
     factoryNote: "Relacionar cada llamada con el numero de pieza del BOM; no inferir tolerancias.",
   },
   {
     id: "hood-neck",
-    title: "Sistema 02 · Capucha y cuello",
-    tokens: ["hood", "collar", "neck", "visor", "brim", "capucha", "cuello", "visera"],
-    views: ["Capucha exterior", "Capucha interior abierta"],
-    garmentPart: "Capucha y cuello",
-    mustMark: ["piezas de capucha", "canal de ajuste", "union al escote"],
+    theme: "Cuello y capucha",
+    aspects: [
+      { label: "Cuello", tokens: ["collar", "neck", "cuello", "escote", "neckline"] },
+      { label: "Capucha", tokens: ["hood", "visor", "brim", "capucha", "visera"] },
+    ],
+    views: ["Cuello / escote", "Detalle de union al escote"],
+    mustMark: ["piezas de cuello", "union al escote"],
     factoryNote: "Mostrar capas y puntos de anclaje sin asumir el metodo de montaje pendiente.",
   },
   {
     id: "sleeves-cuffs",
-    title: "Sistema 03 · Mangas, sisas y punos",
-    tokens: ["sleeve", "cuff", "elbow", "underarm", "armhole", "manga", "puno", "puño", "codo", "sisa", "axila"],
-    views: ["Manga exterior", "Puno y ajuste"],
-    garmentPart: "Mangas y punos",
+    theme: "Mangas",
+    aspects: [
+      { label: "Manga", tokens: ["sleeve", "manga", "armhole", "underarm", "sisa", "axila", "elbow", "codo"] },
+      { label: "Puno", tokens: ["cuff", "puno", "puño"] },
+    ],
+    views: ["Manga exterior", "Detalle de terminacion"],
     mustMark: ["costura superior e inferior", "forma de codo", "sistema de ajuste"],
     factoryNote: "Mantener correspondencia izquierda/derecha y marcar piezas espejo.",
   },
   {
     id: "closures-pockets",
-    title: "Sistema 04 · Cierres, tapetas y bolsillos",
-    tokens: ["zip", "closure", "flap", "pocket", "welt", "garage", "cierre", "cremallera", "tapeta", "bolsillo", "cartera"],
+    theme: "Cierres y bolsillos",
+    aspects: [
+      { label: "Cierre", tokens: ["zip", "closure", "flap", "garage", "cierre", "cremallera", "tapeta", "cartera", "boton", "button"] },
+      { label: "Bolsillos", tokens: ["pocket", "welt", "bolsillo"] },
+    ],
     views: ["Frente funcional", "Detalles de acceso"],
-    garmentPart: "Cierres y bolsillos",
     mustMark: ["inicio y fin de cierres", "aberturas utiles", "capas de tapeta y bolsa"],
     factoryNote: "Dibujar la relacion entre shell, cierre y bolsa; usar solo cotas confirmadas.",
   },
   {
     id: "lining-insulation",
-    title: "Sistema 05 · Forro, aislante e interior",
-    tokens: ["lining", "liner", "insulation", "fleece", "interior", "forro", "aislante", "polar", "malla"],
+    theme: "Interior y forro",
+    aspects: [
+      { label: "Forro", tokens: ["lining", "liner", "forro", "interior", "malla"] },
+      { label: "Aislante", tokens: ["insulation", "fleece", "aislante", "polar"] },
+    ],
     views: ["Interior abierto", "Union shell-forro"],
-    garmentPart: "Interior y forro",
     mustMark: ["paneles interiores", "accesos de montaje", "puntos de union al shell"],
     factoryNote: "Separar graficamente material exterior, aislante y forro.",
   },
   {
     id: "trims-labels",
-    title: "Sistema 06 · Ajustes, herrajes y rotulos",
-    tokens: ["cord", "toggle", "elastic", "snap", "label", "tape", "reflect", "trim", "cordon", "cordón", "tope", "elastico", "elástico", "broche", "etiqueta", "ribete", "herra"],
+    theme: "Ajustes y rotulos",
+    aspects: [
+      { label: "Herrajes y ajustes", tokens: ["cord", "toggle", "elastic", "snap", "reflect", "trim", "cordon", "cordón", "tope", "elastico", "elástico", "broche", "ribete", "herra"] },
+      { label: "Etiquetas", tokens: ["label", "tape", "etiqueta"] },
+    ],
     views: ["Mapa de accesorios", "Rotulos y acabados"],
-    garmentPart: "Accesorios y acabados",
     mustMark: ["ubicacion de cada accesorio", "puntos de fijacion", "orientacion de etiquetas"],
     factoryNote: "Identificar cada accesorio con su numero de BOM y acabado confirmado.",
   },
-]
+].map((system, index) => ({
+  ...system,
+  number: index + 1,
+  tokens: system.aspects.flatMap((aspect) => aspect.tokens),
+}))
 
 const SYSTEM_BY_ID = new Map(SYSTEMS.map((system) => [system.id, system]))
+
+// The aspects a specific set of parts actually triggers, in declaration order.
+// Falls back to the first aspect so a page is never left unlabelled.
+function presentAspects(system, parts) {
+  const haystack = (Array.isArray(parts) ? parts : [])
+    .map((part) => [part && part.id, part && part.label, part && part.val].map(clean).join(" "))
+    .join(" ")
+    .toLowerCase()
+  const present = system.aspects.filter((aspect) => aspect.tokens.some((token) => haystack.includes(token)))
+  return present.length > 0 ? present : [system.aspects[0]]
+}
+
+// A human list: "Cuello", "Cuello y capucha", "Cierre, tapeta y bolsillos".
+function joinLabels(labels) {
+  if (labels.length <= 1) return labels[0] || ""
+  return labels.slice(0, -1).join(", ") + " y " + labels[labels.length - 1]
+}
+
+// Title from the aspects present, not the fixed system name. `Sistema NN` is
+// kept as a stable production index; what follows names only what is there.
+function systemTitle(system, parts) {
+  return "Sistema " + String(system.number).padStart(2, "0") + " · " + joinLabels(presentAspects(system, parts).map((a) => a.label))
+}
+
+function systemGarmentPart(system, parts) {
+  return joinLabels(presentAspects(system, parts).map((a) => a.label))
+}
 
 function clean(value) {
   return String(value == null ? "" : value).trim()
@@ -108,16 +158,19 @@ export function partitionPartsBySystem(parts, { maxPartsPerPage = 8 } = {}) {
     const members = groups.get(system.id)
     balancedChunks(members, limit).forEach((pageParts, index, all) => {
       const suffix = all.length > 1 ? " · " + (index + 1) + "/" + all.length : ""
+      // Title and garmentPart are derived from THIS page's parts, so a page
+      // never names an aspect (capucha, puno, forro) its parts do not have.
+      const garmentPart = systemGarmentPart(system, pageParts)
       pages.push({
         id: "structure-" + system.id + (all.length > 1 ? "-" + (index + 1) : ""),
-        title: system.title + suffix,
+        title: systemTitle(system, pageParts) + suffix,
         purpose: "structure:" + system.id,
         system: system.id,
-        objective: "Documentar " + system.garmentPart.toLowerCase() + " como conjunto fabricable y dibujable.",
+        objective: "Documentar " + garmentPart.toLowerCase() + " como conjunto fabricable y dibujable.",
         pieces: pageParts.map((part) => clean(part.id)),
         views: system.views.slice(),
         briefs: system.views.map((view) => ({
-          garmentPart: system.garmentPart,
+          garmentPart,
           view,
           mustMark: system.mustMark.slice(),
           measurements: [],
