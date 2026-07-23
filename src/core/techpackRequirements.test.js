@@ -525,6 +525,7 @@ describe("reqsToDesigns", () => {
       driveLink: "https://drive.com/logo",
       posDetail: "5cm",
       notes: "Tamano: 5cm",
+      slot: "logo_pecho",
     })
   })
 

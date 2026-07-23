@@ -1,18 +1,12 @@
+import { readDesignImageFile } from "../core/helpers.js"
+
 export function ImageUploader({ d, onUpdate }) {
   function handleFile(e) {
     var f = e.target.files[0]
     if (!f) return
-    var issvg = f.type === "image/svg+xml"
-    var reader = new FileReader()
-    reader.onload = function (ev) {
-      var result = ev.target.result
-      var img = new Image()
-      img.onload = function () {
-        onUpdate({ imageData: result.split(",")[1], imageType: issvg ? "svg" : "png", imgNatW: img.naturalWidth, imgNatH: img.naturalHeight })
-      }
-      img.src = result
-    }
-    reader.readAsDataURL(f)
+    readDesignImageFile(f).then(({ imageData, imageType, imgNatW, imgNatH }) => {
+      onUpdate({ imageData, imageType, imgNatW, imgNatH })
+    })
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

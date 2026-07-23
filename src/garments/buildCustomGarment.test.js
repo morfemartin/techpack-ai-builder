@@ -65,4 +65,24 @@ describe("mapChatDesignsToDesigns", () => {
     expect(result[0]).toEqual({ name: "Botones", pos: "Frente", posDetail: "", tec: "Bordado 3D", driveLink: "drive.google.com/xyz", illustrationBrief: "" })
     expect(result[1]).toEqual({ name: "Logo", pos: "Toda la prenda", posDetail: "", tec: "Bordado 3D", driveLink: "", illustrationBrief: "" })
   })
+
+  it("passes through an image the chat's inline upload attached to a design", () => {
+    // Without this, an image attached mid-chat never reached the design
+    // object App.jsx merges onto newDesign() - so renderDesignArtHero never
+    // had imageData to fire on, and the design page fell back to the two
+    // empty V1/V2 boards no matter what the user uploaded.
+    const result = mapChatDesignsToDesigns(
+      [{ name: "Logo", pos: "Frente", imageData: "QUJD", imageType: "png", imgNatW: 400, imgNatH: 300 }],
+      "Toda la prenda"
+    )
+    expect(result[0].imageData).toBe("QUJD")
+    expect(result[0].imageType).toBe("png")
+    expect(result[0].imgNatW).toBe(400)
+    expect(result[0].imgNatH).toBe(300)
+  })
+
+  it("does not add image keys at all when the chat draft has no image", () => {
+    const result = mapChatDesignsToDesigns([{ name: "Logo", pos: "Frente" }], "Toda la prenda")
+    expect(result[0]).not.toHaveProperty("imageData")
+  })
 })

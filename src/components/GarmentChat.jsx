@@ -7,6 +7,7 @@ import {
 } from "../core/techpackRequirements.js"
 import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
 import { authorProductionQuestions } from "../core/productionReview.js"
+import { readDesignImageFile } from "../core/helpers.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -74,6 +75,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   const [extraNotes, setExtraNotes] = useState("") // raw text from the "finalCheck" catch-all step
   const [imageAnalyzing, setImageAnalyzing] = useState(false) // true only while a mid-chat photo is being read
   const [imageProgress, setImageProgress] = useState(null) // { partialText, tokensSoFar } | null
+  // The design's own artwork file (PNG/SVG), attached inline while walking its
+  // sub-questions - keyed by designSlot (stable across a rename, unlike
+  // `name`) so buildDraft() can merge it back onto reqsToDesigns()' fresh
+  // output. { [slot]: { imageData, imageType, imgNatW, imgNatH, fileName } }.
+  // Without this, an image attached mid-chat never reached the design object,
+  // so the hero (renderDesignArtHero) never had imageData to fire on and the
+  // design page fell back to two empty V1/V2 boards no matter what was drawn.
+  const [designImages, setDesignImages] = useState({})
+  const [designImageError, setDesignImageError] = useState(null)
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
   // Monotonic id for the layer-1 investigation. Only the newest run may write
@@ -502,6 +512,29 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     }
   }
 
+  // The design's own artwork, attached while walking its sub-questions - a
+  // separate control from handleAttachImage above, which uses a photo to
+  // ANSWER a text question. This one stores the actual file that ends up on
+  // the design page as the hero image (see designImages state comment).
+  async function handleDesignImageUpload(slot, file) {
+    if (!file || !slot) return
+    setDesignImageError(null)
+    try {
+      const { imageData, imageType, imgNatW, imgNatH, fileName } = await readDesignImageFile(file)
+      setDesignImages((prev) => ({ ...prev, [slot]: { imageData, imageType, imgNatW, imgNatH, fileName } }))
+    } catch {
+      setDesignImageError("No se pudo leer esa imagen. Probá con otro archivo PNG o SVG.")
+    }
+  }
+
+  function clearDesignImage(slot) {
+    setDesignImages((prev) => {
+      const next = { ...prev }
+      delete next[slot]
+      return next
+    })
+  }
+
   function send(valueOverride) {
     const value = (valueOverride !== undefined ? valueOverride : input).trim()
     if (!value || sending) return
@@ -532,7 +565,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       // already ran) never gets its own illustration brief - attachIllustrationBriefs
       // already defaults those to "" (same as any other unmatched design), so
       // this degrades exactly like a normal brief-authoring failure, not a crash.
-      designs: attachIllustrationBriefs(reqsToDesigns(reqs), briefs),
+      // Merges each design's inline-uploaded image (keyed by its stable
+      // designSlot, see designImages state comment) back onto the fresh
+      // reqsToDesigns() output - `slot` rides along on that output for
+      // exactly this purpose.
+      designs: attachIllustrationBriefs(reqsToDesigns(reqs), briefs).map((d) =>
+        d.slot && designImages[d.slot] ? { ...d, ...designImages[d.slot] } : d
+      ),
       notes: [productionNotes, extraNotes].filter(Boolean).join("\n"),
     }
   }
@@ -585,6 +624,39 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
                   )
                 })}
               </div>
+              <div style={{ display: "flex", alignItems: "center", gap: space(1), marginTop: space(2), paddingTop: space(2), borderTop: `1px dashed ${C.ink.hex}` }}>
+                <label style={{ padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: `1.5px dashed ${role.priority.fill}`, borderRadius: 6, cursor: "pointer", fontSize: type.size.xs, fontWeight: 700, color: role.priority.fill }}>
+                  {designImages[currentField.designSlot] ? "Imagen cargada - cambiar" : "Subí el PNG/SVG ahora (o dejalo para después)"}
+                  <input
+                    type="file"
+                    accept="image/png,image/svg+xml,image/jpeg"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files[0]
+                      e.target.value = ""
+                      if (file) handleDesignImageUpload(currentField.designSlot, file)
+                    }}
+                  />
+                </label>
+                {designImages[currentField.designSlot] && (
+                  <>
+                    <img
+                      src={"data:" + (designImages[currentField.designSlot].imageType === "svg" ? "image/svg+xml" : "image/png") + ";base64," + designImages[currentField.designSlot].imageData}
+                      alt="Diseño adjunto"
+                      style={{ height: 32, maxWidth: 60, objectFit: "contain", border: hair, background: C.white.hex, padding: 2 }}
+                    />
+                    <button
+                      onClick={() => clearDesignImage(currentField.designSlot)}
+                      style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: type.size.xs }}
+                    >
+                      quitar
+                    </button>
+                  </>
+                )}
+              </div>
+              {designImageError && (
+                <div style={{ fontSize: type.size.xs, color: role.index.fill, marginTop: space(1) }}>{designImageError}</div>
+              )}
             </div>
           )}
           {/* Numbered option chips for the current question - click to answer, or type your own. */}

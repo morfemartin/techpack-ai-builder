@@ -756,6 +756,12 @@ export function reqsToDesigns(reqs) {
       driveLink: g.driveLink,
       posDetail: g.posDetail,
       notes: g.details.join(", "),
+      // The stable designSlot key (not derived from `name`, which can be
+      // renamed mid-chat) - lets a caller correlate this design across calls,
+      // e.g. GarmentChat.jsx matching an inline-uploaded image (captured by
+      // slot, since that's what a design's sub-question group is keyed by)
+      // back onto a freshly recomputed design list.
+      slot,
     }
   })
 }

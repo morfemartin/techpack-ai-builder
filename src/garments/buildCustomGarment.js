@@ -49,6 +49,11 @@ export function mapChatDesignsToDesigns(draftDesigns, fallbackPosition) {
     // placeholder note when no image has been uploaded yet - see
     // buildPages.js/Preview.jsx's design-page illustration zone.
     illustrationBrief: dd.illustrationBrief || "",
+    // Passed through when the chat's inline upload (GarmentChat.jsx) set them
+    // on the draft design - without this, an image attached mid-chat never
+    // reached the design object, so the hero (renderDesignArtHero) never had
+    // imageData to fire on and the page fell back to two empty boards.
+    ...(dd.imageData ? { imageData: dd.imageData, imageType: dd.imageType || "png", imgNatW: dd.imgNatW || null, imgNatH: dd.imgNatH || null } : {}),
   }))
 }
 

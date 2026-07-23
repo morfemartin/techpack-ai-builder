@@ -17,6 +17,32 @@ function page(purpose, dataRegions, slots = 1) {
   }
 }
 
+// Phase 2 (D1): renderIllustrationZone shows an uploaded design image as a
+// full-box hero regardless of how many slots its region declares, so tiling
+// the illustration into per-slot mosaic cells would render that same hero
+// once per cell. Two things must both hold:
+describe("mosaic never duplicates an uploaded design's hero image", () => {
+  it("never offers data-slot-mosaic for a design page whose OWN design has an uploaded image", () => {
+    const ctx = { designs: [{ name: "Artwork", imageData: "QUJD", colors: [{ hex: "#000000" }] }] }
+    const result = evaluatePageCompositions(page("design:Artwork", [{ type: "colorSpecs" }], 2), ctx)
+    expect(result.decision.candidates.map((c) => c.mode)).not.toContain("data-slot-mosaic")
+  })
+
+  it("does not suppress a structure page's mosaic just because an UNRELATED design elsewhere has an image", () => {
+    // normalizeSlotBriefs falls back to ctx.designs[0] for ANY page purpose
+    // when it can't match one by name - but the renderer only ever passes a
+    // real `design` (and only ever fires the hero) on a genuine "design:"
+    // page. The guard must be scoped to design pages, or a structure page
+    // would lose a perfectly good mosaic layout for no real risk.
+    const ctx = {
+      parts: Array.from({ length: 6 }, (_, index) => ({ id: "part-" + index, val: "Spec", on: true })),
+      designs: [{ name: "Unrelated Logo", imageData: "QUJD" }],
+    }
+    const result = evaluatePageCompositions(page("structure:shell-body", [{ type: "partsList" }], 2), ctx)
+    expect(result.decision.candidates.map((c) => c.mode)).toContain("data-slot-mosaic")
+  })
+})
+
 describe("Layout Engine v3 candidate composition", () => {
   it("uses a bottom band for a short wide BOM", () => {
     const result = evaluatePageCompositions(page("overview", [{ type: "partsList" }]), { parts: [{ id: "body", val: "Cotton", on: true }] })

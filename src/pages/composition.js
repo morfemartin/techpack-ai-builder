@@ -211,11 +211,28 @@ function slotMosaic(regions, width, height) {
 function mosaicCandidate(page, ctx, illustration, data, width, height, dataLeft, railSpan) {
   const slotCount = Math.max(1, Number(illustration.slots) || (Array.isArray(illustration.refs) ? illustration.refs.length : 1))
   if (!dataLeft || data.length !== 1 || slotCount < 2) return null
+  const briefs = normalizeSlotBriefs(illustration, page, ctx)
+  // renderIllustrationZone shows the uploaded design image as a full-box hero
+  // the moment ITS OWN design has imageData - regardless of how many slots
+  // the region declares. Splitting the illustration into per-slot mosaic
+  // cells means each cell renders its own independent illustration region, so
+  // the hero would fire once per cell: the same reference image duplicated
+  // across the mosaic instead of shown once. Refuse the split so a different
+  // candidate (one that keeps the illustration as a single region) wins.
+  //
+  // Scoped to genuine "design:<name>" pages on purpose: normalizeSlotBriefs's
+  // `hasReference` falls back to ctx.designs[0] for ANY page purpose when it
+  // can't match one by name (briefs.js:48-50), but the renderer only ever
+  // passes a real `design` (and so only ever fires the hero) on a design page
+  // (interpretPlan.js: `design: isDesignPage ? design : null`). Without this
+  // scope check, a structure/overview page would lose a perfectly good mosaic
+  // layout just because SOME unrelated design elsewhere in ctx has an image.
+  const isDesignPage = typeof page?.purpose === "string" && page.purpose.startsWith("design:")
+  if (isDesignPage && briefs.some((brief) => brief.hasReference)) return null
   const leftWidth = GRID.span(railSpan)
   const rightWidth = GRID.span(GRID.columns - railSpan)
   const dataMeasure = measured(data[0], page, ctx, leftWidth)
   const leftSlotHeight = Math.max(0, height - dataMeasure.natural - GRID.verticalGap)
-  const briefs = normalizeSlotBriefs(illustration, page, ctx)
   const slots = Array.from({ length: slotCount }, (_, index) => singleSlotRegion(illustration, briefs, index))
   const right = slotMosaic(slots.slice(1), rightWidth, height)
   const leftSlot = regionNode(slots[0], leftWidth, leftSlotHeight)

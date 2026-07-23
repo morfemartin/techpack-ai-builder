@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { uid } from "./core/idGen.js"
 import { T } from "./core/i18n.js"
-import { EMPTY_EMB, isEmbTec, isWholePosF } from "./core/helpers.js"
+import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
@@ -305,31 +305,10 @@ export default function App() {
     r.readAsDataURL(f)
   }
 
-  // Reads one image file into the same shape ImageUploader.jsx produces
-  // (base64 without the data: prefix, natural dimensions via Image()), plus
-  // its fileName so DeepSeek's text-only extraction can reference it by name.
-  function readImageFile(file) {
-    return new Promise((resolve, reject) => {
-      var issvg = file.type === "image/svg+xml"
-      var reader = new FileReader()
-      reader.onload = function (ev) {
-        var result = ev.target.result
-        var img = new Image()
-        img.onload = function () {
-          resolve({ fileName: file.name, imageData: result.split(",")[1], imageType: issvg ? "svg" : "png", imgNatW: img.naturalWidth, imgNatH: img.naturalHeight })
-        }
-        img.onerror = reject
-        img.src = result
-      }
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
-  }
-
   async function handleCsvImages(e) {
     var files = Array.from(e.target.files || [])
     if (files.length === 0) return
-    var read = await Promise.all(files.map(readImageFile))
+    var read = await Promise.all(files.map(readDesignImageFile))
     setCsvImages((prev) => [...prev, ...read])
     e.target.value = ""
   }
