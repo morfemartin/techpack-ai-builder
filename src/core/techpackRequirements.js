@@ -15,6 +15,7 @@ import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClien
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
 import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk } from "./requirementLayers.js"
+import { dropIncoherentFields } from "./garmentAnatomy.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
@@ -160,7 +161,11 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         ...hybrid,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de requisitos valido.")
-  return answerFromSeed(normalizeRequirements(parsed, garmentType), seed)
+  // Two deterministic guards on the model's field list, in order:
+  // answerFromSeed marks as KNOWN whatever the photo already answered; then
+  // dropIncoherentFields removes the parts the identified garment cannot have
+  // (a franela does not come back asking about a hood, a lining or a closure).
+  return dropIncoherentFields(answerFromSeed(normalizeRequirements(parsed, garmentType), seed))
 }
 
 // Stopwords in a field label that carry no subject - so "Tipo de cuello" and
@@ -478,7 +483,11 @@ export function ensureMinimumGeneralQuestions(reqs, seed) {
   const remainingModelFields = generalFields.filter((field) => !consumedKeys.has(field.key))
   const extra = mergeAdditionalGeneralAsk({ garmentType, layeredFields: tailored, modelFields: remainingModelFields })
 
-  return { ...reqs, garmentType: layered.garmentType, fields: [...tailored, ...extra, ...designFields] }
+  const assembled = { ...reqs, garmentType: layered.garmentType, fields: [...tailored, ...extra, ...designFields] }
+  // Same coherence guard as the live model path: the COMMON template floor
+  // carries a closure/pocket question for every garment, so a tee fallback
+  // would otherwise still ask a franela about its cierre.
+  return dropIncoherentFields(assembled)
 }
 
 export function fallbackRequirements(garmentType, seed) {
