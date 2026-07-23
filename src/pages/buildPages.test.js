@@ -253,3 +253,40 @@ describe("reusable page block helpers", () => {
     expect(svg).not.toContain("<path")
   })
 })
+
+describe("renderIllustrationZone - uploaded artwork is the hero", () => {
+  const box = { x: 32, y: 160, width: 1124, height: 600 }
+  const design = { name: "Logo", imageData: "aGVsbG8=", imageType: "png", w: "80", h: "45", unit: "mm", tec: "Sublimacion", pos: "Centro pecho" }
+
+  it("renders the uploaded image large instead of empty draw-here boards", () => {
+    const svg = renderIllustrationZone(box, { slots: 2, refs: ["A", "B"], design })
+    expect(svg).toContain("id='ARTWORK__DESIGN'")
+    const h = Number(svg.match(/id='ARTWORK__DESIGN'[^>]*height='([\d.]+)'/)[1])
+    expect(h).toBeGreaterThan(300) // dominant, not a 128px strip
+    // no empty placeholder art boards when the art already exists
+    expect(svg).not.toContain("ILLUSTRATOR_INSTRUCTIONS")
+  })
+
+  it("draws real dimension lines, converted to the output unit", () => {
+    const svg = renderIllustrationZone(box, { design, dimensionUnit: "cm" })
+    expect(svg).toContain("Ancho 8cm")   // 80mm -> 8cm
+    expect(svg).toContain("Alto 4.5cm")  // 45mm -> 4.5cm
+  })
+
+  it("keeps the design's own unit when no output unit is set", () => {
+    const svg = renderIllustrationZone(box, { design })
+    expect(svg).toContain("Ancho 80mm")
+    expect(svg).toContain("Alto 45mm")
+  })
+
+  it("shows PENDIENTE instead of inventing a cota when a dimension is missing", () => {
+    const svg = renderIllustrationZone(box, { design: { ...design, h: "" } })
+    expect(svg).toMatch(/PENDIENTE DE CONFIRMAR: Cotas/)
+    expect(svg).not.toContain("Ancho 80mm")
+  })
+
+  it("falls back to empty draw-here boards when there is no uploaded art", () => {
+    const svg = renderIllustrationZone(box, { slots: 2, refs: ["A", "B"], design: { name: "Logo", w: "80", h: "45" } })
+    expect(svg).not.toContain("ARTWORK__DESIGN")
+  })
+})

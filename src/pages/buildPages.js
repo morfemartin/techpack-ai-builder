@@ -6,6 +6,7 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { palette, type } from "../design/tokens.js"
 import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
 import { briefLines } from "./briefs.js"
+import { convertMeasure, formatMeasure, normalizeUnit } from "../core/units.js"
 import { partsTableLayout } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
@@ -186,7 +187,56 @@ export function renderReferenceAsset(box, { design } = {}) {
   return s
 }
 
-export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset, clipPrefix } = {}) {
+// A design page whose artwork is already uploaded: show the art itself,
+// full-size and centred, as the hero - the whole point of the page - with the
+// real width/height drawn as dimension lines and a compact spec strip. This
+// replaces the two empty "draw here" boards that used to dominate while the
+// actual design was crammed into a thin 10%-of-page reference band.
+function renderDesignArtHero(box, design, dimensionUnit) {
+  var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
+  var pad = INSET
+  var s = ""
+  s += R(box.x, box.y, box.width, box.height, "none", "#E4E6EA", "0.8")
+  s += svgChip(box.x + 8 + CHIP / 2, box.y + 8 + CHIP / 2, "D")
+  s += TX(box.x + 8 + CHIP + 8, box.y + 8 + CHIP / 2, "DISENO A ESCALA", PRINT.captionFont, true, "start", palette.ink.hex)
+
+  // Reserve a bottom strip for the spec line; the art fills everything above.
+  var stripH = BAR.h + GRID.baseline
+  var artTop = box.y + BAR.h + pad
+  var artBottom = box.y + box.height - stripH - pad
+  var artLeft = box.x + pad + 40   // room for the vertical (height) dimension line
+  var artRight = box.x + box.width - pad
+  var artW = Math.max(1, artRight - artLeft)
+  var artH = Math.max(1, artBottom - artTop)
+  s += "<image id='ARTWORK__DESIGN' data-asset-role='artwork' data-asset-label='" + sv(design.fileName || design.name || "diseno") + "' href='data:" + mime + ";base64," + design.imageData + "' x='" + artLeft + "' y='" + artTop + "' width='" + artW + "' height='" + artH + "' preserveAspectRatio='xMidYMid meet'/>"
+
+  // Real dimension lines when both sides are known, converted to the output
+  // unit. A half-filled design shows PENDIENTE instead of a made-up cota.
+  var from = normalizeUnit(design.unit)
+  var to = normalizeUnit(dimensionUnit || design.unit)
+  var wv = convertMeasure(design.w, from, to)
+  var hv = convertMeasure(design.h, from, to)
+  if (wv !== null && hv !== null) {
+    s += dimLine(artLeft, 0, artRight, 0, "Ancho " + formatMeasure(wv, to), artBottom + 14 - 0, true)
+    s += dimLine(0, artTop, 0, artBottom, "Alto " + formatMeasure(hv, to), artLeft - pad - 24 - 0, false)
+  } else {
+    s += R(box.x + pad, artBottom + 6, box.width - pad * 2, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
+    s += TX(box.x + pad + 4, artBottom + 6 + GRID.baseline / 2, "PENDIENTE DE CONFIRMAR: Cotas del diseno (mm)", PRINT.minFont, true, "start", palette.ink.hex)
+  }
+
+  // Spec strip: technique + placement, the two facts the factory needs beside
+  // the art. Kept to one line so the art keeps the room.
+  var spec = [design.tec, design.pos, design.posDetail].map(function (x) { return String(x || "").trim() }).filter(Boolean).join(" · ")
+  if (spec) {
+    var sy = box.y + box.height - stripH + GRID.baseline
+    s += TX(box.x + pad, sy, "Ejecucion: " + spec, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
+  }
+  return "<g id='ARTWORK__V1'>" + s + "</g>"
+}
+
+export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset, clipPrefix, design, dimensionUnit } = {}) {
+  // Uploaded artwork owns the page: render it as the hero, not empty boards.
+  if (design && design.imageData) return renderDesignArtHero(box, design, dimensionUnit)
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
   var noteText = note || ""
   // The illustration is the hero: it takes the WHOLE box (no note band carved

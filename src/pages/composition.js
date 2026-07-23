@@ -1,5 +1,5 @@
 import { GRID, PAGE_BODY, snapBaseline } from "../design/metrics.js"
-import { measureRegion, selectedDesign } from "./measure.js"
+import { measureRegion } from "./measure.js"
 import { layoutPolicyFor, normalizePriority } from "./pageContracts.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 
@@ -47,11 +47,10 @@ function collectRegions(page, ctx) {
   source.forEach(add)
   const unique = new Map()
   leaves.forEach((region) => { if (!unique.has(region.type)) unique.set(region.type, region) })
-  const illustration = unique.get("illustration")
-  if (illustration && page.purpose !== "cover" && (ctx && ctx.documentMode) === "illustration-handoff") {
-    const design = selectedDesign(page, ctx)
-    if (design && design.imageData) unique.set("references", { type: "references", weight: 1 })
-  }
+  // No separate `references` band any more: when a design has uploaded
+  // artwork the illustration hero now renders it full-size (see
+  // renderDesignArtHero), so a second thin reference strip would only
+  // duplicate the image and steal the hero's height.
   return [...unique.values()]
 }
 

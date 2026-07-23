@@ -375,6 +375,10 @@ function leafForRegion(region, page, ctx) {
           note: region.note || (design && design.illustrationBrief) || "",
           slotOffset: region._slotOffset,
           clipPrefix: page.id,
+          // When the design page carries the actual uploaded artwork, the hero
+          // shows THAT at full size instead of empty "draw here" boards.
+          design: isDesignPage ? design : null,
+          dimensionUnit: ctx && ctx.dimensionUnit,
         })
         return region._mosaicSlot
           ? "<g id='ARTWORK__V" + (Number(region._slotOffset) + 1) + "'>" + artworkMarkup + "</g>"

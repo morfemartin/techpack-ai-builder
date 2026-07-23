@@ -480,19 +480,20 @@ describe("Layout Engine v3 document assembly", () => {
     pages.forEach((page, index) => expect(page.svg).toContain(">" + String(index + 1).padStart(2, "0") + "</text>"))
   })
 
-  it("emits editable references and per-slot instructions nested inside artwork", () => {
+  it("renders uploaded artwork as the page hero, not a thin reference band", () => {
+    // The design carries uploaded art (ctx.designs[0].imageData). It is the
+    // whole point of the page, so it is the hero - full-size, id ARTWORK__DESIGN
+    // - and the old separate thin REFERENCES band (which crammed it into ~10%
+    // of the page while empty "draw here" boards dominated) is gone.
     const page = buildPlannedPages(plan, ctx, { documentMode: "illustration-handoff", includeIndex: true })[2]
-    for (const id of ["ARTWORK", "TECH_DATA__COLORS", "ILLUSTRATOR_INSTRUCTIONS__V1", "REFERENCES", "PAGE_CHROME__HEADER"]) {
+    for (const id of ["ARTWORK__DESIGN", "TECH_DATA__COLORS", "PAGE_CHROME__HEADER"]) {
       expect(page.svg).toContain("id='" + id + "'")
     }
-    expect(page.svg).toContain("id='DESIGNER_COMMUNICATION' data-removable='true'")
-    const artworkStart = page.svg.indexOf("id='ARTWORK'")
-    const instructionsStart = page.svg.indexOf("id='ILLUSTRATOR_INSTRUCTIONS__V1'")
-    const artworkEnd = page.svg.indexOf("</g>", instructionsStart)
-    expect(instructionsStart).toBeGreaterThan(artworkStart)
-    expect(artworkEnd).toBeGreaterThan(instructionsStart)
-    expect(page.svg).toContain("V1.1 neck seam")
-    expect(page.svg).toContain("REFERENCIA - NO A ESCALA")
+    expect(page.svg).toContain("DISENO A ESCALA")
+    expect(page.svg).not.toContain("id='REFERENCE__ASSET'")
+    // the uploaded image occupies a large hero box, not a 128px strip
+    const hero = page.svg.match(/<image[^>]*id='ARTWORK__DESIGN'[^>]*height='([\d.]+)'/)
+    expect(Number(hero[1])).toBeGreaterThan(300)
     const fontSizes = [...page.svg.matchAll(/font-size='([\d.]+)'/g)].map((match) => Number(match[1]))
     expect(Math.min(...fontSizes)).toBeGreaterThanOrEqual(10)
   })
