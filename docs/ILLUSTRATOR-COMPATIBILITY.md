@@ -9,7 +9,7 @@ TechPack AI Builder uses two complementary deliverables:
 
 A browser cannot generate Illustrator's private editing payload. Renaming an SVG to `.ai`, or adding Adobe-looking metadata, would be misleading. Adobe documents SVG, PDF, EPS and AI as supported formats, but only Illustrator can add **Preserve Illustrator Editing Capabilities** data to AI/PDF files.
 
-The production target is therefore a package containing conservative SVG pages, a manifest and an Illustrator importer. The importer creates one AI document with named A4 artboards in a four-column grid and seven global semantic layers. A later milestone will add a multipage PDF as the visual/print reference.
+The shipped package is therefore `pages/*.svg` (self-contained - uploaded images stay embedded inline as data URIs, so there is no separate assets folder or manifest to keep alongside them) plus the Illustrator importer and a LEEME.txt for whoever unzips it. The importer creates one AI document with named A4 artboards in a four-column grid and seven global semantic layers. A later milestone will add a multipage PDF as the visual/print reference.
 
 ## Format comparison
 
@@ -36,10 +36,11 @@ The exporter additionally guarantees:
 
 - explicit SVG 1.1, XLink and layer namespaces;
 - deterministic metadata in CDATA;
-- embedded images with both `href` and `xlink:href`;
-- complete Illustrator packages externalize uploaded images into `assets/`
-  with deterministic human-readable names, then the JSX importer embeds those
-  links into the saved `.ai` so the designer does not need to reconnect files;
+- embedded images with both `href` and `xlink:href`, as inline base64 data
+  URIs - each page SVG is fully self-contained, nothing to reconnect or lose
+  by moving the file (an asset-externalizing path, `prepareIllustratorSvgWithAssets`,
+  exists in `illustratorSvg.js` but is not wired into the shipped package -
+  available if a future very-large-image case needs it);
 - source font families and sizes preserved, with `dominant-baseline=central` converted to explicit baselines using the source font class metrics;
 - unique names for anonymous groups;
 - seven top-level semantic containers;
@@ -90,23 +91,27 @@ The user validated the final document in both Affinity 3.2.3 and Illustrator
 
 ## Image and logo assets
 
-User-uploaded logos and design/reference images are treated as first-class
-package assets, not anonymous inline blobs:
+User-uploaded logos and design/reference images stay embedded inline in their
+page's SVG as base64 data URIs - each page is a single self-contained file,
+nothing external to reconnect or lose:
 
 ```text
 pages/P09--design-logo-pecho-reflectivo.svg
-assets/P09--design-logo-pecho-reflectivo--reference--logo-pecho-01.png
-manifest.json
 Techpack-Import-Illustrator.jsx
+LEEME.txt
 ```
 
-The SVG page uses relative links such as `../assets/...`, so Affinity can open
-the page as long as the ZIP is decompressed with `pages/` and `assets/`
-together. Illustrator uses the JSX bridge: it opens each page, promotes the
-semantic groups into native layers, embeds every linked image and then saves the
-single multi-artboard `.ai`. The import report records `Embedded linked images`
-and `Remaining linked images`; the release target is always `Remaining linked
-images: 0`.
+Affinity opens any page in `pages/` directly, no companion folder needed.
+Illustrator uses the JSX bridge: it opens each page, promotes the semantic
+groups into native layers, and saves the single multi-artboard `.ai`.
+
+An earlier iteration externalized uploaded images into a companion `assets/`
+folder plus a `manifest.json` the importer read to relink them - useful when
+an image was large enough that inlining bloated every page SVG, but neither
+file was needed once inlining became the default, so both were dropped from
+the shipped package as unread clutter. That code path
+(`prepareIllustratorSvgWithAssets`, `src/core/illustratorSvg.js`) still exists,
+unwired, if a future very-large-image case calls for it again.
 
 An early comparison build replaced the source font stacks while also converting
 the baseline. Illustrator opened it, but the changed font metrics displaced
@@ -118,9 +123,9 @@ for the UI stack and `0.35em` for the monospaced data stack.
 ## Improvement plan
 
 1. **Current comparison:** validate one dense design page against the legacy SVG and collect screenshots.
-2. **Product integration (complete):** Blob downloads now offer original SVG, editable SVG, JSX and a complete ZIP from the export dialog.
+2. **Product integration (complete):** the export dialog collapsed to one button - "Descargar ficha completa" - producing the single ZIP (`pages/*.svg` + the JSX importer + LEEME.txt) rather than four separate downloads.
 3. **Multipage bridge (complete):** the JSX importer creates one named artboard per physical page and saves a single AI document.
-4. **Asset bridge (complete):** uploaded logos and references are packaged with readable filenames and embedded into the generated AI.
+4. **Asset bridge (superseded):** uploaded logos and references are embedded inline in each page SVG as data URIs instead of being packaged as separate linked files - simpler, and Illustrator/Affinity both read it with no companion folder. The original externalize-to-`assets/`-plus-manifest path still exists in code, unwired, for a future case where inlining bloats a page too much.
 5. **Visual master:** generate a multipage PDF and compare Illustrator output against it in automated visual regression tests.
 6. **Typography modes:** ship editable text with a font preflight and an optional outlined-text copy for visual lockoff.
 7. **Release gate:** validate XML, IDs, images, dimensions, layer/object counts, minimum text size, asset embedding and Illustrator import reports before publishing.

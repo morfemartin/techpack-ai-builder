@@ -1,5 +1,22 @@
 # Changelog
 
+See `ROADMAP.md` for the full, phase-by-phase development log with
+verification notes; this file tracks user-facing releases at a higher level.
+
+## [Unreleased]
+### Added
+- One-button Illustrator/Affinity export: "Descargar ficha completa" produces
+  a single ZIP (`pages/*.svg`, self-contained with images embedded inline;
+  the `Techpack-Import-Illustrator.jsx` importer; a `LEEME.txt` with the
+  3-step run instructions) instead of four separate format downloads. The
+  JSX importer opens each page as its own document inside Illustrator and
+  fuses them into one `Techpack-complete.ai` with named artboards (4-column
+  grid) and the 7 native semantic layers - Illustrator discards a plain SVG's
+  group ids on direct import, so the script is the only path to real layers.
+  Affinity needs no script: any page under `pages/` opens directly.
+- Post-download confirmation in the export dialog restates the 3 steps right
+  after the ZIP downloads, not only beforehand.
+
 ## [0.1.0] - 2026-07-01
 ### Added
 - Initial public release.

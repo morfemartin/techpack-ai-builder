@@ -11,6 +11,10 @@ export function SvgModal({ pages, onClose }) {
   const [selPage, setSelPage] = useState(0)
   const [packaging, setPackaging] = useState(false)
   const [failed, setFailed] = useState("")
+  // Reinforces the run-the-script step right when it matters - the pre-
+  // download instructions above the textarea are easy to skim past before
+  // there's anything to actually run yet.
+  const [justDownloaded, setJustDownloaded] = useState(false)
   if (!pages || !pages.length) return null
   var cur = pages[selPage]
   function download(content, mime, name) {
@@ -39,9 +43,11 @@ export function SvgModal({ pages, onClose }) {
     if (packaging) return
     setPackaging(true)
     setFailed("")
+    setJustDownloaded(false)
     try {
       const blob = await buildIllustratorPackageBlob(pages, illustratorImporter)
       download(blob, "application/zip", "techpack-" + pages.length + "-paginas.zip")
+      setJustDownloaded(true)
     } catch (error) {
       setFailed((error && error.message) || "No se pudo generar el paquete.")
     } finally {
@@ -106,6 +112,18 @@ export function SvgModal({ pages, onClose }) {
             Descomprimí el ZIP y corré <b>Techpack-Import-Illustrator.jsx</b> (Archivo &gt; Secuencias de comandos &gt; Otra secuencia de comandos) — arma un solo <b>.ai</b> con las {pages.length} páginas como mesas de trabajo nombradas y las 7 capas nativas reales. Affinity: abrí cualquier SVG de <b>pages/</b> directamente, sin script.
           </span>
         </div>
+        {justDownloaded && (
+          <div style={{ padding: `${space(2)}px ${space(4)}px`, background: role.priority.fill, borderBottom: hair }}>
+            <div style={{ fontSize: type.size.xs, fontWeight: 700, color: role.priority.on, marginBottom: space(1), display: "flex", alignItems: "center", gap: space(1) }}>
+              <Icon name="check_circle" size={16} color={role.priority.on} /> Descargado — próximo paso:
+            </div>
+            <ol style={{ margin: 0, paddingLeft: space(4), fontSize: type.size.xs, color: role.priority.on }}>
+              <li>Descomprimí el ZIP (dejando pages/ y el script juntos).</li>
+              <li>En Illustrator: Archivo &gt; Secuencias de comandos &gt; Otra secuencia de comandos… y elegí <b>Techpack-Import-Illustrator.jsx</b>.</li>
+              <li>Se genera <b>Techpack-complete.ai</b> con las {pages.length} páginas como mesas de trabajo y las 7 capas nativas. (Affinity: abrí un SVG de pages/ directo, sin script.)</li>
+            </ol>
+          </div>
+        )}
         <textarea
           id="svgta"
           readOnly
