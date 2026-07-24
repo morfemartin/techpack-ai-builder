@@ -178,6 +178,11 @@ export default function App() {
   const [dimensionUnit, setDimensionUnit] = useState(DEFAULT_UNIT)
   const [documentPlanning, setDocumentPlanning] = useState(false)
   const [documentPlanStatus, setDocumentPlanStatus] = useState("")
+  // AI planning failures used to degrade to the deterministic outline/layout
+  // with nothing telling the user - the document still came out fine, but
+  // silently poorer (less deliberate block choices) with no way to know that
+  // happened short of noticing the difference themselves.
+  const [documentPlanWarnings, setDocumentPlanWarnings] = useState([])
   // Positive "it is actually finished" signal. Without it the only cue was the
   // progress text disappearing, which is indistinguishable from it never
   // having started - and the preview already looks like a document while it is
@@ -458,6 +463,7 @@ export default function App() {
     setDocumentPlanning(true)
     setDocumentReady(false)
     setDocumentPlanStatus("Estructurando el documento...")
+    setDocumentPlanWarnings([])
     try {
       var baseContext = { garmentType, parts, designs, lang }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
@@ -489,6 +495,7 @@ export default function App() {
         })
       } catch {
         outline = provisionalOutline
+        setDocumentPlanWarnings((w) => [...w, "El plan de documento con IA falló - usando la estructura de páginas estándar."])
       }
       var total = outline.pages.length
       var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, total, { label: "En cola", done: 0 }) }))
@@ -530,6 +537,7 @@ export default function App() {
           plannedPages.push(planned)
         } catch {
           plannedPages.push(fallbackPageLayout(page))
+          setDocumentPlanWarnings((w) => [...w, "Página " + (i + 1) + " (" + plannedPageName(page, i) + "): el diseño con IA falló - usando el layout estándar."])
         }
         var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
         publishPages(outline.pages.map(function (p, idx) {
@@ -1140,6 +1148,15 @@ export default function App() {
               {!documentPlanning && documentReady && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.priority.fill, fontWeight: 700 }}>
                   <Icon name="check" size={14} color={role.priority.fill} /> Documento listo
+                </span>
+              )}
+              {documentPlanWarnings.length > 0 && (
+                <span
+                  title={documentPlanWarnings.join("\n")}
+                  style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}
+                >
+                  <Icon name="error" size={14} color={role.index.fill} />
+                  {documentPlanWarnings.length === 1 ? "1 página usó layout estándar (falló la IA)" : documentPlanWarnings.length + " páginas usaron layout estándar (falló la IA)"}
                 </span>
               )}
               {garmentId === "custom" && customGarment && (
