@@ -202,7 +202,12 @@ export function answerFromSeed(reqs, seed) {
     if (tokens.size === 0) return field
     const hit = seedSubjects.find((s) => [...s.tokens].some((t) => tokens.has(t)))
     if (!hit) return field
-    return { ...field, status: FIELD_STATUS.KNOWN, value: hit.value }
+    // Marks a field the PHOTO answered (not the model's own reasoning), so
+    // GarmentChat.jsx can show it in one batch confirmation ("Del analisis de
+    // fotos tome: ... ¿todo correcto?") instead of silently locking it in -
+    // the same "assumed" pattern the model's own standard defaults already
+    // get, just for evidence instead of a guess.
+    return { ...field, status: FIELD_STATUS.KNOWN, value: hit.value, fromSeed: true }
   })
   return { ...reqs, fields }
 }

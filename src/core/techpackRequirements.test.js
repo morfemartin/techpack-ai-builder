@@ -44,6 +44,16 @@ describe("answerFromSeed (photo already answered it)", () => {
     const out = answerFromSeed(reqs(), { "Tipo visible": "algo" })
     expect(out.fields.every((f) => f.status === "ask")).toBe(true)
   })
+
+  it("tags a seed-answered field with fromSeed, so the chat can offer it for confirmation/correction", () => {
+    // GarmentChat.jsx's photo-confirmation batch message (and its "Corregir"
+    // buttons) needs to tell "the photo answered this" apart from "the model
+    // assumed this is standard" - both end up status:known, but only one
+    // should be presented as evidence to confirm.
+    const out = answerFromSeed(reqs(), { "Cuello visible": "Redondo rib" })
+    expect(out.fields.find((f) => f.key === "cuello").fromSeed).toBe(true)
+    expect(out.fields.find((f) => f.key === "talles").fromSeed).toBeUndefined()
+  })
 })
 
 describe("normalizeRequirements dedup", () => {

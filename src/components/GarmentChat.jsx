@@ -234,6 +234,32 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       if (assumed.length > 0) {
         post("assistant", "Para una " + (analysis.garmentType || garmentType) + " doy por estandar: " + assumed.map((f) => f.label + " (" + f.value + ")").join(", ") + ". Si algo no aplica lo corregis despues. Ahora, lo que define tu prenda:")
       }
+      // What the PHOTO answered (answerFromSeed, techpackRequirements.js) gets
+      // confirmed out loud too, not silently locked in - a misread photo
+      // (wrong collar, a pocket that isn't actually there) should be one
+      // click to fix, not something the user discovers only on the finished
+      // page. Distinct from `assumed` above: that is the model's own
+      // standard-for-this-garment guess, this is evidence from what was
+      // actually photographed.
+      const fromPhoto = analysis.fields.filter((f) => f.status === FIELD_STATUS.KNOWN && f.fromSeed)
+      if (fromPhoto.length > 0) {
+        post("assistant", (
+          <div>
+            <div>Del análisis de fotos tomé: {fromPhoto.map((f) => f.label + " (" + f.value + ")").join(", ")}. ¿Todo correcto?</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), marginTop: space(2) }}>
+              {fromPhoto.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => handleCorrectSeedField(f.key)}
+                  style={{ padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
+                >
+                  Corregir: {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))
+      }
       setPhase("asking")
       askNext(analysis, "general")
     } catch (e) {
@@ -417,6 +443,22 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     const nextReqs = applyAnswer(reqs, currentField.key, value)
     setReqs(nextReqs)
     askNext(nextReqs, currentField.category)
+  }
+
+  // "Corregir: X" on the photo-confirmation batch (see runAnalysis) - puts
+  // that ONE field back to "ask" and re-arms the general walk on it,
+  // regardless of how far the conversation has moved on since. Always
+  // resetting to phase "asking" (not just when already there) is deliberate:
+  // by the time a human actually clicks this, the walk has virtually always
+  // already advanced past the moment the message was posted, and silently
+  // reverting the field's data without re-asking it would let a wrong
+  // photo-read fact quietly survive into the finished tech pack.
+  function handleCorrectSeedField(key) {
+    const reverted = revertField(reqs, key)
+    setReqs(reverted)
+    post("assistant", "Corrijamos eso.")
+    setPhase("asking")
+    askNext(reverted, "general")
   }
 
   function skipCurrentField() {
