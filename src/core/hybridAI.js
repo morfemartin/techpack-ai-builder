@@ -100,7 +100,7 @@ function recordNvidiaSuccess() {
 // unmodified), so this names whoever genuinely answered instead of
 // assuming. Falls back to a neutral "Studio AI" label only if the model
 // name doesn't match anything recognized - never guesses wrong.
-function localProviderLabel(model) {
+export function localProviderLabel(model) {
   const name = String(model || "")
   if (/mistral/i.test(name)) return "Mistral"
   if (/qwen/i.test(name)) return "Qwen"

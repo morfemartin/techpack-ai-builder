@@ -6,6 +6,7 @@ import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/uni
 import { translateContent } from "./core/claudeApi.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
+import { localProviderLabel } from "./core/hybridAI.js"
 import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
 import { toGrayscale } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
@@ -134,6 +135,7 @@ function newDesign() {
 export default function App() {
   const [textAIProvider] = useState(() => getTextAIProvider())
   const [localAIStatus, setLocalAIStatus] = useState(textAIProvider === "local" ? "starting" : "cloud")
+  const [localAIModel, setLocalAIModel] = useState("")
   const [step, setStep] = useState(0)
   const [garmentId, setGarmentId] = useState("cap")
   const [langs, setLangs] = useState(["ES"])
@@ -205,6 +207,7 @@ export default function App() {
       try {
         const health = await getLocalAIHealth()
         if (active) setLocalAIStatus(health.status === "ready" ? "ready" : "starting")
+        if (active) setLocalAIModel(health.model || "")
         if (active && health.status !== "ready") timer = setTimeout(check, 3000)
       } catch {
         if (active) setLocalAIStatus("offline")
@@ -1256,7 +1259,7 @@ export default function App() {
             title={textAIProvider === "local" ? "Ir a la version publica (NVIDIA)" : "Ir a la version estudio (Qwen local, privado)"}
             style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${localAIStatus === "ready" ? role.highlight.fill : C.white.hex}`, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", textDecoration: "none" }}
           >
-            {textAIProvider === "local" ? `Studio AI · ${localAIStatus === "ready" ? "Qwen listo" : localAIStatus === "offline" ? "servicio apagado" : "cargando"}` : "AI · NVIDIA"}
+            {textAIProvider === "local" ? `Studio AI · ${localAIStatus === "ready" ? localProviderLabel(localAIModel) + " listo" : localAIStatus === "offline" ? "servicio apagado" : "cargando"}` : "AI · NVIDIA"}
             <span style={{ opacity: 0.55 }}>{textAIProvider === "local" ? "→ publica" : "→ studio"}</span>
           </a>
         </div>
