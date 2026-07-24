@@ -125,6 +125,15 @@ export function createStudioBridge({
   allowedOrigins = DEFAULT_ALLOWED_ORIGINS,
   fetchImpl = fetch,
   readiness = { status: "starting" },
+  // Present only when the upstream is a real hosted API (Mistral) rather
+  // than the local MLX server - forwarded as a standard OpenAI-shaped
+  // Authorization header. Never logged, never echoed back to the browser:
+  // the browser only ever talks to THIS bridge, on 127.0.0.1, exactly like
+  // api/deepseek.js is the sole custodian of the NVIDIA key server-side.
+  apiKey = "",
+  // Reported on /health so the UI can show which upstream is actually
+  // answering ("Mistral" vs "Qwen") instead of a hardcoded label.
+  provider = "mlx",
 } = {}) {
   return createServer(async (req, res) => {
     if (!allowedHost(req.headers.host)) return sendJSON(res, 403, { error: "host_forbidden" })
@@ -134,7 +143,7 @@ export function createStudioBridge({
     const url = new URL(req.url, "http://127.0.0.1")
     if (req.method === "GET" && url.pathname === "/health") {
       const ready = readiness.status === "ready"
-      return sendJSON(res, ready ? 200 : 503, { status: readiness.status || "starting", provider: "mlx", model, private: true })
+      return sendJSON(res, ready ? 200 : 503, { status: readiness.status || "starting", provider, model, private: true })
     }
 
     if (req.method !== "POST" || url.pathname !== "/v1/chat/completions") {
@@ -145,7 +154,10 @@ export function createStudioBridge({
       const payload = sanitizeCompletionPayload(await readJSON(req), model)
       const upstream = await fetchImpl(upstreamBaseURL + "/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(180000),
       })

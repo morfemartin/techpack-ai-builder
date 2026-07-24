@@ -41,7 +41,61 @@ describe("studio AI bridge security", () => {
       const { port } = bridge.address()
       const response = await fetch(`http://127.0.0.1:${port}/health`, { headers: { Origin: "http://localhost:3000" } })
       expect(response.status).toBe(200)
-      expect(await response.json()).toMatchObject({ status: "ready", private: true })
+      expect(await response.json()).toMatchObject({ status: "ready", private: true, provider: "mlx" })
+    } finally {
+      await new Promise((resolve) => bridge.close(resolve))
+    }
+  })
+
+  it("reports the configured provider (e.g. mistral) on /health instead of a hardcoded label", async () => {
+    const bridge = createStudioBridge({ readiness: { status: "ready" }, provider: "mistral", model: "mistral-small-2603" })
+    await new Promise((resolve) => bridge.listen(0, "127.0.0.1", resolve))
+    try {
+      const { port } = bridge.address()
+      const response = await fetch(`http://127.0.0.1:${port}/health`, { headers: { Origin: "http://localhost:3000" } })
+      expect(await response.json()).toMatchObject({ provider: "mistral", model: "mistral-small-2603" })
+    } finally {
+      await new Promise((resolve) => bridge.close(resolve))
+    }
+  })
+
+  it("forwards a hosted-API key as a standard Authorization header to the upstream", async () => {
+    let capturedHeaders = null
+    const fetchImpl = async (url, init) => {
+      capturedHeaders = init.headers
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } })
+    }
+    const bridge = createStudioBridge({ apiKey: "secret-mistral-key", fetchImpl })
+    await new Promise((resolve) => bridge.listen(0, "127.0.0.1", resolve))
+    try {
+      const { port } = bridge.address()
+      await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:3000", "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hola" }] }),
+      })
+      expect(capturedHeaders.Authorization).toBe("Bearer secret-mistral-key")
+    } finally {
+      await new Promise((resolve) => bridge.close(resolve))
+    }
+  })
+
+  it("never sends an Authorization header when no apiKey is configured (the local MLX path)", async () => {
+    let capturedHeaders = null
+    const fetchImpl = async (url, init) => {
+      capturedHeaders = init.headers
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } })
+    }
+    const bridge = createStudioBridge({ fetchImpl })
+    await new Promise((resolve) => bridge.listen(0, "127.0.0.1", resolve))
+    try {
+      const { port } = bridge.address()
+      await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:3000", "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: "hola" }] }),
+      })
+      expect(capturedHeaders.Authorization).toBeUndefined()
     } finally {
       await new Promise((resolve) => bridge.close(resolve))
     }
