@@ -275,6 +275,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     } finally {
       setSending(false)
       setLiveReply("")
+      setAIStatus("")
     }
   }
 
@@ -317,6 +318,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     } finally {
       setSending(false)
       setLiveReply("")
+      setAIStatus("")
     }
   }
 
@@ -351,6 +353,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     } finally {
       setSending(false)
       setLiveReply("")
+      setAIStatus("")
     }
   }
 
@@ -509,6 +512,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     } finally {
       setSending(false)
       setLiveReply("")
+      setAIStatus("")
     }
   }
 
@@ -533,6 +537,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       post("assistant", "No pude procesarlo con la IA, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?")
     } finally {
       setSending(false)
+      setAIStatus("")
     }
   }
 
