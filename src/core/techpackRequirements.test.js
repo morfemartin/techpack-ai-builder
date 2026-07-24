@@ -13,7 +13,7 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, answerFieldQuestion, analyzeAdditionalNotes } from "./techpackRequirements.js"
+import { analyzeRequirements, analyzeDesignExpression, mergeDesignFields, reqsToDesigns, authorIllustrationBriefs, attachIllustrationBriefs, answerFieldQuestion, analyzeAdditionalNotes, ensureDetailUnits } from "./techpackRequirements.js"
 
 describe("answerFromSeed (photo already answered it)", () => {
   const reqs = () => ({
@@ -529,6 +529,42 @@ describe("mergeDesignFields", () => {
     const merged = mergeDesignFields(null, designFields)
     expect(merged.fields).toEqual(designFields)
     expect(merged.garmentType).toBeUndefined()
+  })
+})
+
+describe("ensureDetailUnits", () => {
+  function detailField(label) {
+    return { key: "x", label, category: "design", designField: "detail", status: "ask", options: ["A", "B"] }
+  }
+
+  it("appends a default unit to a measurement-sounding label with none", () => {
+    const [result] = ensureDetailUnits([detailField("Distancia al hombro")])
+    expect(result.label).toBe("Distancia al hombro (cm)")
+  })
+
+  it("leaves a label that already names a unit untouched", () => {
+    const [result] = ensureDetailUnits([detailField("Ancho del bordado (mm)")])
+    expect(result.label).toBe("Ancho del bordado (mm)")
+  })
+
+  it("does not touch a detail field that isn't asking for a measurement", () => {
+    const [result] = ensureDetailUnits([detailField("Material de los botones")])
+    expect(result.label).toBe("Material de los botones")
+  })
+
+  it("only touches category:design designField:detail fields, never general/other design fields", () => {
+    const fields = [
+      { key: "a", label: "Distancia al hombro", category: "general", status: "ask", options: ["A", "B"] },
+      { key: "b", label: "Distancia al hombro", category: "design", designField: "position", status: "ask", options: ["A", "B"] },
+    ]
+    const result = ensureDetailUnits(fields)
+    expect(result[0].label).toBe("Distancia al hombro")
+    expect(result[1].label).toBe("Distancia al hombro")
+  })
+
+  it("handles a missing/empty array without throwing", () => {
+    expect(ensureDetailUnits(undefined)).toEqual([])
+    expect(ensureDetailUnits([])).toEqual([])
   })
 })
 

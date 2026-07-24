@@ -648,6 +648,34 @@ export function fallbackDesignFields(reqs) {
  * them into real design objects. Reuses normalizeRequirements() - same field
  * shape as analyzeRequirements(), just with the two extra design-only keys.
  */
+// A design 'detail' field asking for a measurement (distancia, tamano,
+// ancho, diametro...) prints its bare numeric answer straight onto the page
+// (briefs.js) - without an explicit unit, "25" reads as meaningless out of
+// context (the same ambiguity Phase 1 stopped from mislabeling as
+// "Ubicacion: 25", now closed from the INPUT side too). The prompt above
+// asks the model to suffix the unit itself, but a model can be told and
+// still forget - this is the deterministic backstop, not a validator
+// rejection: rejecting the whole design-analysis response over one missing
+// unit would risk discarding otherwise-good fields (the design task's
+// validator already falls back to an EMPTY field list on failure), so this
+// only ever ADDS a default unit to the label text, never fails the call.
+const MEASUREMENT_DETAIL_WORDS = /\b(distancia|tamano|ancho|alto|largo|diametro|medida|profundidad|separacion|altura|longitud)\b/
+const HAS_UNIT_SUFFIX = /\((cm|mm|in|pulgadas?|pulg)\)\s*$/i
+
+function normalizeForUnitCheck(value) {
+  return String(value || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+}
+
+export function ensureDetailUnits(fields) {
+  return (Array.isArray(fields) ? fields : []).map((field) => {
+    if (!field || field.category !== "design" || field.designField !== "detail") return field
+    const label = String(field.label || "")
+    if (!label || !MEASUREMENT_DETAIL_WORDS.test(normalizeForUnitCheck(label))) return field
+    if (HAS_UNIT_SUFFIX.test(label)) return field
+    return { ...field, label: label.trim() + " (cm)" }
+  })
+}
+
 export async function analyzeDesignExpression({ garmentType, generalFields, tecs, lang = "ES", onProgress, onStatus, signal }) {
   const generalText = generalFields && generalFields.length > 0 ? JSON.stringify(generalFields) : "(sin datos de construccion)"
   const instructions =
@@ -671,6 +699,9 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "Sub-preguntas condicionales: si el elemento implica detalles tecnicos que cambian produccion, agrega campos 'detail' especificos. " +
     "Ejemplos: capucha de dos caras -> archivo dividido, union y margen de seguridad; cierre personalizado -> troquel vs archivo existente; diseno diferente frente/espalda -> archivo por lado. " +
     "Cuando una sub-pregunta sea util pero no obligatoria, marca optional:true (boolean). Si es necesaria para fabricar bien, optional:false u omitido.\n\n" +
+    "Si un campo 'detail' pide una MEDIDA (distancia, tamano, ancho, alto, diametro, profundidad), la 'label' DEBE " +
+    "terminar con la unidad entre parentesis, ej: 'Distancia al hombro (cm)' - nunca 'Distancia al hombro' a secas, " +
+    "porque una respuesta numerica sin unidad es ambigua en la ficha final.\n\n" +
     "ANATOMIA - regla dura: solo podes nombrar ubicaciones que existan FISICAMENTE en una '" + garmentType + "'. " +
     "Antes de escribir una posicion, preguntate si esa parte existe en esta prenda. Unas medias no tienen pecho ni " +
     "espalda: sus ubicaciones son puno, tobillo, empeine, talon, planta. Un pantalon no tiene manga ni cuello. " +
@@ -712,7 +743,8 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
         signal,
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de disenos valido.")
-  return normalizeRequirements(parsed, garmentType)
+  const normalized = normalizeRequirements(parsed, garmentType)
+  return { ...normalized, fields: ensureDetailUnits(normalized.fields) }
 }
 
 // Merges freshly-analyzed design fields into an existing reqs object without
@@ -935,5 +967,5 @@ export async function analyzeAdditionalNotes({ garmentType, existingFields, note
     signal,
   })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no pudo interpretar esas notas.")
-  return normalizeRequirements(parsed, garmentType).fields
+  return ensureDetailUnits(normalizeRequirements(parsed, garmentType).fields)
 }
