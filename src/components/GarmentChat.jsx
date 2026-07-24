@@ -8,6 +8,7 @@ import {
 import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
 import { authorProductionQuestions } from "../core/productionReview.js"
 import { readDesignImageFile } from "../core/helpers.js"
+import { ambiguousGarmentTerm } from "../core/garmentLexicon.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 
@@ -84,6 +85,10 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   // design page fell back to two empty V1/V2 boards no matter what was drawn.
   const [designImages, setDesignImages] = useState({})
   const [designImageError, setDesignImageError] = useState(null)
+  // Set while a typed garment name is genuinely ambiguous (see
+  // garmentLexicon.js) - phase stays "naming" until resolved, so the walker
+  // never reaches the model with a name it would have had to guess at.
+  const [disambiguation, setDisambiguation] = useState(null)
   const scrollRef = useRef(null)
   const analyzedFor = useRef(null)
   // Monotonic id for the layer-1 investigation. Only the newest run may write
@@ -375,7 +380,28 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
 
   function submitName(value) {
     post("user", value)
+    // A genuinely ambiguous term (see garmentLexicon.js) asks ONE clarifying
+    // question instead of letting the model silently pick a meaning - stays
+    // in "naming" phase until resolveDisambiguation() below fires.
+    const ambiguity = ambiguousGarmentTerm(value)
+    if (ambiguity) {
+      setDisambiguation(ambiguity)
+      post("assistant", ambiguity.question)
+      return
+    }
     setGarmentLabel(value)
+    setPhase("analyzing")
+  }
+
+  // Resolves a pending disambiguation (see submitName) to an unambiguous
+  // garment name, either from a clicked option or free-typed text - never
+  // re-checks ambiguousGarmentTerm on that text, since a resolved label can
+  // still contain the ambiguous word itself (e.g. "Camisa de franela...")
+  // and would otherwise loop back into the same question.
+  function resolveDisambiguation(resolvedType) {
+    post("user", resolvedType)
+    setDisambiguation(null)
+    setGarmentLabel(resolvedType)
     setPhase("analyzing")
   }
 
@@ -539,6 +565,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     const value = (valueOverride !== undefined ? valueOverride : input).trim()
     if (!value || sending) return
     setInput("")
+    if (disambiguation) return resolveDisambiguation(value)
     if (phase === "naming") return submitName(value)
     if (isWalking && currentField && looksLikeQuestion(value)) return submitTangentQuestion(value)
     if (isWalking) return submitAnswer(value)
@@ -659,6 +686,21 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               )}
             </div>
           )}
+          {/* Disambiguation chips for an ambiguous garment name - click to resolve, or type your own. */}
+          {disambiguation && !sending && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), alignSelf: "flex-start", maxWidth: "90%" }}>
+              {disambiguation.options.map((opt, i) => (
+                <button
+                  key={i}
+                  onClick={() => resolveDisambiguation(opt.resolvedType)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
+                >
+                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Numbered option chips for the current question - click to answer, or type your own. */}
           {isWalking && currentField && currentField.options && currentField.options.length > 0 && !sending && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), alignSelf: "flex-start", maxWidth: "90%" }}>
@@ -723,7 +765,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               onKeyDown={(e) => {
                 if (e.key === "Enter") send()
               }}
-              placeholder={phase === "asking" ? "Elegí una opción, escribí la tuya, o preguntá algo..." : phase === "finalCheck" ? "Algo que no te pregunté (opcional)..." : "Escribí tu respuesta..."}
+              placeholder={disambiguation ? "Elegí una opción o escribí la tuya..." : phase === "asking" ? "Elegí una opción, escribí la tuya, o preguntá algo..." : phase === "finalCheck" ? "Algo que no te pregunté (opcional)..." : "Escribí tu respuesta..."}
               disabled={sending}
               style={{ flex: 1, padding: space(3), border: "none", outline: "none", fontFamily: type.fonts.ui, fontSize: type.size.base, background: sending ? "#F7F7F8" : C.white.hex }}
             />
