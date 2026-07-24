@@ -128,10 +128,16 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     return heading + purpose + example
   }
 
+  // Deliberately shows a COUNT, never the model's raw field labels mid-stream.
+  // Those labels are unverified until the response is fully parsed and run
+  // through dropIncoherentFields/answerFromSeed (techpackRequirements.js) -
+  // a field the model streams out (e.g. "✓ Tipo de cierre" on a plain tee)
+  // can be one the coherence guard removes a moment later. Flashing it first
+  // and then silently making it vanish read as a glitch, not as progress.
   function showStructuredStream(progressUpdate, action) {
     const labels = progressUpdate && progressUpdate.completedLabels ? progressUpdate.completedLabels : []
     if (labels.length > 0) {
-      setLiveReply(action + "\n" + labels.map((label) => "✓ " + label).join("\n"))
+      setLiveReply(action + " " + labels.length + (labels.length === 1 ? " campo detectado…" : " campos detectados…"))
     }
   }
 
