@@ -166,6 +166,10 @@ export default function App() {
   const [visionExtracting, setVisionExtracting] = useState(false)
   const [visionError, setVisionError] = useState(null)
   const [visionProgress, setVisionProgress] = useState(null)
+  // Passes/photos the extraction skipped after a failure (extractGarmentFromImages's
+  // warnings[] - visionExtract.js) - shown so a thinner seed is explained
+  // instead of silently discovered later as "why didn't it catch the collar".
+  const [visionWarnings, setVisionWarnings] = useState([])
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
   const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
@@ -217,6 +221,7 @@ export default function App() {
       setVisionSeed(null)
       setVisionError(null)
       setVisionProgress(null)
+      setVisionWarnings([])
     }
     if (id === "custom") {
       setCustomGarment(null)
@@ -250,6 +255,7 @@ export default function App() {
     setVisionExtracting(true)
     setVisionError(null)
     setVisionProgress(null)
+    setVisionWarnings([])
     try {
       var split = await Promise.all(files.map((f) => splitImageIntoQuadrants(f)))
       var photoTotal = split.length
@@ -262,7 +268,10 @@ export default function App() {
       })
       var result = await extractGarmentFromImages(images, {
         lang: "ES",
-        onProgress: (progress) => setVisionProgress(progress),
+        onProgress: (progress) => {
+          setVisionProgress(progress)
+          if (progress.warning) setVisionWarnings((w) => [...w, progress.warning])
+        },
       })
       setVisionSeed(result)
     } catch (err) {
@@ -787,6 +796,7 @@ export default function App() {
                 <div style={{ border: hair, padding: space(2), fontSize: type.size.xs, color: C.ink.hex, background: C.white.hex }}>
                   <div style={{ fontWeight: 700, marginBottom: space(1) }}>{visionProgress.label}</div>
                   {visionProgress.partialText && <div style={{ fontFamily: type.fonts.data, opacity: 0.75, wordBreak: "break-word" }}>{visionProgress.partialText}</div>}
+                  {visionProgress.warning && <div style={{ color: role.index.fill, marginTop: space(1) }}>{visionProgress.warning}</div>}
                 </div>
               )}
               {visionError && (
@@ -808,6 +818,18 @@ export default function App() {
                   ) : (
                     <div style={{ opacity: 0.7 }}>No se detectaron atributos con certeza - se preguntará todo en "Piezas".</div>
                   )}
+                </div>
+              )}
+              {visionWarnings.length > 0 && (
+                <div style={{ border: hair, borderLeft: `${space(1)}px solid ${role.index.fill}`, padding: space(2), fontSize: type.size.xs, color: C.ink.hex, background: C.white.hex }}>
+                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>
+                    {visionWarnings.length === 1 ? "1 paso del análisis no se completó:" : visionWarnings.length + " pasos del análisis no se completaron:"}
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: space(4), opacity: 0.85 }}>
+                    {visionWarnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>

@@ -288,13 +288,45 @@ export async function extractDetailedGarmentFromImages(images, { lang = "ES", mo
   const hasPhotoGroups = images.some((img) => img && img.photoIndex !== undefined)
   if (!hasPhotoGroups) {
     const settled = await mapWithConcurrency(images, currentVisionConcurrency, async (img, i) => {
-      try { return { ok: true, value: await callFor(img, i) } } catch (error) { return { ok: false, error } }
+      try { return { ok: true, value: await callFor(img, i) } } catch (error) { return { ok: false, error, img, i } }
     })
     const results = settled.filter((item) => item.ok).map((item) => item.value)
     if (results.length === 0) throw settled[0].error
+    // A photo that failed but wasn't the ONLY one still degrades the seed
+    // silently unless this says so - same "fail loudly, don't just go
+    // quieter" rule as the photo-grouped path below.
+    const warnings = settled
+      .filter((item) => !item.ok)
+      .map((item) => {
+        const message = `${item.img.fileName ? "Foto \"" + item.img.fileName + "\"" : "Una foto"}: no se pudo analizar - continúo sin ella.`
+        if (onProgress) onProgress({ imageIndex: item.i, warning: message })
+        return message
+      })
     const analysis = mergeVisionAnalyses(results)
     const seed = Object.keys(analysis.legacySeed || {}).length > 0 ? analysis.legacySeed : visionAnalysisToSeed(analysis)
-    return { garmentType: analysis.garmentType, seed, analysis }
+    return { garmentType: analysis.garmentType, seed, analysis, warnings }
+  }
+
+  // Human-readable name for a pass that failed silently before this - a
+  // multi-pass photo upload could lose its classification/orientation/
+  // construction/verification/artwork read (or a whole detail crop) with
+  // NOTHING telling the user, just a thinner seed at the end. "Fail loudly"
+  // (the house rule everywhere else in this codebase) applies here too: these
+  // ARE recoverable (the extraction still finishes with whatever succeeded),
+  // so they are warnings, not thrown errors - but they must be visible ones.
+  const PASS_LABELS = {
+    classification: "clasificación del tipo de prenda",
+    orientation: "orientación de la foto",
+    construction: "construcción visible",
+    verification: "verificación de detalles",
+    artwork: "diseños/arte visibles",
+  }
+
+  function notePassFailure(warnings, pass, photoIndex, photoTotal) {
+    const photoLabel = photoTotal > 1 ? `Foto ${photoIndex + 1}/${photoTotal}` : "La foto"
+    const message = `${photoLabel}: no se pudo completar el análisis de ${PASS_LABELS[pass] || pass} - continúo sin ese dato.`
+    warnings.push(message)
+    if (onProgress) onProgress({ photoIndex, photoTotal, pass, warning: message })
   }
 
   const groups = new Map()
@@ -304,9 +336,11 @@ export async function extractDetailedGarmentFromImages(images, { lang = "ES", mo
     groups.get(key).push([img, i])
   })
   const results = []
+  const warnings = []
   for (const key of [...groups.keys()].sort((a, b) => a - b)) {
     const entries = groups.get(key)
     const full = entries.find(([img]) => (img.kind || "full") === "full")
+    const photoTotal = (full ? full[0].photoTotal : entries[0][0].photoTotal) || 1
     if (full) {
       const identity = await callFor(full[0], full[1], { pass: "identity" })
       results.push(identity)
@@ -316,45 +350,55 @@ export async function extractDetailedGarmentFromImages(images, { lang = "ES", mo
           const classification = await callFor(full[0], full[1], { pass: "classification" })
           results.push(classification)
           family = classification.garmentType
-        } catch {}
+        } catch { notePassFailure(warnings, "classification", key, photoTotal) }
       }
       try {
         results.push(await callFor(full[0], full[1], { pass: "orientation", garmentType: family }))
-      } catch {}
+      } catch { notePassFailure(warnings, "orientation", key, photoTotal) }
       try {
         results.push(await callFor(full[0], full[1], { pass: "construction", garmentType: family }))
       } catch (error) {
         if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
+        notePassFailure(warnings, "construction", key, photoTotal)
       }
       try {
         results.push(await callFor(full[0], full[1], { pass: "verification", garmentType: family }))
       } catch (error) {
         if (error && (error.status === 503 || error.status === 504)) currentVisionConcurrency = 1
+        notePassFailure(warnings, "verification", key, photoTotal)
       }
       // `surface` dropped: its signal (fit/shoulder/cuffs/hem + artwork) is
       // already covered by the construction pass + the artwork pass, so it was
       // a near-duplicate call against the rate limit.
       try {
         results.push(await callFor(full[0], full[1], { pass: "artwork", garmentType: family }))
-      } catch {}
+      } catch { notePassFailure(warnings, "artwork", key, photoTotal) }
     }
     // Cap detail crops per photo - quadrants only add low-rank supplementary
     // detail, so processing the first VISION_MAX_QUADRANTS keeps coverage while
     // roughly halving the detail calls against NVIDIA's rate limit.
     const details = entries.filter((entry) => entry !== full).slice(0, VISION_MAX_QUADRANTS)
     const settled = await mapWithConcurrency(details, currentVisionConcurrency, async ([img, i]) => {
-      try { return await callFor(img, i) } catch { return null }
+      try {
+        return await callFor(img, i)
+      } catch {
+        const photoLabel = photoTotal > 1 ? `Foto ${key + 1}/${photoTotal}` : "La foto"
+        const message = `${photoLabel}: un detalle (${img.quadrantLabel || "recorte"}) no se pudo analizar - continúo sin él.`
+        warnings.push(message)
+        if (onProgress) onProgress({ photoIndex: key, photoTotal, pass: "detail", quadrantLabel: img.quadrantLabel, warning: message })
+        return null
+      }
     })
     results.push(...settled.filter(Boolean))
   }
   const analysis = mergeVisionAnalyses(results)
   const seed = Object.keys(analysis.legacySeed || {}).length > 0 ? analysis.legacySeed : visionAnalysisToSeed(analysis)
-  return { garmentType: analysis.garmentType, seed, analysis }
+  return { garmentType: analysis.garmentType, seed, analysis, warnings }
 }
 
 export async function extractGarmentFromImages(images, options = {}) {
   const result = await extractDetailedGarmentFromImages(images, options)
-  return { garmentType: result.garmentType, seed: result.seed }
+  return { garmentType: result.garmentType, seed: result.seed, warnings: result.warnings || [] }
 }
 
 // Single targeted vision call (deliberately NOT quadrant-split - this answers

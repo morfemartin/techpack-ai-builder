@@ -117,7 +117,7 @@ describe("extractGarmentFromImages", () => {
     deepseekChatStream.mockResolvedValue('{"garmentType":"Camisa","seed":{"Color":"Azul"}}')
     const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }])
 
-    expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul" } })
+    expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul" }, warnings: [] })
     expect(deepseekChatStream).toHaveBeenCalledTimes(1)
     const call = deepseekChatStream.mock.calls[0][0]
     expect(call.messages[0].content).toHaveLength(2) // 1 text block + 1 image
@@ -151,7 +151,7 @@ describe("extractGarmentFromImages", () => {
 
     const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }, { fileName: "b.jpg", base64: "BBB" }])
 
-    expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" } })
+    expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" }, warnings: [] })
     expect(deepseekChatStream).toHaveBeenCalledTimes(2)
     for (const call of deepseekChatStream.mock.calls) {
       expect(call[0].messages[0].content).toHaveLength(2) // never more than 1 image per call
@@ -178,14 +178,24 @@ describe("extractGarmentFromImages", () => {
 
   describe("photo-grouped (quadrant-tagged) images", () => {
     it("processes photo groups in order, full-before-quadrants within a photo, and merges everything", async () => {
+      // photo 0 (type from identity, 1 quadrant): identity+orientation+
+      // construction+verification+artwork + 1 quadrant = 6; photo 1 (no type,
+      // no quadrant): identity+classification+orientation+construction+
+      // verification+artwork = 6. Total 12 (was 14 before dropping `surface`) -
+      // one mock per actual call, so nothing runs out of queued responses.
       deepseekChatStream
-        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}') // photo 0 full
-        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 construction audit
+        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}') // photo 0 identity
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 orientation
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 construction
         .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 verification
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 0 artwork
         .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble pespunte"}}') // photo 0 quadrant
-        .mockResolvedValueOnce('{"garmentType":"","seed":{"Cierre":"Metal"}}') // photo 1 full (no type - shouldn't matter, photo 0 already won)
-        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 construction audit
+        .mockResolvedValueOnce('{"garmentType":"","seed":{"Cierre":"Metal"}}') // photo 1 identity (no type - shouldn't matter, photo 0 already won)
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 classification (no type still)
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 orientation
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 construction
         .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 verification
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // photo 1 artwork
 
       const images = [
         { fileName: "a.jpg", base64: "AAA", photoIndex: 0, photoTotal: 2, kind: "full" },
@@ -194,11 +204,7 @@ describe("extractGarmentFromImages", () => {
       ]
       const result = await extractGarmentFromImages(images)
 
-      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble pespunte", Cierre: "Metal" } })
-      // photo 0 (type from identity, 1 quadrant): identity+orientation+
-      // construction+verification+artwork + 1 quadrant = 6; photo 1 (no type,
-      // no quadrant): identity+classification+orientation+construction+
-      // verification+artwork = 6. Total 12 (was 14 before dropping `surface`).
+      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble pespunte", Cierre: "Metal" }, warnings: [] })
       expect(deepseekChatStream).toHaveBeenCalledTimes(12)
     })
 
@@ -253,7 +259,7 @@ describe("extractGarmentFromImages", () => {
         .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Color":"Azul"}}')
         .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Cierre":"Botones"}}')
       const result = await extractGarmentFromImages([{ fileName: "a.jpg", base64: "AAA" }, { fileName: "b.jpg", base64: "BBB" }])
-      expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" } })
+      expect(result).toEqual({ garmentType: "Camisa", seed: { Color: "Azul", Cierre: "Botones" }, warnings: [] })
     })
 
     it("caps each photo's full+quadrants at 3 concurrent calls", async () => {
@@ -299,23 +305,65 @@ describe("extractGarmentFromImages", () => {
         { fileName: "a.jpg", base64: "AAA-q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
       ])
 
-      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Pespunte visible" } })
+      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Pespunte visible" }, warnings: [] })
     })
 
     it("keeps the full-image result when one quadrant fails", async () => {
+      // Family comes back truthy from identity ("Hoodie"), so classification
+      // is skipped: the full-image calls are identity, orientation,
+      // construction, verification, artwork (5), then the 2 quadrants (7
+      // total) - one mock per actual call, so only the intended quadrant
+      // (q1) fails and nothing runs out of queued responses.
       deepseekChatStream
-        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}')
-        .mockRejectedValueOnce(Object.assign(new Error("capacity"), { status: 503 }))
-        .mockResolvedValueOnce('{"garmentType":"","seed":{}}')
-        .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble"}}')
-        .mockResolvedValueOnce('{"garmentType":"","seed":{}}')
+        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}') // identity
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // orientation
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // construction
+        .mockResolvedValueOnce('{"garmentType":"","seed":{"Costura":"Doble"}}') // verification
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // artwork
+        .mockRejectedValueOnce(Object.assign(new Error("capacity"), { status: 503 })) // quadrant q1 - the one that fails
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // quadrant q2
       const result = await extractGarmentFromImages([
         { fileName: "a.jpg", base64: "full", photoIndex: 0, photoTotal: 1, kind: "full" },
         { fileName: "a.jpg", base64: "q1", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior izquierdo" },
         { fileName: "a.jpg", base64: "q2", photoIndex: 0, photoTotal: 1, kind: "quadrant", quadrantLabel: "superior derecho" },
       ])
-      expect(result).toEqual({ garmentType: "Hoodie", seed: { Color: "Negro", Costura: "Doble" } })
+      expect(result.garmentType).toBe("Hoodie")
+      expect(result.seed).toEqual({ Color: "Negro", Costura: "Doble" })
+      // The swallowed quadrant failure is now a visible warning instead of
+      // silently thinning the seed with no trace.
+      expect(result.warnings).toEqual(["La foto: un detalle (superior izquierdo) no se pudo analizar - continúo sin él."])
       expect(deepseekChatStream.mock.calls.every(([options]) => options.provider === "nvidia" && [15000, 30000].includes(options.timeoutMs))).toBe(true)
+    })
+
+    it("surfaces a failed full-image pass (not just a failed quadrant) as a live warning", async () => {
+      deepseekChatStream
+        .mockResolvedValueOnce('{"garmentType":"Hoodie","seed":{"Color":"Negro"}}') // identity
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // orientation
+        .mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 })) // construction - this one fails
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // verification
+        .mockResolvedValueOnce('{"garmentType":"","seed":{}}') // artwork
+      const events = []
+      const result = await extractGarmentFromImages(
+        [{ fileName: "a.jpg", base64: "full", photoIndex: 0, photoTotal: 1, kind: "full" }],
+        { onProgress: (e) => events.push(e) }
+      )
+      expect(result.warnings).toEqual(["La foto: no se pudo completar el análisis de construcción visible - continúo sin ese dato."])
+      // The failure is reported live via onProgress too, not only in the
+      // final summary - a multi-minute multi-photo upload shouldn't have to
+      // wait until the very end to learn a pass was skipped.
+      expect(events.some((e) => e.pass === "construction" && e.warning)).toBe(true)
+    })
+
+    it("reports a whole failed photo as a warning on the flat/legacy (non-grouped) path", async () => {
+      deepseekChatStream
+        .mockResolvedValueOnce('{"garmentType":"Camisa","seed":{"Color":"Azul"}}')
+        .mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }))
+      const result = await extractGarmentFromImages([
+        { fileName: "a.jpg", base64: "AAA" },
+        { fileName: "b.jpg", base64: "BBB" },
+      ])
+      expect(result.garmentType).toBe("Camisa")
+      expect(result.warnings).toEqual(['Foto "b.jpg": no se pudo analizar - continúo sin ella.'])
     })
   })
 })
