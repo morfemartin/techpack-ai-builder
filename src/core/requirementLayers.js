@@ -372,3 +372,48 @@ export function mergeAdditionalGeneralAsk({ garmentType, layeredFields, modelFie
   }
   return extra
 }
+
+// Deterministic question order for the general (construction) walk - a
+// production-logical progression instead of whatever order the model
+// happened to stream its fields in (which is model-order, not "how a
+// technician would actually ask"). Coarse, keyword-based buckets on purpose:
+// a handful of Spanish construction words per tier, not an exhaustive
+// per-garment vocabulary - the same "stay coarse, do not overfit" discipline
+// buildLayeredRequirements above already uses for its own field templates.
+// Ties within a bucket keep the model's original order (stable sort).
+const INTAKE_RANK_BUCKETS = [
+  // 0. What the whole garment IS - fabric, silhouette, use, fit, size range.
+  ["tela", "fibra", "composicion", "silueta", "uso", "fit", "calce", "ajuste", "talle"],
+  // 1. Unmatched fields default here (see intakeRank) - general construction
+  // facts that do not name a specific visible part.
+  ["construccion", "hombro", "costura", "pliegue", "pinza"],
+  // 2. The visible top-to-bottom parts, in the order a technician inspects them.
+  ["cuello", "escote", "manga", "puno", "bajo", "dobladillo", "terminacion", "acabado"],
+  // 3. Closures and hardware.
+  ["cierre", "boton", "zipper", "cremallera", "broche", "tapeta", "avio"],
+  // 4. Design/artwork/branding.
+  ["diseno", "logo", "bordado", "estampado", "aplicacion", "print"],
+  // 5. Labels, packaging, production notes - lowest priority, asked last.
+  ["etiqueta", "empaque", "packaging", "produccion", "requisito"],
+]
+const UNMATCHED_RANK = 1
+
+function intakeRank(field) {
+  const text = normalize((field.label || "") + " " + (field.key || "") + " " + (field.layer || ""))
+  for (let i = 0; i < INTAKE_RANK_BUCKETS.length; i++) {
+    if (INTAKE_RANK_BUCKETS[i].some((word) => text.includes(word))) return i
+  }
+  return UNMATCHED_RANK
+}
+
+// Stable-sorts general-category ASK fields into the rank above. Only ever
+// applied to "general" (construction) fields by pendingFields() below -
+// design fields keep their designSlot grouping (re-sorting would scatter one
+// design's name/position/technique/detail questions apart from each other),
+// and production fields keep whatever order productionReview.js gave them.
+export function sortFieldsForIntake(fields) {
+  return fields
+    .map((field, index) => ({ field, index, rank: intakeRank(field) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.field)
+}

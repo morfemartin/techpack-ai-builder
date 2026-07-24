@@ -14,7 +14,7 @@
 import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClient.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
-import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk } from "./requirementLayers.js"
+import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk, sortFieldsForIntake } from "./requirementLayers.js"
 import { dropIncoherentFields } from "./garmentAnatomy.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
@@ -498,9 +498,18 @@ export function fallbackRequirements(garmentType, seed) {
 
 // The next fields the user still needs to answer, in order. If `category` is
 // given, only that category ("general" | "design"); otherwise all categories.
+//
+// The "general" (construction) walk is stable-sorted into a production-
+// logical order (sortFieldsForIntake, requirementLayers.js) instead of
+// whatever order the model happened to stream its fields in. "design" and
+// "production" categories keep their own order on purpose: design fields are
+// already grouped by designSlot (re-sorting would scatter one design's
+// name/position/technique/detail questions apart from each other), and
+// production fields keep the order productionReview.js gave them.
 export function pendingFields(reqs, category) {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
-  return fields.filter((f) => f.status === FIELD_STATUS.ASK && (category ? f.category === category : true))
+  const pending = fields.filter((f) => f.status === FIELD_STATUS.ASK && (category ? f.category === category : true))
+  return category === "general" ? sortFieldsForIntake(pending) : pending
 }
 
 // Returns a NEW reqs with field `key` set to `value` and marked "known".

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk, requiredLayers } from "./requirementLayers.js"
+import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk, requiredLayers, sortFieldsForIntake } from "./requirementLayers.js"
 
 describe("layered intake contract", () => {
   it("covers every factory-critical layer with understandable questions and examples", () => {
@@ -178,5 +178,46 @@ describe("enrichLayersWithModel (garment-specific tailoring of the layers)", () 
     const { fields, consumedKeys } = enrichLayersWithModel({ garmentType: "Campera con capucha", layeredFields: layered.fields })
     expect(fields).toEqual(layered.fields)
     expect(consumedKeys.size).toBe(0)
+  })
+})
+
+describe("sortFieldsForIntake", () => {
+  function field(key, label) {
+    return { key, label, category: "general", status: "ask", options: ["A", "B"] }
+  }
+
+  it("reorders a model's scrambled field list into a production-logical progression", () => {
+    // Deliberately out of order and interleaved, as a streamed model reply
+    // often is - closure and label questions before the fabric is even known.
+    const scrambled = [
+      field("closure", "Cierre"),
+      field("label_text", "Etiqueta"),
+      field("fabric", "Tela principal"),
+      field("logo", "Logo o bordado"),
+      field("collar", "Cuello"),
+    ]
+    const sorted = sortFieldsForIntake(scrambled)
+    expect(sorted.map((f) => f.key)).toEqual(["fabric", "collar", "closure", "logo", "label_text"])
+  })
+
+  it("keeps the model's original order for two fields in the same bucket (stable sort)", () => {
+    const fields = [field("sleeve", "Manga"), field("collar", "Cuello")]
+    // Both are top-to-bottom visible-part questions (bucket 2) - ties break
+    // by original position, not alphabetically or by any other reordering.
+    expect(sortFieldsForIntake(fields).map((f) => f.key)).toEqual(["sleeve", "collar"])
+  })
+
+  it("does not scatter fields it cannot classify to the very end", () => {
+    // An unrecognized label still describes a real construction fact, not a
+    // label/packaging afterthought - it should not rank behind design/label
+    // questions just because no keyword matched.
+    const fields = [field("label_text", "Etiqueta"), field("mystery_part", "Corte especial")]
+    expect(sortFieldsForIntake(fields).map((f) => f.key)).toEqual(["mystery_part", "label_text"])
+  })
+
+  it("is a no-op on an already-ordered or empty list", () => {
+    const ordered = [field("fabric", "Tela"), field("collar", "Cuello"), field("closure", "Cierre")]
+    expect(sortFieldsForIntake(ordered).map((f) => f.key)).toEqual(["fabric", "collar", "closure"])
+    expect(sortFieldsForIntake([])).toEqual([])
   })
 })

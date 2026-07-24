@@ -238,6 +238,23 @@ describe("pendingFields", () => {
     expect(pendingFields(reqs, "design").map((f) => f.key)).toEqual(["c"])
     expect(pendingFields(reqs, "general").map((f) => f.key)).toEqual(["a"])
   })
+
+  it("reorders 'general' fields into production-logical order, but leaves 'design' fields exactly as the model returned them", () => {
+    const scrambled = {
+      garmentType: "franela",
+      fields: [
+        { key: "closure", label: "Cierre", status: "ask", category: "general" },
+        { key: "fabric", label: "Tela principal", status: "ask", category: "general" },
+        // Design fields keep the model's own order - re-sorting by
+        // construction keywords would scatter one design slot's
+        // name/position/technique/detail questions apart from each other.
+        { key: "logo_tecnica", label: "Tecnica", status: "ask", category: "design", designSlot: "logo", designField: "technique" },
+        { key: "logo_nombre", label: "Nombre", status: "ask", category: "design", designSlot: "logo", designField: "name" },
+      ],
+    }
+    expect(pendingFields(scrambled, "general").map((f) => f.key)).toEqual(["fabric", "closure"])
+    expect(pendingFields(scrambled, "design").map((f) => f.key)).toEqual(["logo_tecnica", "logo_nombre"])
+  })
 })
 
 describe("fallbackDesignFields", () => {
