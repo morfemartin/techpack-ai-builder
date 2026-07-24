@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { uid } from "./core/idGen.js"
-import { T } from "./core/i18n.js"
+import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { translateContent } from "./core/claudeApi.js"
@@ -197,7 +197,18 @@ export default function App() {
   const [viewAllPages, setViewAllPages] = useState(false) // "see every page at once" contact sheet
   const [reviewFindings, setReviewFindings] = useState(null) // problems from the pre-download intent-vs-document diff
   const [pendingReview, setPendingReview] = useState(null) // {pages, plan, lang, tx, garmentType} held behind the review gate
-  const tl = T.ES
+  // The APP's OWN chrome language - independent of `langs` (the EXPORTED
+  // document's languages, picked in the wizard's own "Idioma" step). Persisted
+  // so the choice survives a reload; a builder working in English shouldn't
+  // have to re-pick it every session.
+  const [uiLang, setUiLang] = useState(() => {
+    try { return localStorage.getItem("techpack.uiLang") === "EN" ? "EN" : "ES" } catch { return "ES" }
+  })
+  useEffect(() => {
+    try { localStorage.setItem("techpack.uiLang", uiLang) } catch {}
+  }, [uiLang])
+  const tl = T[uiLang] || T.ES
+  const ui = UI[uiLang] || UI.ES
 
   useEffect(() => {
     if (textAIProvider !== "local") return undefined
@@ -427,10 +438,10 @@ export default function App() {
   function placeholderSvg(page, i, total, state) {
     var W = PAGE.width
     var H = PAGE.height
-    var status = (state && state.label) || "En cola"
+    var status = (state && state.label) || ui.queued
     var detail = (state && state.detail) || ""
     var done = (state && state.done) || 0
-    var title = svgSafeText((page && page.title) || "Pagina " + (i + 1))
+    var title = svgSafeText((page && page.title) || ui.page + " " + (i + 1))
     var barX = 80
     var barW = W - 160
     var ratio = total > 0 ? Math.max(0, Math.min(1, done / total)) : 0
@@ -465,7 +476,7 @@ export default function App() {
     }
     setDocumentPlanning(true)
     setDocumentReady(false)
-    setDocumentPlanStatus("Estructurando el documento...")
+    setDocumentPlanStatus(ui.structuringDocument)
     setDocumentPlanWarnings([])
     try {
       var baseContext = { garmentType, parts, designs, lang }
@@ -486,42 +497,42 @@ export default function App() {
         })))
       }
 
-      drawWaiting(provisionalOutline.pages, { label: "Analizando la prenda", detail: "Decidiendo que paginas necesita esta ficha.", done: 0 })
+      drawWaiting(provisionalOutline.pages, { label: ui.analyzingGarment, detail: ui.decidingPages, done: 0 })
 
       var outline
       try {
         outline = await planDocumentOutline(baseContext, {
           onStatus: (status) => {
             setDocumentPlanStatus(status)
-            drawWaiting(provisionalOutline.pages, { label: "Estructurando el documento", detail: status, done: 0 })
+            drawWaiting(provisionalOutline.pages, { label: ui.structuringDocument, detail: status, done: 0 })
           },
         })
       } catch {
         outline = provisionalOutline
-        setDocumentPlanWarnings((w) => [...w, "El plan de documento con IA falló - usando la estructura de páginas estándar."])
+        setDocumentPlanWarnings((w) => [...w, ui.planFailed])
       }
       var total = outline.pages.length
-      var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, total, { label: "En cola", done: 0 }) }))
+      var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, total, { label: ui.queued, done: 0 }) }))
       publishPages(placeholders)
       var plannedPages = []
       for (var i = 0; i < total; i++) {
         var page = outline.pages[i]
-        var human = "Desarrollando pagina " + (i + 1) + " de " + total
+        var human = uiDevelopingPage(uiLang, i + 1, total)
         setDocumentPlanStatus(human + "...")
         // Repaint the queue on every tick so the sheet being worked on says so,
         // the ones already resolved show their real render, and the rest read
-        // "En cola" - the wait becomes legible instead of a frozen spinner.
+        // "queued" - the wait becomes legible instead of a frozen spinner.
         var repaint = (function (index, detail) {
           var resolved = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
           publishPages(outline.pages.map(function (p, idx) {
             if (idx < resolved.length) return resolved[idx]
             var state = idx === index
-              ? { label: "Diseñando esta pagina", detail: detail, done: index }
-              : { label: "En cola", done: index }
+              ? { label: ui.designingThisPage, detail: detail, done: index }
+              : { label: ui.queued, done: index }
             return { name: plannedPageName(p, idx), svg: placeholderSvg(p, idx, total, state) }
           }))
         })
-        repaint(i, "La IA esta decidiendo bloques y jerarquia visual.")
+        repaint(i, ui.aiDecidingBlocks)
         try {
           var planned = await planPageLayout(
               page,
@@ -530,7 +541,7 @@ export default function App() {
                 onStatus: setDocumentPlanStatus,
                 onProgress: (function (index, label) {
                   return function (progress) {
-                    var detail = progress.lastLabel ? "Resolviendo bloque: " + progress.lastLabel : "La IA esta decidiendo bloques y jerarquia visual."
+                    var detail = progress.lastLabel ? uiResolvingBlock(uiLang, progress.lastLabel) : ui.aiDecidingBlocks
                     setDocumentPlanStatus(label + (progress.lastLabel ? ": " + progress.lastLabel : "..."))
                     repaint(index, detail)
                   }
@@ -540,12 +551,12 @@ export default function App() {
           plannedPages.push(planned)
         } catch {
           plannedPages.push(fallbackPageLayout(page))
-          setDocumentPlanWarnings((w) => [...w, "Página " + (i + 1) + " (" + plannedPageName(page, i) + "): el diseño con IA falló - usando el layout estándar."])
+          setDocumentPlanWarnings((w) => [...w, uiPageDesignFailed(uiLang, i + 1, plannedPageName(page, i))])
         }
         var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
         publishPages(outline.pages.map(function (p, idx) {
           if (idx < rendered.length) return rendered[idx]
-          return { name: plannedPageName(p, idx), svg: placeholderSvg(p, idx, total, { label: "En cola", done: rendered.length }) }
+          return { name: plannedPageName(p, idx), svg: placeholderSvg(p, idx, total, { label: ui.queued, done: rendered.length }) }
         }))
       }
       // Hand the planned document (pages with their regions) to the caller so
@@ -631,7 +642,7 @@ export default function App() {
           continue
         }
 
-        setDocumentPlanStatus("Aplicando revision: pagina " + (i + 1) + " de " + applied.plan.pages.length + "...")
+        setDocumentPlanStatus(uiApplyingRevision(uiLang, i + 1, applied.plan.pages.length))
         try {
           var replanned = await withPlanningTimeout(planPageLayout(page, planCtx))
           revisedPlan.pages.push(replanned)
@@ -782,25 +793,25 @@ export default function App() {
               </Chip>
             ))}
             <Chip selected={garmentId === "custom" && !visionEntry} onClick={() => selectGarment("custom")} iconName="auto_awesome">
-              Prenda nueva (con IA)
+              {ui.newGarmentAI}
             </Chip>
             <Chip selected={garmentId === "custom" && visionEntry} onClick={() => selectGarment("custom", { vision: true })} iconName="photo_camera">
-              Prenda desde foto (IA)
+              {ui.garmentFromPhoto}
             </Chip>
           </div>
           {garmentId === "custom" && !visionEntry && (
             <p style={{ marginTop: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 480 }}>
-              Vas a charlar con la IA en el paso "Piezas" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual.
+              {ui.garmentHelp}
             </p>
           )}
           {garmentId === "custom" && visionEntry && (
             <div style={{ marginTop: space(3), maxWidth: 480, display: "flex", flexDirection: "column", gap: space(2) }}>
               <p style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, margin: 0 }}>
-                Subí una o mas fotos de la prenda real. La IA identifica el tipo de prenda y lo que se ve con claridad (color, cuello, cierre, etc.); en el paso "Piezas" solo te va a preguntar lo que la foto no reveló.
+                {ui.visionHelp}
               </p>
               <label style={{ display: "inline-flex", alignSelf: "flex-start", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: C.white.hex, border: `1px dashed ${C.ink.hex}`, cursor: visionExtracting ? "wait" : "pointer", fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 <Icon name="add_photo_alternate" size={18} />
-                {visionExtracting ? "Analizando foto(s)…" : visionSeed ? "Cambiar foto(s)" : "Subir foto(s)"}
+                {visionExtracting ? ui.analyzingPhotos : visionSeed ? ui.changePhotos : ui.uploadPhotos}
                 <input type="file" accept="image/png,image/jpeg" multiple disabled={visionExtracting} onChange={handleVisionUpload} style={{ display: "none" }} />
               </label>
               {visionExtracting && visionProgress && (
@@ -817,7 +828,7 @@ export default function App() {
               )}
               {visionSeed && (
                 <div style={{ border: hair, padding: space(3), fontSize: type.size.xs, color: C.ink.hex }}>
-                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>Detectado: {visionSeed.garmentType || "(no identificado)"}</div>
+                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>{ui.detected}: {visionSeed.garmentType || ui.notIdentified}</div>
                   {Object.keys(visionSeed.seed || {}).length > 0 ? (
                     <ul style={{ margin: 0, paddingLeft: space(4) }}>
                       {Object.entries(visionSeed.seed).map(([k, v]) => (
@@ -827,14 +838,16 @@ export default function App() {
                       ))}
                     </ul>
                   ) : (
-                    <div style={{ opacity: 0.7 }}>No se detectaron atributos con certeza - se preguntará todo en "Piezas".</div>
+                    <div style={{ opacity: 0.7 }}>{ui.noAttributesDetected}</div>
                   )}
                 </div>
               )}
               {visionWarnings.length > 0 && (
                 <div style={{ border: hair, borderLeft: `${space(1)}px solid ${role.index.fill}`, padding: space(2), fontSize: type.size.xs, color: C.ink.hex, background: C.white.hex }}>
                   <div style={{ fontWeight: 700, marginBottom: space(1) }}>
-                    {visionWarnings.length === 1 ? "1 paso del análisis no se completó:" : visionWarnings.length + " pasos del análisis no se completaron:"}
+                    {uiLang === "EN"
+                      ? (visionWarnings.length === 1 ? "1 analysis step did not complete:" : visionWarnings.length + " analysis steps did not complete:")
+                      : (visionWarnings.length === 1 ? "1 paso del análisis no se completó:" : visionWarnings.length + " pasos del análisis no se completaron:")}
                   </div>
                   <ul style={{ margin: 0, paddingLeft: space(4), opacity: 0.85 }}>
                     {visionWarnings.map((w, i) => (
@@ -868,37 +881,37 @@ export default function App() {
         <span style={{ display: "inline-flex", alignItems: "center", gap: space(1) }}>
           {text}
           {reqEmpty(field) && (
-            <span title="Requerido" style={{ width: space(2), height: space(2), background: role.highlight.fill, boxShadow: `0 0 0 1px ${role.highlight.keyline}` }} />
+            <span title={ui.required} style={{ width: space(2), height: space(2), background: role.highlight.fill, boxShadow: `0 0 0 1px ${role.highlight.keyline}` }} />
           )}
         </span>
       )
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: space(4) }}>
-          <Fld lbl="Logo de la Marca">
+          <Fld lbl={ui.brandLogo}>
             <div style={{ display: "flex", alignItems: "center", gap: space(3), flexWrap: "wrap" }}>
               <label style={{ display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: C.white.hex, border: `1px dashed ${logo ? role.priority.fill : C.ink.hex}`, cursor: "pointer", fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 <Icon name="upload_file" size={18} />
-                {logo ? "Cambiar logo" : "Subir imagen (PNG, JPG, SVG)"}
+                {logo ? ui.changeLogo : ui.uploadLogoImage}
                 <input type="file" accept="image/*" onChange={handleLogo} style={{ display: "none" }} />
               </label>
               {logo && <img src={logo} style={{ height: 46, maxWidth: 100, objectFit: "contain", border: hair, padding: 4 }} alt="logo" />}
               {logo && (
-                <button onClick={() => setLogo(null)} style={iconBtn(role.index.fill)} title="Quitar">
+                <button onClick={() => setLogo(null)} style={iconBtn(role.index.fill)} title={ui.remove}>
                   <Icon name="delete" size={20} color={role.index.fill} />
                 </button>
               )}
             </div>
           </Fld>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: space(4) }}>
-            {[["Marca", "brand", "Ej: New Era", true], ["Temporada", "season", "Ej: 2027 SS/FW"], ["Codigo", "sno", "Ej: 2ACP002"], ["Tela", "fab", "Ej: 100% Poliester"], ["Fabrica", "fac", "Ej: Colombia"], ["Fecha Entrada", "ind", "18/10/2027"], ["Fecha Salida", "outd", "20/11/2027"]].map((row) => (
+            {[[tl.brand, "brand", "Ej: New Era", true], [tl.season, "season", "Ej: 2027 SS/FW"], [tl.sno, "sno", "Ej: 2ACP002"], [tl.fab, "fab", "Ej: 100% Poliester"], [tl.fac, "fac", "Ej: Colombia"], [tl.ind, "ind", "18/10/2027"], [tl.outd, "outd", "20/11/2027"]].map((row) => (
               <Fld key={row[1]} lbl={row[3] ? <RequiredLabel text={row[0]} field={row[1]} /> : row[0]}>
                 <Inp v={hdr[row[1]]} ch={(v) => setHdr((p) => Object.assign({}, p, { [row[1]]: v }))} ph={row[2]} />
               </Fld>
             ))}
-            <Fld lbl="Categoria">
+            <Fld lbl={tl.cat}>
               <Sel v={hdr.cat} ch={(v) => setHdr((p) => Object.assign({}, p, { cat: v }))} opts={tl.cats} />
             </Fld>
-            <Fld lbl={<RequiredLabel text="Nombre del Producto" field="pname" />} span={2}>
+            <Fld lbl={<RequiredLabel text={tl.pname} field="pname" />} span={2}>
               <Inp v={hdr.pname} ch={(v) => setHdr((p) => Object.assign({}, p, { pname: v }))} ph="Ej: Gorra New Era 59FIFTY Los Angeles" />
             </Fld>
           </div>
@@ -934,21 +947,21 @@ export default function App() {
           <div style={{ marginBottom: space(4), padding: space(3), border: `1px dashed ${role.priority.fill}`, background: C.white.hex }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: space(3), flexWrap: "wrap" }}>
               <div>
-                <div style={{ fontSize: type.size.sm, fontWeight: 700, fontFamily: type.fonts.ui, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>Importar desde CSV (opcional)</div>
+                <div style={{ fontSize: type.size.sm, fontWeight: 700, fontFamily: type.fonts.ui, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ui.importFromCsv}</div>
                 <div style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, marginTop: 2, maxWidth: 480 }}>
-                  Subí un CSV con las piezas (y de paso los diseños, si los incluís) — la IA lo interpreta, no hace falta que el formato sea exacto.
+                  {ui.csvHelp}
                 </div>
               </div>
               <div style={{ display: "flex", gap: space(2), alignItems: "center", flexWrap: "wrap" }}>
                 <button onClick={downloadCsvTemplate} style={secondaryBtnStyle}>
-                  <Icon name="description" size={16} /> Ver ejemplo
+                  <Icon name="description" size={16} /> {ui.viewExample}
                 </button>
                 <label style={secondaryBtnStyle}>
-                  <Icon name="add_photo_alternate" size={16} /> {csvImages.length > 0 ? csvImages.length + " foto(s)" : "Subir fotos (opcional)"}
+                  <Icon name="add_photo_alternate" size={16} /> {csvImages.length > 0 ? uiPhotosCount(uiLang, csvImages.length) : ui.uploadPhotosOptional}
                   <input type="file" accept="image/png,image/jpeg,image/svg+xml" multiple onChange={handleCsvImages} style={{ display: "none" }} />
                 </label>
                 <label style={{ ...primaryBtnStyle(true), cursor: csvImporting ? "wait" : "pointer", opacity: csvImporting ? 0.6 : 1 }}>
-                  <Icon name="upload_file" size={16} color={C.white.hex} /> {csvImporting ? "Analizando..." : "Subir CSV"}
+                  <Icon name="upload_file" size={16} color={C.white.hex} /> {csvImporting ? ui.analyzing : ui.uploadCsv}
                   <input type="file" accept=".csv,text/csv" onChange={handleCsvUpload} disabled={csvImporting} style={{ display: "none" }} />
                 </label>
               </div>
@@ -978,7 +991,7 @@ export default function App() {
                     {nm}
                     <button
                       onClick={() => searchPieceReference(nm)}
-                      title={`Buscar referencias de "${nm}" en imagenes`}
+                      title={uiSearchReferences(uiLang, nm)}
                       style={{ ...iconBtn(C.ink.hex), opacity: 0.4, flexShrink: 0 }}
                     >
                       <Icon name="help" size={14} />
@@ -986,7 +999,7 @@ export default function App() {
                   </span>
                   <input value={p.val} onChange={(e) => updPart(p.id, "val", e.target.value)} style={{ flex: 1, padding: `${space(1)}px ${space(2)}px`, border: hair, fontSize: type.size.sm, outline: "none", background: C.white.hex, fontFamily: type.fonts.ui }} />
                   {p.customName && (
-                    <button onClick={() => setParts((prev) => prev.filter((x) => x.id !== p.id))} style={iconBtn(role.index.fill)} title="Quitar">
+                    <button onClick={() => setParts((prev) => prev.filter((x) => x.id !== p.id))} style={iconBtn(role.index.fill)} title={ui.remove}>
                       <Icon name="delete" size={18} color={role.index.fill} />
                     </button>
                   )}
@@ -994,8 +1007,8 @@ export default function App() {
               )
             })}
           </div>
-          <button onClick={() => setParts((p) => [...p, { id: uid(), val: "", on: true, customName: "Pieza personalizada" }])} style={dashedActionStyle}>
-            <Icon name="add" size={16} color={role.priority.fill} /> Agregar Pieza
+          <button onClick={() => setParts((p) => [...p, { id: uid(), val: "", on: true, customName: ui.customPiece }])} style={dashedActionStyle}>
+            <Icon name="add" size={16} color={role.priority.fill} /> {ui.addPiece}
           </button>
         </div>
       )
@@ -1013,35 +1026,35 @@ export default function App() {
                   <span style={{ display: "inline-flex", alignItems: "center", gap: space(2), fontSize: type.size.base, fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                     <IndexChip n={i + 1} /> {d.name}
                   </span>
-                  <button onClick={() => setDesigns((p) => p.filter((x) => x.id !== d.id))} style={iconBtn(C.white.hex)} title="Quitar diseño">
+                  <button onClick={() => setDesigns((p) => p.filter((x) => x.id !== d.id))} style={iconBtn(C.white.hex)} title={ui.removeDesign}>
                     <Icon name="close" size={20} color={C.white.hex} />
                   </button>
                 </div>
                 <div style={{ padding: space(3) }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: space(3) }}>
-                    <Fld lbl="Nombre">
+                    <Fld lbl={ui.name}>
                       <Inp v={d.name} ch={(v) => updDesign(d.id, "name", v)} />
                     </Fld>
-                    <Fld lbl="Posicion">
+                    <Fld lbl={ui.position}>
                       <Sel v={d.pos} ch={(v) => updDesign(d.id, "pos", v)} opts={positions} />
                     </Fld>
-                    <Fld lbl="Tecnica">
+                    <Fld lbl={ui.technique}>
                       <Sel v={d.tec} ch={(v) => updDesign(d.id, "tec", v)} opts={tl.tecs} />
                     </Fld>
                     {!isWhole ? (
-                      <Fld lbl="Posicion Detallada">
+                      <Fld lbl={tl.posDetail}>
                         <Inp v={d.posDetail || ""} ch={(v) => updDesign(d.id, "posDetail", v)} ph="Ej: Panel frontal centrado" />
                       </Fld>
                     ) : (
                       <div />
                     )}
                     {!isWhole && (
-                      <Fld lbl={"Ancho (" + normalizeUnit(d.unit) + ")"}>
+                      <Fld lbl={(uiLang === "EN" ? "Width (" : "Ancho (") + normalizeUnit(d.unit) + ")"}>
                         <Inp v={d.w || ""} ch={(v) => updDesign(d.id, "w", v)} ph="Ej: 111.6" mono={true} />
                       </Fld>
                     )}
                     {!isWhole && (
-                      <Fld lbl={"Alto (" + normalizeUnit(d.unit) + ")"}>
+                      <Fld lbl={(uiLang === "EN" ? "Height (" : "Alto (") + normalizeUnit(d.unit) + ")"}>
                         <Inp v={d.h || ""} ch={(v) => updDesign(d.id, "h", v)} ph="Ej: 59.1" mono={true} />
                       </Fld>
                     )}
@@ -1050,39 +1063,39 @@ export default function App() {
                         back into the field is how rounding error accumulates.
                         Conversion happens once, at print time. */}
                     {!isWhole && (
-                      <Fld lbl="Unidad medida">
+                      <Fld lbl={ui.unitOfMeasure}>
                         <Sel v={normalizeUnit(d.unit)} ch={(v) => updDesign(d.id, "unit", v)} opts={UNITS} />
                       </Fld>
                     )}
                     {!isWhole && (
-                      <Fld lbl="Imprimir en">
+                      <Fld lbl={ui.printIn}>
                         <Sel v={normalizeUnit(dimensionUnit)} ch={setDimensionUnit} opts={UNITS} />
                       </Fld>
                     )}
                     {!isWhole && normalizeUnit(d.unit) !== normalizeUnit(dimensionUnit) && formatDimensions(d.w, d.h, d.unit, dimensionUnit) && (
                       <div style={{ gridColumn: "span 2", padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: `1px solid ${role.highlight.keyline}`, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex }}>
-                        En la ficha saldrá: {formatDimensions(d.w, d.h, d.unit, dimensionUnit)}
+                        {ui.willShowAs}: {formatDimensions(d.w, d.h, d.unit, dimensionUnit)}
                       </div>
                     )}
                     {isWhole && (
                       <div style={{ gridColumn: "span 2", display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(3)}px`, background: C.white.hex, border: `1px solid ${role.highlight.keyline}`, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, fontSize: type.size.sm, color: C.ink.hex }}>
-                        <Icon name="info" size={18} /> Diseño cubre toda la prenda — medidas no aplican.
+                        <Icon name="info" size={18} /> {tl.noApplica}.
                       </div>
                     )}
-                    <Fld lbl="Nombre del Archivo">
+                    <Fld lbl={tl.fileName}>
                       <Inp v={d.fileName || ""} ch={(v) => updDesign(d.id, "fileName", v)} ph="Ej: SUNNER_HAWAII_LOGO_v3.ai" mono={true} />
                     </Fld>
-                    <Fld lbl="Enlace Drive">
+                    <Fld lbl={tl.driveLink}>
                       <Inp v={d.driveLink || ""} ch={(v) => updDesign(d.id, "driveLink", v)} ph="Ej: drive.google.com/..." mono={true} />
                     </Fld>
                   </div>
                   <div style={{ marginTop: space(3) }}>
-                    <Fld lbl="Colores (selector + nombre Pantone)">
+                    <Fld lbl={ui.colorsFieldLabel}>
                       <ColorsEditor colors={d.colors || []} onChange={(c) => updDesign(d.id, "colors", c)} />
                     </Fld>
                   </div>
                   <div style={{ marginTop: space(3) }}>
-                    <Fld lbl="Imagen del diseno (PNG o SVG - se muestra con cotas)">
+                    <Fld lbl={ui.designImageFieldLabel}>
                       <ImageUploader d={d} onUpdate={(obj) => updDesignMulti(d.id, obj)} />
                     </Fld>
                   </div>
@@ -1092,7 +1105,7 @@ export default function App() {
             )
           })}
           <button onClick={() => setDesigns((p) => [...p, Object.assign(newDesign(), { pos: positions[0] })])} style={dashedActionStyle}>
-            <Icon name="add" size={16} color={role.priority.fill} /> Agregar Diseño
+            <Icon name="add" size={16} color={role.priority.fill} /> {ui.addDesign}
           </button>
         </div>
       )
@@ -1103,7 +1116,7 @@ export default function App() {
       var activePlannedPages = plannedMode && plannedPreviewPages ? plannedPreviewPages : []
       var allPgs = plannedMode
         ? activePlannedPages.map((p, i) => ({ l: p.name || "pagina_" + (i + 1), i }))
-        : [{ l: "Pag. Principal", i: 0 }, ...designs.map((d, i) => ({ l: "Diseno " + (i + 1), i: i + 1 }))]
+        : [{ l: ui.mainPage, i: 0 }, ...designs.map((d, i) => ({ l: tl.pageDesign + " " + (i + 1), i: i + 1 }))]
       var activePlannedIndex = activePlannedPages.length > 0 ? Math.min(prevPage, activePlannedPages.length - 1) : 0
       var activePlannedPage = activePlannedPages[activePlannedIndex]
       const miniBtn = (active, activeColor) => ({
@@ -1123,13 +1136,13 @@ export default function App() {
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: space(3), flexWrap: "wrap", gap: space(2) }}>
             <div style={{ display: "flex", gap: space(1), flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, marginRight: space(1), textTransform: "uppercase", letterSpacing: "0.08em" }}>Vista</span>
+              <span style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, marginRight: space(1), textTransform: "uppercase", letterSpacing: "0.08em" }}>{ui.view}</span>
               {allPgs.length > 0 ? allPgs.map((p) => (
                 <button key={p.i} onClick={() => { setPrevPage(p.i); ensureTx(prevLang) }} style={miniBtn(prevPage === p.i, role.priority.fill)}>
                   {p.l}
                 </button>
               )) : (
-                <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}>Diseñando páginas…</span>
+                <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}>{ui.designingPages}</span>
               )}
               <span style={{ width: 1, alignSelf: "stretch", background: C.ink.hex, margin: `0 ${space(1)}px` }} />
               {langs.map((l) => (
@@ -1138,19 +1151,19 @@ export default function App() {
                 </button>
               ))}
               <span style={{ width: 1, alignSelf: "stretch", background: C.ink.hex, margin: `0 ${space(1)}px` }} />
-              <button onClick={() => setViewAllPages((v) => !v)} title="Ver todas las paginas en una sola vista" style={miniBtn(viewAllPages, role.priority.fill)}>
-                <Icon name="grid_view" size={14} /> Ver todas
+              <button onClick={() => setViewAllPages((v) => !v)} title={ui.viewAllTitle} style={miniBtn(viewAllPages, role.priority.fill)}>
+                <Icon name="grid_view" size={14} /> {ui.viewAll}
               </button>
-              <button onClick={() => setMonoMode((v) => !v)} title="Vista previa y exportacion en blanco y negro (escala de grises)" style={miniBtn(monoMode, C.ink.hex)}>
-                <Icon name="contrast" size={14} /> Escala de grises
+              <button onClick={() => setMonoMode((v) => !v)} title={ui.grayscaleTitle} style={miniBtn(monoMode, C.ink.hex)}>
+                <Icon name="contrast" size={14} /> {ui.grayscale}
               </button>
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
-              {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>Traduciendo…</span>}
-              {documentPlanning && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{documentPlanStatus || "Disenando documento..."}</span>}
+              {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{ui.translating}</span>}
+              {documentPlanning && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{documentPlanStatus || ui.designingDocument}</span>}
               {!documentPlanning && documentReady && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.priority.fill, fontWeight: 700 }}>
-                  <Icon name="check" size={14} color={role.priority.fill} /> Documento listo
+                  <Icon name="check" size={14} color={role.priority.fill} /> {ui.documentReadyLabel}
                 </span>
               )}
               {documentPlanWarnings.length > 0 && (
@@ -1159,21 +1172,21 @@ export default function App() {
                   style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}
                 >
                   <Icon name="error" size={14} color={role.index.fill} />
-                  {documentPlanWarnings.length === 1 ? "1 página usó layout estándar (falló la IA)" : documentPlanWarnings.length + " páginas usaron layout estándar (falló la IA)"}
+                  {uiPagesUsedFallback(uiLang, documentPlanWarnings.length)}
                 </span>
               )}
               {garmentId === "custom" && customGarment && (
                 <button
                   onClick={() => downloadGarmentFile(customGarment)}
-                  title="Descarga un archivo .js de partida para contribuir esta prenda al repo - ver CONTRIBUTING.md"
+                  title={ui.downloadGarmentFileTitle}
                   style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: C.white.hex, color: C.ink.hex, border: hair, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}
                 >
-                  <Icon name="download" size={16} color={C.ink.hex} /> Descargar prenda (.js)
+                  <Icon name="download" size={16} color={C.ink.hex} /> {ui.downloadGarmentFile}
                 </button>
               )}
               {langs.map((l) => (
                 <button key={l} onClick={() => handleGenerate(l)} disabled={documentPlanning} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning ? C.canvas.hex : role.priority.fill, color: documentPlanning ? "#9AA0AB" : role.priority.on, border: hair, borderColor: documentPlanning ? "#C6CAD2" : role.priority.fill, fontSize: type.size.xs, cursor: documentPlanning ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  <Icon name="bolt" size={16} color={C.white.hex} /> Generar SVG [{l}]
+                  <Icon name="bolt" size={16} color={C.white.hex} /> {tl.gen} SVG [{l}]
                 </button>
               ))}
             </div>
@@ -1224,7 +1237,7 @@ export default function App() {
                   <div style={{ height: 6, width: 260, background: C.canvas.hex, border: hair }}>
                     <div style={{ height: "100%", width: documentPlanning ? "45%" : "0%", background: role.priority.fill }} />
                   </div>
-                  <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data }}>{documentPlanStatus || "Estructurando el documento..."}</div>
+                  <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data }}>{documentPlanStatus || ui.structuringDocument}</div>
                 </div>
               )}
             </div>
@@ -1250,17 +1263,27 @@ export default function App() {
             <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.white.hex }}>TechPack AI Builder</h1>
             <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.white.hex, opacity: 0.55 }}>por Morfe · Generador Open Source de Fichas Técnicas · v0.2</p>
           </div>
+          {/* App UI language - independent of the export "Idioma" step below.
+              Only ES/EN for now: the export table already covers ZH, but this
+              is the builder's OWN chrome, not document content. */}
+          <button
+            onClick={() => setUiLang((l) => (l === "ES" ? "EN" : "ES"))}
+            title={uiLang === "ES" ? "Switch app to English" : "Cambiar la app a español"}
+            style={{ marginLeft: "auto", padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${C.white.hex}`, background: "none", color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", cursor: "pointer" }}
+          >
+            {uiLang === "ES" ? "EN" : "ES"}
+          </button>
           {/* The badge already says WHICH build you are in, so it doubles as
               the way to reach the other one - studio.html was deployed but
               unreachable, with no link to it anywhere. BASE_URL keeps this
               correct under the repo-name base path on Pages and at '/' in dev. */}
           <a
             href={import.meta.env.BASE_URL + (textAIProvider === "local" ? "index.html" : "studio.html")}
-            title={textAIProvider === "local" ? "Ir a la version publica (NVIDIA)" : "Ir a la version estudio (Qwen local, privado)"}
-            style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${localAIStatus === "ready" ? role.highlight.fill : C.white.hex}`, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", textDecoration: "none" }}
+            title={textAIProvider === "local" ? ui.goToPublic : ui.goToStudio}
+            style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${localAIStatus === "ready" ? role.highlight.fill : C.white.hex}`, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", textDecoration: "none" }}
           >
-            {textAIProvider === "local" ? `Studio AI · ${localAIStatus === "ready" ? localProviderLabel(localAIModel) + " listo" : localAIStatus === "offline" ? "servicio apagado" : "cargando"}` : "AI · NVIDIA"}
-            <span style={{ opacity: 0.55 }}>{textAIProvider === "local" ? "→ publica" : "→ studio"}</span>
+            {textAIProvider === "local" ? `Studio AI · ${localAIStatus === "ready" ? localProviderLabel(localAIModel) + " " + ui.ready : localAIStatus === "offline" ? ui.offline : ui.loading}` : "AI · NVIDIA"}
+            <span style={{ opacity: 0.55 }}>{textAIProvider === "local" ? ui.toPublic : ui.toStudio}</span>
           </a>
         </div>
         {/* Stepper — red index numbers (enumeration seen first), blue underline = active */}
@@ -1314,7 +1337,7 @@ export default function App() {
             </button>
           ) : (
             <span style={{ display: "inline-flex", alignItems: "center", gap: space(2), fontSize: type.size.sm, color: C.ink.hex, opacity: 0.7, alignSelf: "center" }}>
-              <Icon name="bolt" size={18} /> Genera el SVG por idioma arriba
+              <Icon name="bolt" size={18} /> {ui.generateHint}
             </span>
           )}
         </div>

@@ -1,3 +1,147 @@
+// The APP'S OWN chrome (buttons, helper text, status messages) - distinct
+// from T below, which is the language of the EXPORTED tech-pack document
+// (the wizard's own "Idioma" step). Before this, App.jsx hardcoded `T.ES`
+// for its whole UI regardless of what export language(s) the user picked,
+// so the builder itself was always Spanish. Kept separate from T on purpose:
+// T's keys describe document content (a garment's category options, its
+// applicable embroidery techniques); mixing pure UI actions ("Quitar",
+// "Agregar Pieza") into that table would blur what T is actually for.
+//
+// Scope note: this covers static UI chrome. Two things are deliberately OUT
+// of scope here - a UI-language toggle can't reach them without changing
+// their own source: (1) prose the AI itself writes (chat replies, design
+// briefs) - see GarmentChat.jsx's own prompts; (2) the descriptive warning
+// strings visionExtract.js builds internally (e.g. "Foto 2/3: no se pudo
+// completar..."), which are business logic, not simple static labels.
+export const UI = {
+  ES: {
+    garmentHelp: "Vas a charlar con la IA en el paso \"Piezas\" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual.",
+    newGarmentAI: "Prenda nueva (con IA)",
+    garmentFromPhoto: "Prenda desde foto (IA)",
+    visionHelp: "Subí una o mas fotos de la prenda real. La IA identifica el tipo de prenda y lo que se ve con claridad (color, cuello, cierre, etc.); en el paso \"Piezas\" solo te va a preguntar lo que la foto no reveló.",
+    analyzingPhotos: "Analizando foto(s)…",
+    changePhotos: "Cambiar foto(s)",
+    uploadPhotos: "Subir foto(s)",
+    detected: "Detectado",
+    notIdentified: "(no identificado)",
+    noAttributesDetected: "No se detectaron atributos con certeza - se preguntará todo en \"Piezas\".",
+    changeLogo: "Cambiar logo",
+    uploadLogoImage: "Subir imagen (PNG, JPG, SVG)",
+    brandLogo: "Logo de la Marca",
+    remove: "Quitar",
+    required: "Requerido",
+    importFromCsv: "Importar desde CSV (opcional)",
+    csvHelp: "Subí un CSV con las piezas (y de paso los diseños, si los incluís) — la IA lo interpreta, no hace falta que el formato sea exacto.",
+    viewExample: "Ver ejemplo",
+    uploadPhotosOptional: "Subir fotos (opcional)",
+    analyzing: "Analizando...",
+    uploadCsv: "Subir CSV",
+    addPiece: "Agregar Pieza",
+    customPiece: "Pieza personalizada",
+    removeDesign: "Quitar diseño",
+    name: "Nombre",
+    position: "Posicion",
+    technique: "Tecnica",
+    unitOfMeasure: "Unidad medida",
+    printIn: "Imprimir en",
+    willShowAs: "En la ficha saldrá",
+    colorsFieldLabel: "Colores (selector + nombre Pantone)",
+    designImageFieldLabel: "Imagen del diseno (PNG o SVG - se muestra con cotas)",
+    addDesign: "Agregar Diseño",
+    view: "Vista",
+    designingPages: "Diseñando páginas…",
+    viewAllTitle: "Ver todas las paginas en una sola vista",
+    viewAll: "Ver todas",
+    grayscaleTitle: "Vista previa y exportacion en blanco y negro (escala de grises)",
+    grayscale: "Escala de grises",
+    translating: "Traduciendo…",
+    designingDocument: "Disenando documento...",
+    structuringDocument: "Estructurando el documento...",
+    documentReadyLabel: "Documento listo",
+    downloadGarmentFileTitle: "Descarga un archivo .js de partida para contribuir esta prenda al repo - ver CONTRIBUTING.md",
+    downloadGarmentFile: "Descargar prenda (.js)",
+    mainPage: "Pag. Principal",
+    analyzingGarment: "Analizando la prenda",
+    decidingPages: "Decidiendo que paginas necesita esta ficha.",
+    queued: "En cola",
+    designingThisPage: "Diseñando esta pagina",
+    aiDecidingBlocks: "La IA esta decidiendo bloques y jerarquia visual.",
+    planFailed: "El plan de documento con IA falló - usando la estructura de páginas estándar.",
+    page: "Pagina",
+    generateHint: "Genera el SVG por idioma arriba",
+    ready: "listo",
+    offline: "servicio apagado",
+    loading: "cargando",
+    goToPublic: "Ir a la version publica (NVIDIA)",
+    goToStudio: "Ir a la version estudio (Qwen local, privado)",
+    toPublic: "→ publica",
+    toStudio: "→ studio",
+  },
+  EN: {
+    garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same.",
+    newGarmentAI: "New garment (with AI)",
+    garmentFromPhoto: "Garment from photo (AI)",
+    visionHelp: "Upload one or more photos of the real garment. The AI identifies the garment type and whatever is clearly visible (color, collar, closure, etc.); in the \"Parts\" step it will only ask about what the photo didn't reveal.",
+    analyzingPhotos: "Analyzing photo(s)…",
+    changePhotos: "Change photo(s)",
+    uploadPhotos: "Upload photo(s)",
+    detected: "Detected",
+    notIdentified: "(not identified)",
+    noAttributesDetected: "No attributes were detected with confidence - everything will be asked in \"Parts\".",
+    changeLogo: "Change logo",
+    uploadLogoImage: "Upload image (PNG, JPG, SVG)",
+    brandLogo: "Brand Logo",
+    remove: "Remove",
+    required: "Required",
+    importFromCsv: "Import from CSV (optional)",
+    csvHelp: "Upload a CSV with the parts (and the designs too, if you include them) — the AI interprets it, the format doesn't need to be exact.",
+    viewExample: "View example",
+    uploadPhotosOptional: "Upload photos (optional)",
+    analyzing: "Analyzing...",
+    uploadCsv: "Upload CSV",
+    addPiece: "Add Part",
+    customPiece: "Custom part",
+    removeDesign: "Remove design",
+    name: "Name",
+    position: "Position",
+    technique: "Technique",
+    unitOfMeasure: "Unit",
+    printIn: "Print in",
+    willShowAs: "The tech pack will show",
+    colorsFieldLabel: "Colors (picker + Pantone name)",
+    designImageFieldLabel: "Design image (PNG or SVG - shown with dimensions)",
+    addDesign: "Add Design",
+    view: "View",
+    designingPages: "Designing pages…",
+    viewAllTitle: "View every page in a single view",
+    viewAll: "View all",
+    grayscaleTitle: "Black-and-white preview and export (grayscale)",
+    grayscale: "Grayscale",
+    translating: "Translating…",
+    designingDocument: "Designing document...",
+    structuringDocument: "Structuring the document...",
+    documentReadyLabel: "Document ready",
+    downloadGarmentFileTitle: "Downloads a starter .js file to contribute this garment to the repo - see CONTRIBUTING.md",
+    downloadGarmentFile: "Download garment (.js)",
+    mainPage: "Main Page",
+    analyzingGarment: "Analyzing the garment",
+    decidingPages: "Deciding which pages this tech pack needs.",
+    queued: "Queued",
+    designingThisPage: "Designing this page",
+    aiDecidingBlocks: "The AI is deciding blocks and visual hierarchy.",
+    planFailed: "The AI document plan failed - using the standard page structure.",
+    page: "Page",
+    generateHint: "Generate the SVG per language above",
+    ready: "ready",
+    offline: "service offline",
+    loading: "loading",
+    goToPublic: "Go to the public version (NVIDIA)",
+    goToStudio: "Go to the studio version (local Qwen, private)",
+    toPublic: "→ public",
+    toStudio: "→ studio",
+  },
+}
+
 // Garment-agnostic UI/output strings. Per-garment part names and design
 // positions live in src/garments/*.js instead, since they differ by garment.
 export const T = {
@@ -58,4 +202,38 @@ export const T = {
     noApplica: "设计覆盖整件服装 - 尺寸不适用",
     fileName: "文件名", driveLink: "Drive 链接",
   },
+}
+
+// Interpolated/pluralized UI strings - kept as functions rather than table
+// entries since each needs its arguments woven into the sentence, not just
+// substituted at a fixed slot (word order differs between ES and EN).
+export function uiPhotosCount(uiLang, count) {
+  return uiLang === "EN" ? count + " photo(s)" : count + " foto(s)"
+}
+
+export function uiSearchReferences(uiLang, label) {
+  return uiLang === "EN" ? `Search image references for "${label}"` : `Buscar referencias de "${label}" en imagenes`
+}
+
+export function uiDevelopingPage(uiLang, index, total) {
+  return uiLang === "EN" ? `Developing page ${index} of ${total}` : `Desarrollando pagina ${index} de ${total}`
+}
+
+export function uiResolvingBlock(uiLang, label) {
+  return uiLang === "EN" ? `Resolving block: ${label}` : `Resolviendo bloque: ${label}`
+}
+
+export function uiApplyingRevision(uiLang, index, total) {
+  return uiLang === "EN" ? `Applying revision: page ${index} of ${total}...` : `Aplicando revision: pagina ${index} de ${total}...`
+}
+
+export function uiPagesUsedFallback(uiLang, count) {
+  if (uiLang === "EN") return count === 1 ? "1 page used the standard layout (AI failed)" : count + " pages used the standard layout (AI failed)"
+  return count === 1 ? "1 página usó layout estándar (falló la IA)" : count + " páginas usaron layout estándar (falló la IA)"
+}
+
+export function uiPageDesignFailed(uiLang, index, pageName) {
+  return uiLang === "EN"
+    ? `Page ${index} (${pageName}): the AI design failed - using the standard layout.`
+    : `Página ${index} (${pageName}): el diseño con IA falló - usando el layout estándar.`
 }
