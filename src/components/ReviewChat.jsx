@@ -33,6 +33,7 @@ import { deepseekChat } from "../core/deepseekClient.js"
 import { HYBRID_TASKS } from "../core/hybridTasks.js"
 import { findingsToWalkFields, summarizeConfirmed } from "../core/reviewDiff.js"
 import { authorProductionQuestions } from "../core/productionReview.js"
+import { T, UI, uiQuestionOf, uiDocumentReflects, uiWillApplyDecisions } from "../core/i18n.js"
 
 const C = palette
 const hair = `1px solid ${C.ink.hex}`
@@ -67,7 +68,9 @@ async function rephraseFields(fields) {
   })
 }
 
-export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }) {
+export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip, uiLang = "ES" }) {
+  const ui = UI[uiLang] || UI.ES
+  const tl = T[uiLang] || T.ES
   const [fields, setFields] = useState(() => findingsToWalkFields(findings))
   const [idx, setIdx] = useState(0)
   const [answers, setAnswers] = useState([])
@@ -164,7 +167,7 @@ export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }
     try {
       await onComplete(answers)
     } catch (error) {
-      setApplyError((error && error.message) || "No se pudo aplicar la revisión.")
+      setApplyError((error && error.message) || ui.couldNotApplyReview)
       setApplying(false)
     }
   }
@@ -197,20 +200,20 @@ export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }
       <div style={{ background: C.white.hex, width: "100%", maxWidth: 640, maxHeight: "92vh", display: "flex", flexDirection: "column", border: hair }}>
         <div style={{ padding: `${space(3)}px ${space(4)}px`, borderBottom: hair, display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: space(3) }}>
           <div>
-            <div style={{ fontSize: type.size.md, fontWeight: 700, fontFamily: type.fonts.display, textTransform: "uppercase", color: C.ink.hex }}>Revisión final</div>
+            <div style={{ fontSize: type.size.md, fontWeight: 700, fontFamily: type.fonts.display, textTransform: "uppercase", color: C.ink.hex }}>{ui.reviewTitle}</div>
             <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginTop: 2 }}>
-              {done ? (loadingProduction ? "Revisando producción…" : "Listo") : `Pregunta ${idx + 1} de ${fields.length}`}
+              {done ? (loadingProduction ? ui.reviewingProduction : ui.reviewDone) : uiQuestionOf(uiLang, idx + 1, fields.length)}
             </div>
           </div>
-          <button onClick={onSkip} disabled={applying} style={{ ...btn(C.white.hex, C.ink.hex), opacity: applying ? 0.45 : 1 }} title="Saltar la revisión y generar igual">
-            Descargar igual
+          <button onClick={onSkip} disabled={applying} style={{ ...btn(C.white.hex, C.ink.hex), opacity: applying ? 0.45 : 1 }} title={ui.skipReviewTitle}>
+            {ui.downloadAnyway}
           </button>
         </div>
 
         <div style={{ padding: space(4), overflowY: "auto", display: "flex", flexDirection: "column", gap: space(3) }}>
           {/* confirmed summary - what's already faithful, not re-asked */}
           <div style={{ background: C.canvas.hex, border: `1px solid #cfd3da`, padding: `${space(2)}px ${space(3)}px`, fontSize: type.size.xs, color: C.ink.hex }}>
-            <Icon name="check" size={14} color={role.priority.fill} /> El documento ya refleja {summary.header} datos de header, {summary.parts} piezas y {summary.designs} diseños del intake.
+            <Icon name="check" size={14} color={role.priority.fill} /> {uiDocumentReflects(uiLang, summary.header, summary.parts, summary.designs)}
           </div>
 
           {/* answered so far */}
@@ -253,7 +256,7 @@ export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }
                     autoFocus
                     value={text}
                     onChange={(e) => setText(e.target.value)}
-                    placeholder="Escribí el valor..."
+                    placeholder={ui.typeValuePlaceholder}
                     style={{ flex: 1, padding: space(2), border: hair, fontFamily: type.fonts.data, fontSize: type.size.sm }}
                   />
                   <button type="submit" style={btn(role.priority.fill, role.priority.on)}>
@@ -268,17 +271,17 @@ export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }
             <div style={{ border: hair, padding: space(4), color: C.ink.hex, display: "flex", alignItems: "center", gap: space(2) }}>
               <Icon name="hourglass" size={16} color={role.priority.fill} />
               <div>
-                <div style={{ fontSize: type.size.sm, fontWeight: 700 }}>Revisando detalles de producción…</div>
-                <div style={{ fontSize: type.size.xs, opacity: 0.6, marginTop: 2 }}>Pensando como diseñador técnico sobre lo ya decidido - cantidades, distancias, variantes.</div>
+                <div style={{ fontSize: type.size.sm, fontWeight: 700 }}>{ui.reviewingProductionDetails}</div>
+                <div style={{ fontSize: type.size.xs, opacity: 0.6, marginTop: 2 }}>{ui.thinkingLikeDesigner}</div>
               </div>
             </div>
           )}
 
           {done && !loadingProduction && (
             <div style={{ border: hair, padding: space(4), color: C.ink.hex }}>
-              <div style={{ fontSize: type.size.sm, fontWeight: 700, marginBottom: space(1) }}>Revisión completada</div>
+              <div style={{ fontSize: type.size.sm, fontWeight: 700, marginBottom: space(1) }}>{ui.reviewCompleted}</div>
               <div style={{ fontSize: type.size.xs, opacity: 0.65, marginBottom: space(3) }}>
-                Aplicaremos {answers.length} decisiones y regeneraremos únicamente las páginas afectadas.
+                {uiWillApplyDecisions(uiLang, answers.length)}
               </div>
               {applyError && (
                 <div style={{ color: role.index.fill, fontSize: type.size.xs, marginBottom: space(2) }}>
@@ -287,7 +290,7 @@ export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }
               )}
               <button onClick={complete} disabled={applying} style={{ ...btn(role.priority.fill, role.priority.on), opacity: applying ? 0.55 : 1 }}>
                 <Icon name={applying ? "hourglass" : "check"} size={14} color={C.white.hex} />
-                {applying ? "Aplicando revisión..." : applyError ? "Reintentar" : "Aplicar y descargar"}
+                {applying ? ui.applyingReview : applyError ? ui.retry : ui.applyAndDownload}
               </button>
             </div>
           )}
@@ -295,10 +298,10 @@ export function ReviewChat({ findings, hdr, parts, designs, onComplete, onSkip }
 
         <div style={{ padding: `${space(2)}px ${space(4)}px`, borderTop: hair, display: "flex", justifyContent: "space-between" }}>
           <button onClick={back} disabled={applying || (idx === 0 && !typing)} style={{ ...btn(C.white.hex, C.ink.hex), opacity: applying || (idx === 0 && !typing) ? 0.4 : 1 }}>
-            <Icon name="arrow_back" size={14} /> Volver
+            <Icon name="arrow_back" size={14} /> {tl.bk}
           </button>
           <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.5, alignSelf: "center" }}>
-            La revisión asegura que el documento sea 100% fiel a lo que pediste.
+            {ui.reviewAssurance}
           </span>
         </div>
       </div>

@@ -2,12 +2,14 @@ import { useState } from "react"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 import { buildIllustratorPackageBlob } from "../core/illustratorPackage.js"
+import { UI, uiExportHint, uiExportSteps } from "../core/i18n.js"
 import illustratorImporter from "../../docs/illustrator-comparison/Techpack-Import-Illustrator.jsx?raw"
 
 const C = palette
 const hair = `1px solid ${C.ink.hex}`
 
-export function SvgModal({ pages, onClose }) {
+export function SvgModal({ pages, onClose, uiLang = "ES" }) {
+  const ui = UI[uiLang] || UI.ES
   const [selPage, setSelPage] = useState(0)
   const [packaging, setPackaging] = useState(false)
   const [failed, setFailed] = useState("")
@@ -49,7 +51,7 @@ export function SvgModal({ pages, onClose }) {
       download(blob, "application/zip", "techpack-" + pages.length + "-paginas.zip")
       setJustDownloaded(true)
     } catch (error) {
-      setFailed((error && error.message) || "No se pudo generar el paquete.")
+      setFailed((error && error.message) || ui.packageFailed)
     } finally {
       setPackaging(false)
     }
@@ -76,10 +78,10 @@ export function SvgModal({ pages, onClose }) {
       <div style={{ background: C.white.hex, width: "100%", maxWidth: 840, maxHeight: "92vh", display: "flex", flexDirection: "column", border: hair }}>
         <div style={{ padding: `${space(3)}px ${space(4)}px`, borderBottom: hair, display: "flex", justifyContent: "space-between", alignItems: "center", gap: space(3) }}>
           <div>
-            <div style={{ fontSize: type.size.md, fontWeight: 700, fontFamily: type.fonts.display, textTransform: "uppercase", letterSpacing: "0.02em", color: C.ink.hex }}>Exportación vectorial</div>
-            <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginTop: 2 }}>Cada página = un SVG A4 con capas semánticas</div>
+            <div style={{ fontSize: type.size.md, fontWeight: 700, fontFamily: type.fonts.display, textTransform: "uppercase", letterSpacing: "0.02em", color: C.ink.hex }}>{ui.exportTitle}</div>
+            <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginTop: 2 }}>{ui.exportSubtitle}</div>
           </div>
-          <button onClick={onClose} style={{ ...btn(C.white.hex, C.ink.hex), padding: space(1) }} title="Cerrar">
+          <button onClick={onClose} style={{ ...btn(C.white.hex, C.ink.hex), padding: space(1) }} title={ui.close}>
             <Icon name="close" size={20} />
           </button>
         </div>
@@ -109,18 +111,18 @@ export function SvgModal({ pages, onClose }) {
         </div>
         <div style={{ padding: `${space(2)}px ${space(4)}px`, background: C.canvas.hex, borderBottom: hair }}>
           <span style={{ fontSize: type.size.xs, color: C.ink.hex }}>
-            Descomprimí el ZIP y corré <b>Techpack-Import-Illustrator.jsx</b> (Archivo &gt; Secuencias de comandos &gt; Otra secuencia de comandos) — arma un solo <b>.ai</b> con las {pages.length} páginas como mesas de trabajo nombradas y las 7 capas nativas reales. Affinity: abrí cualquier SVG de <b>pages/</b> directamente, sin script.
+            {uiExportHint(uiLang, pages.length)}
           </span>
         </div>
         {justDownloaded && (
           <div style={{ padding: `${space(2)}px ${space(4)}px`, background: role.priority.fill, borderBottom: hair }}>
             <div style={{ fontSize: type.size.xs, fontWeight: 700, color: role.priority.on, marginBottom: space(1), display: "flex", alignItems: "center", gap: space(1) }}>
-              <Icon name="check_circle" size={16} color={role.priority.on} /> Descargado — próximo paso:
+              <Icon name="check_circle" size={16} color={role.priority.on} /> {ui.downloadedNextStep}
             </div>
             <ol style={{ margin: 0, paddingLeft: space(4), fontSize: type.size.xs, color: role.priority.on }}>
-              <li>Descomprimí el ZIP (dejando pages/ y el script juntos).</li>
-              <li>En Illustrator: Archivo &gt; Secuencias de comandos &gt; Otra secuencia de comandos… y elegí <b>Techpack-Import-Illustrator.jsx</b>.</li>
-              <li>Se genera <b>Techpack-complete.ai</b> con las {pages.length} páginas como mesas de trabajo y las 7 capas nativas. (Affinity: abrí un SVG de pages/ directo, sin script.)</li>
+              {uiExportSteps(uiLang, pages.length).map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
             </ol>
           </div>
         )}
@@ -133,8 +135,8 @@ export function SvgModal({ pages, onClose }) {
         <div style={{ padding: `${space(3)}px ${space(4)}px`, borderTop: hair, display: "flex", gap: space(2), justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginRight: "auto" }}>{(cur.svg.length / 1024).toFixed(1)} KB</span>
           {failed && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{failed}</span>}
-          <button disabled={packaging} onClick={downloadPackage} style={{ ...btn(role.index.fill, role.index.on), opacity: packaging ? 0.55 : 1 }} title="pages/*.svg + el script que las fusiona en un solo .ai con capas nativas">
-            <Icon name="folder_zip" size={16} color={role.index.on} /> {packaging ? "Preparando..." : "Descargar ficha completa"}
+          <button disabled={packaging} onClick={downloadPackage} style={{ ...btn(role.index.fill, role.index.on), opacity: packaging ? 0.55 : 1 }} title={ui.downloadCompletePackTitle}>
+            <Icon name="folder_zip" size={16} color={role.index.on} /> {packaging ? ui.preparing : ui.downloadCompletePack}
           </button>
         </div>
       </div>

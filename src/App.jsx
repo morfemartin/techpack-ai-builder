@@ -1253,8 +1253,8 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: C.shell.hex, display: "flex", flexDirection: "column", alignItems: "center", padding: `${space(6)}px 4%`, fontFamily: type.fonts.ui, color: C.white.hex }}>
-      {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} />}
-      {reviewFindings && <ReviewChat findings={reviewFindings} hdr={hdr} parts={parts} designs={designs} onComplete={finishReview} onSkip={skipReview} />}
+      {svgPages && <SvgModal pages={svgPages} onClose={() => setSvgPages(null)} uiLang={uiLang} />}
+      {reviewFindings && <ReviewChat findings={reviewFindings} hdr={hdr} parts={parts} designs={designs} onComplete={finishReview} onSkip={skipReview} uiLang={uiLang} />}
       <div style={{ width: "100%", maxWidth: 960, marginBottom: space(3) }}>
         {/* Wordmark — Morfe mark in white on the black shell */}
         <div style={{ display: "flex", alignItems: "center", gap: space(3), marginBottom: space(3) }}>

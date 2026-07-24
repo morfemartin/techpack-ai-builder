@@ -76,6 +76,28 @@ export const UI = {
     goToStudio: "Ir a la version estudio (Qwen local, privado)",
     toPublic: "→ publica",
     toStudio: "→ studio",
+    exportTitle: "Exportación vectorial",
+    exportSubtitle: "Cada página = un SVG A4 con capas semánticas",
+    close: "Cerrar",
+    downloadedNextStep: "Descargado — próximo paso:",
+    preparing: "Preparando...",
+    downloadCompletePack: "Descargar ficha completa",
+    downloadCompletePackTitle: "pages/*.svg + el script que las fusiona en un solo .ai con capas nativas",
+    packageFailed: "No se pudo generar el paquete.",
+    reviewTitle: "Revisión final",
+    reviewingProduction: "Revisando producción…",
+    reviewDone: "Listo",
+    skipReviewTitle: "Saltar la revisión y generar igual",
+    downloadAnyway: "Descargar igual",
+    typeValuePlaceholder: "Escribí el valor...",
+    reviewingProductionDetails: "Revisando detalles de producción…",
+    thinkingLikeDesigner: "Pensando como diseñador técnico sobre lo ya decidido - cantidades, distancias, variantes.",
+    reviewCompleted: "Revisión completada",
+    couldNotApplyReview: "No se pudo aplicar la revisión.",
+    applyingReview: "Aplicando revisión...",
+    retry: "Reintentar",
+    applyAndDownload: "Aplicar y descargar",
+    reviewAssurance: "La revisión asegura que el documento sea 100% fiel a lo que pediste.",
   },
   EN: {
     garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same.",
@@ -139,6 +161,28 @@ export const UI = {
     goToStudio: "Go to the studio version (local Qwen, private)",
     toPublic: "→ public",
     toStudio: "→ studio",
+    exportTitle: "Vector export",
+    exportSubtitle: "Each page = one A4 SVG with semantic layers",
+    close: "Close",
+    downloadedNextStep: "Downloaded — next step:",
+    preparing: "Preparing...",
+    downloadCompletePack: "Download complete tech pack",
+    downloadCompletePackTitle: "pages/*.svg + the script that fuses them into one .ai with native layers",
+    packageFailed: "Could not generate the package.",
+    reviewTitle: "Final review",
+    reviewingProduction: "Reviewing production…",
+    reviewDone: "Done",
+    skipReviewTitle: "Skip the review and generate anyway",
+    downloadAnyway: "Download anyway",
+    typeValuePlaceholder: "Type the value...",
+    reviewingProductionDetails: "Reviewing production details…",
+    thinkingLikeDesigner: "Thinking like a technical designer about what's already decided - quantities, distances, variants.",
+    reviewCompleted: "Review completed",
+    couldNotApplyReview: "Could not apply the review.",
+    applyingReview: "Applying review...",
+    retry: "Retry",
+    applyAndDownload: "Apply and download",
+    reviewAssurance: "The review makes sure the document is 100% faithful to what you asked for.",
   },
 }
 
@@ -230,6 +274,42 @@ export function uiApplyingRevision(uiLang, index, total) {
 export function uiPagesUsedFallback(uiLang, count) {
   if (uiLang === "EN") return count === 1 ? "1 page used the standard layout (AI failed)" : count + " pages used the standard layout (AI failed)"
   return count === 1 ? "1 página usó layout estándar (falló la IA)" : count + " páginas usaron layout estándar (falló la IA)"
+}
+
+export function uiExportHint(uiLang, pageCount) {
+  return uiLang === "EN"
+    ? `Unzip and run Techpack-Import-Illustrator.jsx (File > Scripts > Other Script) to build one .ai with the ${pageCount} pages as named artboards and the 7 native layers. Affinity: open any SVG in pages/ directly, no script needed.`
+    : `Descomprimí el ZIP y corré Techpack-Import-Illustrator.jsx (Archivo > Secuencias de comandos > Otra secuencia de comandos) para armar un solo .ai con las ${pageCount} páginas como mesas de trabajo y las 7 capas nativas. Affinity: abrí cualquier SVG de pages/ directamente, sin script.`
+}
+
+export function uiExportSteps(uiLang, pageCount) {
+  return uiLang === "EN"
+    ? [
+        "Unzip this ZIP (keep pages/ and the script together).",
+        "In Illustrator: File > Scripts > Other Script... and choose Techpack-Import-Illustrator.jsx.",
+        `Techpack-complete.ai is generated with the ${pageCount} pages as named artboards and the 7 native layers. (Affinity: open a page SVG directly, no script.)`,
+      ]
+    : [
+        "Descomprimí el ZIP (dejando pages/ y el script juntos).",
+        "En Illustrator: Archivo > Secuencias de comandos > Otra secuencia de comandos... y elegí Techpack-Import-Illustrator.jsx.",
+        `Se genera Techpack-complete.ai con las ${pageCount} páginas como mesas de trabajo y las 7 capas nativas. (Affinity: abrí un SVG de pages/ directo, sin script.)`,
+      ]
+}
+
+export function uiQuestionOf(uiLang, index, total) {
+  return uiLang === "EN" ? `Question ${index} of ${total}` : `Pregunta ${index} de ${total}`
+}
+
+export function uiDocumentReflects(uiLang, headerCount, partsCount, designsCount) {
+  return uiLang === "EN"
+    ? `The document already reflects ${headerCount} header fields, ${partsCount} parts and ${designsCount} designs from the intake.`
+    : `El documento ya refleja ${headerCount} datos de header, ${partsCount} piezas y ${designsCount} diseños del intake.`
+}
+
+export function uiWillApplyDecisions(uiLang, count) {
+  return uiLang === "EN"
+    ? `We'll apply ${count} decisions and only regenerate the affected pages.`
+    : `Aplicaremos ${count} decisiones y regeneraremos únicamente las páginas afectadas.`
 }
 
 export function uiPageDesignFailed(uiLang, index, pageName) {
