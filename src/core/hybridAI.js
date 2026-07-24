@@ -91,6 +91,26 @@ function recordNvidiaSuccess() {
   circuitOpenedAt = 0
 }
 
+// The "local" provider used to always mean Qwen - it can now be a paid
+// hosted model (Mistral) instead, depending on what studio-ai.mjs's bridge
+// is configured to run (see scripts/studio-ai.mjs). Hardcoding "Qwen" here
+// would tell the user the wrong model answered - a status message that
+// LIES is worse than one that says nothing. `result.model` is the actual
+// model name the upstream API returned (studioBridge.mjs pipes it through
+// unmodified), so this names whoever genuinely answered instead of
+// assuming. Falls back to a neutral "Studio AI" label only if the model
+// name doesn't match anything recognized - never guesses wrong.
+function localProviderLabel(model) {
+  const name = String(model || "")
+  if (/mistral/i.test(name)) return "Mistral"
+  if (/qwen/i.test(name)) return "Qwen"
+  return "Studio AI"
+}
+
+function providerLabel(result) {
+  return result.provider === "local" ? localProviderLabel(result.model) : "DeepSeek"
+}
+
 async function qwenAvailable() {
   const now = Date.now()
   if (qwenHealth.available !== null && now - qwenHealth.checkedAt < HEALTH_TTL_MS) return qwenHealth.available
@@ -257,7 +277,7 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
       if (result.provider === "nvidia") qwen.controller.abort("winner_selected")
       else nvidia.controller.abort("winner_selected")
       const seconds = Math.max(1, Math.round(result.latencyMs / 1000))
-      onStatus && onStatus(result.provider === "local" ? `Respondido por Qwen · ${seconds} s` : `Respondido por DeepSeek · ${seconds} s`)
+      onStatus && onStatus(`Respondido por ${providerLabel(result)} · ${seconds} s`)
       logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: result.fallbackReason })
       return result
     }
@@ -273,7 +293,7 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
     const localCandidate = enabled.has("local") ? (async () => {
       await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
       if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
-      onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando Qwen local…" : "Consultando Qwen local…")
+      onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando el modelo local…" : "Consultando el modelo local…")
       return enqueueQwen(() => providerAttempt("local", options, qwen.controller, localDeadline(deadline))).then(accept)
     })().catch((error) => { failures.push(error); throw error }) : null
     if (localCandidate) candidates.push(localCandidate)
@@ -333,7 +353,7 @@ export async function runHybridAIStream({ task, messages, validator, fallback, o
       if (result.provider === "nvidia") qwen.controller.abort("winner_selected")
       else nvidia.controller.abort("winner_selected")
       const seconds = Math.max(1, Math.round(result.latencyMs / 1000))
-      onStatus && onStatus(result.provider === "local" ? `Respondido por Qwen · ${seconds} s` : `Respondido por DeepSeek · ${seconds} s`)
+      onStatus && onStatus(`Respondido por ${providerLabel(result)} · ${seconds} s`)
       logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: result.fallbackReason })
       return result
     }
@@ -348,7 +368,7 @@ export async function runHybridAIStream({ task, messages, validator, fallback, o
       candidates.push((async () => {
         await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
         if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
-        onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando Qwen local…" : "Consultando Qwen local…")
+        onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando el modelo local…" : "Consultando el modelo local…")
         return enqueueQwen(() => streamProviderAttempt("local", options, qwen.controller, localDeadline(deadline), onEvent)).then(accept)
       })().catch((error) => { failures.push(error); throw error }))
     }

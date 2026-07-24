@@ -207,4 +207,66 @@ describe("local model timeout window", () => {
     await promise
     expect(localTimeout).toBeGreaterThanOrEqual(89000)
   })
+
+  // The "local" provider used to always mean Qwen - studio-ai.mjs's bridge can
+  // now run a paid hosted model (Mistral) instead. Naming the wrong one in the
+  // status message is worse than saying nothing, so the label must be derived
+  // from the model name the upstream ACTUALLY returned, not assumed from the
+  // provider slot. Verified live: NVIDIA down, local answered via Mistral, and
+  // the status still said "Respondido por Qwen" before this fix.
+  describe("onStatus names the model that actually answered", () => {
+    function statusMessages() {
+      const messages = []
+      return { onStatus: (message) => messages.push(message), messages }
+    }
+
+    it("says Mistral when the local bridge's response names a mistral model", async () => {
+      requestAIOnce.mockImplementation(({ provider, signal }) =>
+        provider === "nvidia" ? waitForAbort(signal) : Promise.resolve({ content: '{"ok":true}', provider, model: "mistral-small-2603" })
+      )
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+      expect(messages.some((m) => m.startsWith("Respondido por Mistral"))).toBe(true)
+      expect(messages.some((m) => m.includes("Qwen"))).toBe(false)
+    })
+
+    it("says Qwen when the local bridge's response names a qwen model", async () => {
+      requestAIOnce.mockImplementation(({ provider, signal }) =>
+        provider === "nvidia" ? waitForAbort(signal) : Promise.resolve({ content: '{"ok":true}', provider, model: "mlx-community/Qwen3-8B-4bit" })
+      )
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+      expect(messages.some((m) => m.startsWith("Respondido por Qwen"))).toBe(true)
+    })
+
+    it("falls back to a neutral 'Studio AI' label for an unrecognized local model, never guessing", async () => {
+      requestAIOnce.mockImplementation(({ provider, signal }) =>
+        provider === "nvidia" ? waitForAbort(signal) : Promise.resolve({ content: '{"ok":true}', provider, model: "some-other-model" })
+      )
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+      expect(messages.some((m) => m.startsWith("Respondido por Studio AI"))).toBe(true)
+    })
+
+    it("never names a specific local model before it has actually answered", async () => {
+      // The pre-join "trying the local model" message fires BEFORE the result
+      // (and its model name) is known - it must stay provider-neutral instead
+      // of naming Qwen/Mistral speculatively.
+      requestAIOnce.mockImplementation(({ provider, signal }) =>
+        provider === "nvidia" ? waitForAbort(signal) : Promise.resolve({ content: '{"ok":true}', provider, model: "mistral-small-2603" })
+      )
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+      const preJoinMessages = messages.filter((m) => !m.startsWith("Respondido por"))
+      expect(preJoinMessages.every((m) => !/qwen|mistral/i.test(m))).toBe(true)
+    })
+  })
 })
