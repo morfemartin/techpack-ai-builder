@@ -111,6 +111,36 @@ function providerLabel(result) {
   return result.provider === "local" ? localProviderLabel(result.model) : "DeepSeek"
 }
 
+// Fills the SILENCE between real status events, instead of leaving the UI
+// frozen on whatever the last message said. Observed live: intake's 30s
+// qwenDelayMs means "Consultando DeepSeek…" can sit on screen completely
+// unchanged for up to half a minute while nothing visibly happens - a user
+// watching that has no way to tell a slow-but-normal wait from a hang.
+//
+// Only ticks when nothing more specific has been said recently (tracked via
+// `lastStatusAt`, bumped on every real onStatus call) - so it never
+// overwrites "DeepSeek está tardando; probando el modelo local…" the moment
+// that fires, it only shows up in the gaps around it. Always cleared in the
+// caller's `finally` block, same discipline as the abort controllers.
+const HEARTBEAT_INTERVAL_MS = 5000
+
+function withHeartbeat(onStatus) {
+  const noop = () => {}
+  if (!onStatus) return { status: noop, stop: noop }
+  const startedAt = Date.now()
+  let lastStatusAt = startedAt
+  const status = (message) => {
+    lastStatusAt = Date.now()
+    onStatus(message)
+  }
+  const timer = setInterval(() => {
+    if (Date.now() - lastStatusAt < HEARTBEAT_INTERVAL_MS) return
+    const seconds = Math.round((Date.now() - startedAt) / 1000)
+    status(`Esperando respuesta de la IA… ${seconds} s`)
+  }, HEARTBEAT_INTERVAL_MS)
+  return { status, stop: () => clearInterval(timer) }
+}
+
 async function qwenAvailable() {
   const now = Date.now()
   if (qwenHealth.available !== null && now - qwenHealth.checkedAt < HEALTH_TTL_MS) return qwenHealth.available
@@ -270,6 +300,7 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
     const qwen = composeAbort(operationAbort.controller.signal)
     const failures = []
     let settled = false
+    const heartbeat = withHeartbeat(onStatus)
 
     const accept = (result) => {
       if (settled || activeOperations.get(task)?.id !== id) throw abortError("stale_operation")
@@ -277,23 +308,24 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
       if (result.provider === "nvidia") qwen.controller.abort("winner_selected")
       else nvidia.controller.abort("winner_selected")
       const seconds = Math.max(1, Math.round(result.latencyMs / 1000))
-      onStatus && onStatus(`Respondido por ${providerLabel(result)} · ${seconds} s`)
+      heartbeat.status(`Respondido por ${providerLabel(result)} · ${seconds} s`)
       logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: result.fallbackReason })
       return result
     }
 
     const candidates = []
     if (enabled.has("nvidia") && !circuitIsOpen()) {
-      onStatus && onStatus("Consultando DeepSeek…")
+      heartbeat.status("Consultando DeepSeek…")
       candidates.push(providerAttempt("nvidia", options, nvidia.controller, deadline).then(accept).catch((error) => { failures.push(error); throw error }))
     } else if (enabled.has("nvidia")) {
       failures.push(new Error("nvidia_circuit_open"))
+      heartbeat.status("NVIDIA en pausa tras fallas recientes; usando el modelo local…")
     }
 
     const localCandidate = enabled.has("local") ? (async () => {
       await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
       if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
-      onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando el modelo local…" : "Consultando el modelo local…")
+      heartbeat.status(enabled.has("nvidia") ? "DeepSeek está tardando; probando el modelo local…" : "Consultando el modelo local…")
       return enqueueQwen(() => providerAttempt("local", options, qwen.controller, localDeadline(deadline))).then(accept)
     })().catch((error) => { failures.push(error); throw error }) : null
     if (localCandidate) candidates.push(localCandidate)
@@ -307,10 +339,11 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
       fallbackContent = validateContent(validator, fallbackContent)
       const reason = failures.map((error) => error && (error.status || error.message)).filter(Boolean).join(",") || "providers_failed"
       const result = { content: fallbackContent, provider: "contract", model: "deterministic", latencyMs: Date.now() - started, degraded: true, fallbackReason: reason }
-      onStatus && onStatus("Usando respuesta base verificable")
+      heartbeat.status("Usando respuesta base verificable")
       logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: reason })
       return result
     } finally {
+      heartbeat.stop()
       nvidia.controller.abort("operation_finished")
       qwen.controller.abort("operation_finished")
       nvidia.dispose()
@@ -347,28 +380,30 @@ export async function runHybridAIStream({ task, messages, validator, fallback, o
     const qwen = composeAbort(operationAbort.controller.signal)
     const failures = []
     let settled = false
+    const heartbeat = withHeartbeat(onStatus)
     const accept = (result) => {
       if (settled || activeOperations.get(task)?.id !== id) throw abortError("stale_operation")
       settled = true
       if (result.provider === "nvidia") qwen.controller.abort("winner_selected")
       else nvidia.controller.abort("winner_selected")
       const seconds = Math.max(1, Math.round(result.latencyMs / 1000))
-      onStatus && onStatus(`Respondido por ${providerLabel(result)} · ${seconds} s`)
+      heartbeat.status(`Respondido por ${providerLabel(result)} · ${seconds} s`)
       logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: result.fallbackReason })
       return result
     }
     const candidates = []
     if (enabled.has("nvidia") && !circuitIsOpen()) {
-      onStatus && onStatus("Consultando DeepSeek…")
+      heartbeat.status("Consultando DeepSeek…")
       candidates.push(streamProviderAttempt("nvidia", options, nvidia.controller, deadline, onEvent).then(accept).catch((error) => { failures.push(error); throw error }))
     } else if (enabled.has("nvidia")) {
       failures.push(new Error("nvidia_circuit_open"))
+      heartbeat.status("NVIDIA en pausa tras fallas recientes; usando el modelo local…")
     }
     if (enabled.has("local")) {
       candidates.push((async () => {
         await delay(!enabled.has("nvidia") || circuitIsOpen() ? 0 : policy.qwenDelayMs, qwen.controller.signal)
         if (!(await qwenAvailable())) throw new Error("qwen_unavailable")
-        onStatus && onStatus(enabled.has("nvidia") ? "DeepSeek está tardando; probando el modelo local…" : "Consultando el modelo local…")
+        heartbeat.status(enabled.has("nvidia") ? "DeepSeek está tardando; probando el modelo local…" : "Consultando el modelo local…")
         return enqueueQwen(() => streamProviderAttempt("local", options, qwen.controller, localDeadline(deadline), onEvent)).then(accept)
       })().catch((error) => { failures.push(error); throw error }))
     }
@@ -381,10 +416,11 @@ export async function runHybridAIStream({ task, messages, validator, fallback, o
       fallbackContent = validateContent(validator, fallbackContent)
       const reason = failures.map((error) => error && (error.status || error.message)).filter(Boolean).join(",") || "providers_failed"
       const result = { content: fallbackContent, provider: "contract", model: "deterministic", latencyMs: Date.now() - started, degraded: true, fallbackReason: reason }
-      onStatus && onStatus("Usando respuesta base verificable")
+      heartbeat.status("Usando respuesta base verificable")
       logTelemetry({ at: new Date().toISOString(), task, provider: result.provider, model: result.model, latencyMs: result.latencyMs, valid: true, fallbackReason: reason })
       return result
     } finally {
+      heartbeat.stop()
       nvidia.controller.abort("operation_finished")
       qwen.controller.abort("operation_finished")
       nvidia.dispose()

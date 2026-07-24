@@ -269,4 +269,72 @@ describe("local model timeout window", () => {
       expect(preJoinMessages.every((m) => !/qwen|mistral/i.test(m))).toBe(true)
     })
   })
+
+  // Observed live: intake's 30s qwenDelayMs left "Consultando DeepSeek…"
+  // frozen on screen, unchanged, for the entire wait - a user watching that
+  // has no way to tell a slow-but-normal delay from a hang.
+  describe("heartbeat fills the silence between real status events", () => {
+    function statusMessages() {
+      const messages = []
+      return { onStatus: (message) => messages.push(message), messages }
+    }
+
+    it("ticks periodically during a long wait instead of staying silent", async () => {
+      requestAIOnce.mockImplementation(({ provider, signal }) =>
+        provider === "nvidia" ? waitForAbort(signal) : Promise.resolve({ content: '{"ok":true}', provider, model: "mistral-small-2603" })
+      )
+      const { onStatus, messages } = statusMessages()
+      // intake: local joins at 30s - the heartbeat should tick several times
+      // during that wait, on top of the initial "Consultando DeepSeek…".
+      const promise = runHybridAI({ task: "intake", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(29999)
+      const heartbeatTicks = messages.filter((m) => m.startsWith("Esperando respuesta de la IA…"))
+      expect(heartbeatTicks.length).toBeGreaterThanOrEqual(4) // ~30s / 5s interval
+      await vi.advanceTimersByTimeAsync(1)
+      await promise
+    })
+
+    it("never overwrites the real 'trying local' message the instant it fires", async () => {
+      requestAIOnce.mockImplementation(({ provider, signal }) =>
+        provider === "nvidia" ? waitForAbort(signal) : Promise.resolve({ content: '{"ok":true}', provider, model: "qwen" })
+      )
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "intake", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(30000)
+      await promise
+      const localJoinIndex = messages.indexOf("DeepSeek está tardando; probando el modelo local…")
+      expect(localJoinIndex).toBeGreaterThanOrEqual(0)
+      // The message immediately after the real "trying local" event must not
+      // be a heartbeat tick reasserting itself in the very same instant.
+      expect(messages[localJoinIndex + 1]).not.toBe("Esperando respuesta de la IA… " + Math.round(30000 / 1000) + " s")
+    })
+
+    it("stops ticking once the operation has settled", async () => {
+      requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: '{"ok":true}', provider, model: provider }))
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "x" }], validator: (v) => v.includes("ok"), fallback: "fallback", onStatus })
+      await promise
+      const countAfterSettle = messages.length
+      await vi.advanceTimersByTimeAsync(60000)
+      expect(messages.length).toBe(countAfterSettle)
+    })
+
+    it("announces the circuit-open skip instead of silently omitting NVIDIA", async () => {
+      requestAIOnce.mockImplementation(({ provider }) =>
+        provider === "nvidia" ? Promise.reject(Object.assign(new Error("down"), { status: 500 })) : Promise.resolve({ content: "valid", provider, model: "qwen" })
+      )
+      // "explain"'s qwenDelayMs (3s) still runs under fake timers even though
+      // NVIDIA rejects instantly - advance past it for each warm-up call.
+      for (let i = 0; i < 4; i++) {
+        const warmPromise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "warm-" + i }], validator: (v) => v === "valid", fallback: "fallback" })
+        await vi.advanceTimersByTimeAsync(3000)
+        await warmPromise
+      }
+      const { onStatus, messages } = statusMessages()
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "after-open" }], validator: (v) => v === "valid", fallback: "fallback", onStatus })
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+      expect(messages.some((m) => /NVIDIA en pausa/i.test(m))).toBe(true)
+    })
+  })
 })
