@@ -1,4 +1,5 @@
 import { h2c } from "../core/colorUtils.js"
+import { palette, role } from "../design/tokens.js"
 
 export function ColorsEditor({ colors, onChange }) {
   function addColor() {
@@ -27,13 +28,13 @@ export function ColorsEditor({ colors, onChange }) {
                 {col.hex} | C:{cm.c} M:{cm.m} Y:{cm.y} K:{cm.k}
               </div>
             </div>
-            <button onClick={() => del(i)} style={{ background: "none", border: "none", color: "#E5352B", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>
+            <button onClick={() => del(i)} style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: 16, flexShrink: 0 }}>
               x
             </button>
           </div>
         )
       })}
-      <button onClick={addColor} style={{ padding: "6px 14px", background: "#FFFFFF", border: "1.5px dashed #1A3FB0", borderRadius: 7, color: "#1A3FB0", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+      <button onClick={addColor} style={{ padding: "6px 14px", background: palette.white.hex, border: "1.5px dashed " + role.priority.fill, borderRadius: 7, color: role.priority.fill, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
         + Color
       </button>
     </div>

@@ -29,7 +29,7 @@ import { buildReviewFindings } from "./core/reviewDiff.js"
 import { applyReviewAnswers } from "./core/applyReviewAnswers.js"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
-import { palette, role, type, space } from "./design/tokens.js"
+import { getPaletteNames, palette, role, setPalette, type, space } from "./design/tokens.js"
 import { GRID, PAGE } from "./design/metrics.js"
 import { deterministicPageLayout } from "./core/semanticOutline.js"
 
@@ -209,6 +209,28 @@ export default function App() {
   }, [uiLang])
   const tl = T[uiLang] || T.ES
   const ui = UI[uiLang] || UI.ES
+
+  // Color palette preset - `setPalette()` MUTATES the shared `palette`/`role`
+  // objects (see design/tokens.js), so a plain object mutation is invisible
+  // to React's own change detection; only a STATE CHANGE forces this
+  // component (and every child under it, since none are React.memo'd) to
+  // re-render and read the new hex values. That's why the persisted preset
+  // is applied INSIDE the useState initializer (runs synchronously during
+  // this component's first render, before its JSX is built) rather than in
+  // a useEffect - an effect fires after the first paint, so on reload the
+  // page would flash bauhaus for a frame and then never even correct itself
+  // (nothing re-renders after an effect-only mutation with no state change).
+  const [paletteName, setPaletteName] = useState(() => {
+    let name = "bauhaus"
+    try { name = localStorage.getItem("techpack.palette") || "bauhaus" } catch {}
+    setPalette(name)
+    return name
+  })
+  function choosePalette(name) {
+    setPalette(name)
+    setPaletteName(name)
+    try { localStorage.setItem("techpack.palette", name) } catch {}
+  }
 
   useEffect(() => {
     if (textAIProvider !== "local") return undefined
@@ -1273,6 +1295,21 @@ export default function App() {
           >
             {uiLang === "ES" ? "EN" : "ES"}
           </button>
+          {/* Color palette preset - which colors carry the index/priority/
+              highlight roles across both screen and export. Independent of
+              monoMode (a render-time grayscale toggle) and of uiLang. */}
+          <select
+            value={paletteName}
+            onChange={(e) => choosePalette(e.target.value)}
+            title={uiLang === "ES" ? "Paleta de colores" : "Color palette"}
+            style={{ padding: `${space(1)}px ${space(2)}px`, border: `1px solid ${C.white.hex}`, background: C.shell.hex, color: C.white.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", cursor: "pointer" }}
+          >
+            {getPaletteNames().map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
           {/* The badge already says WHICH build you are in, so it doubles as
               the way to reach the other one - studio.html was deployed but
               unreachable, with no link to it anywhere. BASE_URL keeps this

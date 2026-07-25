@@ -12,7 +12,7 @@
 import { T } from "../core/i18n.js"
 import { R, TX, svgHeader, svgDisc, wrapLines, fitText, headerHeight } from "../core/svgPrimitives.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
-import { palette } from "../design/tokens.js"
+import { neutral, palette } from "../design/tokens.js"
 import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { documentIndexRows, measureRegion, selectedDesign } from "./measure.js"
@@ -257,7 +257,7 @@ function renderDocumentIndex(box, entries) {
   s += R(box.x, box.y, box.width, GRID.baseline, palette.blue.hex, palette.ink.hex, "0.8")
   s += TX(pageX, box.y + GRID.baseline / 2, "INDICE DE PRODUCCION", PRINT.bodyFont, true, "start", palette.white.hex)
   const headerY = box.y + GRID.baseline
-  s += R(box.x, headerY, box.width, GRID.baseline * 2, "#F0F1F3", palette.ink.hex, "0.5")
+  s += R(box.x, headerY, box.width, GRID.baseline * 2, neutral.divider.hex, palette.ink.hex, "0.5")
   s += TX(pageX, headerY + GRID.baseline, "P.", PRINT.minFont, true, "start")
   s += TX(titleX, headerY + GRID.baseline, "SECCION", PRINT.minFont, true, "start")
   s += TX(descriptionX, headerY + GRID.baseline, "QUE CONTIENE / PARA QUE SIRVE", PRINT.minFont, true, "start")
@@ -268,7 +268,7 @@ function renderDocumentIndex(box, entries) {
     const purpose = String(entry.purpose || "")
     const role = purpose.startsWith("design:") ? "APLICACION" : purpose === "lining" ? "INTERIOR" : purpose === "label" ? "ROTULADO" : "CONSTRUCCION"
     const centerY = rowTop + height / 2
-    s += R(box.x, rowTop, box.width, height, rowIndex % 2 ? "#F7F7F8" : palette.white.hex, palette.ink.hex, "0.35")
+    s += R(box.x, rowTop, box.width, height, rowIndex % 2 ? neutral.faint.hex : palette.white.hex, palette.ink.hex, "0.35")
     s += TX(pageX, centerY, String(entry.pageNumber).padStart(2, "0"), PRINT.minFont, true, "start", palette.red.hex, undefined)
     lines.forEach((line, index) => {
       const startY = centerY - (lines.length - 1) * GRID.baseline / 2

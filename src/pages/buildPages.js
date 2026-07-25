@@ -3,7 +3,7 @@ import { NA, sv, R, TX, LBL, VAL, dimLine, svgChip, svgHeader, svgDisc, svgSecti
 import { h2c } from "../core/colorUtils.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
-import { palette, type } from "../design/tokens.js"
+import { neutral, palette, type } from "../design/tokens.js"
 import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
 import { briefLines } from "./briefs.js"
 import { convertMeasure, formatMeasure, normalizeUnit } from "../core/units.js"
@@ -42,7 +42,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
     render: (b) => {
       var st = colStops(b)
       return (
-        R(b.x, b.y, b.width, b.height, "#EDEEF0", palette.ink.hex, "0.6") +
+        R(b.x, b.y, b.width, b.height, neutral.paleBorder.hex, palette.ink.hex, "0.6") +
         TX(b.x + b.width * columns.index, b.y + b.height / 2, "#", PRINT.minFont, true, "middle") +
         TX(st.divLabel + TEXT_PAD, b.y + b.height / 2, lx.spec || "SPECS", PRINT.minFont, true, "start") +
         TX(st.divValue + TEXT_PAD, b.y + b.height / 2, lx.detail || "DETAILS", PRINT.minFont, true, "start")
@@ -54,7 +54,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
     leaf({
       ...(compact ? { basis: measuredRows[i].height + rowExtra, grow: 0, min: measuredRows[i].height } : { grow: 1, min: 16 }),
       render: (b) => {
-        var bg = i % 2 === 0 ? palette.white.hex : "#F7F7F8"
+        var bg = i % 2 === 0 ? palette.white.hex : neutral.faint.hex
         var metric = compact ? measuredRows[i] : null
         var nm = metric ? metric.name : pn[p.id] || p.customName || "P" + p.id
         var v = metric ? metric.value : txP ? txP[i] : p.val
@@ -196,7 +196,7 @@ function renderDesignArtHero(box, design, dimensionUnit) {
   var mime = design.imageType === "svg" ? "image/svg+xml" : design.imageType === "png" ? "image/png" : "image/jpeg"
   var pad = INSET
   var s = ""
-  s += R(box.x, box.y, box.width, box.height, "none", "#E4E6EA", "0.8")
+  s += R(box.x, box.y, box.width, box.height, "none", neutral.line.hex, "0.8")
   s += svgChip(box.x + 8 + CHIP / 2, box.y + 8 + CHIP / 2, "D")
   s += TX(box.x + 8 + CHIP + 8, box.y + 8 + CHIP / 2, "DISENO A ESCALA", PRINT.captionFont, true, "start", palette.ink.hex)
 
@@ -229,7 +229,7 @@ function renderDesignArtHero(box, design, dimensionUnit) {
   var spec = [design.tec, design.pos, design.posDetail].map(function (x) { return String(x || "").trim() }).filter(Boolean).join(" · ")
   if (spec) {
     var sy = box.y + box.height - stripH + GRID.baseline
-    s += TX(box.x + pad, sy, "Ejecucion: " + spec, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
+    s += TX(box.x + pad, sy, "Ejecucion: " + spec, PRINT.minFont, false, "start", neutral.strongText.hex, type.svgFonts.data)
   }
   return "<g id='ARTWORK__V1'>" + s + "</g>"
 }
@@ -275,11 +275,11 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     var clipId = safeClipPrefix + "ARTBOARD_CONTENT_CLIP__V" + viewNumber
     // Crop-marked art board: a hairline frame with inward corner registration
     // ticks reads as "place artwork here", not a blank box.
-    s += R(x, y, cellW, cellH, "none", "#E4E6EA", "0.8")
+    s += R(x, y, cellW, cellH, "none", neutral.line.hex, "0.8")
     var tk = 12
     ;[[x, y, 1, 1], [x + cellW, y, -1, 1], [x, y + cellH, 1, -1], [x + cellW, y + cellH, -1, -1]].forEach(function (p) {
-      s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + (p[0] + tk * p[2]) + "' y2='" + p[1] + "' stroke='#B7BCC6' stroke-width='1'/>"
-      s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + p[0] + "' y2='" + (p[1] + tk * p[3]) + "' stroke='#B7BCC6' stroke-width='1'/>"
+      s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + (p[0] + tk * p[2]) + "' y2='" + p[1] + "' stroke='" + neutral.mid.hex + "' stroke-width='1'/>"
+      s += "<line x1='" + p[0] + "' y1='" + p[1] + "' x2='" + p[0] + "' y2='" + (p[1] + tk * p[3]) + "' stroke='" + neutral.mid.hex + "' stroke-width='1'/>"
     })
     // Wrapping is conservative and this clip is the invariant's final guard:
     // no glyph, highlight or reference can paint outside its artwork slot.
@@ -314,21 +314,21 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     designerCommunication += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
     // The view code already appears in this block's badge and heading, so the
     // caption does not repeat it (see briefLines for the other two copies).
-    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES", PRINT.minFont, true, "start", "#7D8490")
+    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES", PRINT.minFont, true, "start", neutral.strongText.hex)
     selectedLines.forEach(function (line, lineIndex) {
       var ly = textY + lineIndex * GRID.baseline
       if (line.pending) designerCommunication += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
-      designerCommunication += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : "#7D8490", type.svgFonts.data)
+      designerCommunication += TX(textX, ly, line.text, PRINT.minFont, lineIndex === 0 || line.pending, "start", line.pending ? palette.ink.hex : neutral.strongText.hex, type.svgFonts.data)
     })
     if (!brief && noteText) {
       wrapLines(noteText, textW, PRINT.minFont).slice(0, maxLines).forEach(function (line, lineIndex) {
-        designerCommunication += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", "#7D8490", type.svgFonts.data)
+        designerCommunication += TX(textX, textY + lineIndex * GRID.baseline, line, PRINT.minFont, false, "start", neutral.strongText.hex, type.svgFonts.data)
       })
     }
     if (cellH >= 120) {
       var fullAreaLabel = "AREA EDITABLE PARA ILUSTRACION TECNICA"
       var areaLabel = wrapLines(fullAreaLabel, Math.max(1, cellW - INSET * 2), PRINT.minFont).length === 1 ? fullAreaLabel : "AREA EDITABLE"
-      designerCommunication += TX(x + cellW / 2, y + cellH - 16, areaLabel, PRINT.minFont, true, "middle", "#9AA0AB")
+      designerCommunication += TX(x + cellW / 2, y + cellH - 16, areaLabel, PRINT.minFont, true, "middle", neutral.mutedText.hex)
     }
     designerCommunication += "</g>"
     designerCommunication += "</g>"
@@ -531,7 +531,7 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
     ])
     s += renderLayoutToSVG(solveLayout(briefRoot, { x: RX, y: by, width: RW, height: RH }))
   } else {
-    s += TX(RX + RW / 2, by + RH / 2, t.illZone, 11, false, "middle", "#B7BCC6")
+    s += TX(RX + RW / 2, by + RH / 2, t.illZone, 11, false, "middle", neutral.mid.hex)
     var cors = [[RX + 20, by + 20], [RX + 20, by + RH - 20], [RX + RW - 20, by + 20], [RX + RW - 20, by + RH - 20]]
     cors.forEach(function (pt) {
       s += "<line x1='" + (pt[0] - 12) + "' y1='" + pt[1] + "' x2='" + (pt[0] + 12) + "' y2='" + pt[1] + "' stroke='#ddd' stroke-width='1'/>"
