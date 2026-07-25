@@ -131,12 +131,30 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
       const value = normalizeRequirements(parseJSONOrRepair(content, "invalid intake"), garmentType)
       const general = value.fields.filter((field) => field.category === "general")
       const asked = general.filter((field) => field.status === FIELD_STATUS.ASK)
+      const resolved = general.filter((field) => field.status !== FIELD_STATUS.ASK)
       return (
         new Set(value.fields.map((field) => field.key)).size === value.fields.length &&
-        // enough substance to actually build a tech pack from
-        asked.length >= 6 &&
+        // Real coverage - the prompt itself asks for 8-14 fields total; a
+        // garment that genuinely has few open decisions (see below) still
+        // needs to name this many construction facts, assumed or asked, to
+        // be usable by a factory. Gates substance regardless of how the
+        // ask/assumed split lands, instead of only counting "ask".
+        general.length >= 8 &&
+        // Some genuine decisions must surface - a response that assumes
+        // literally everything asks the user nothing and is indistinguishable
+        // from a lazy non-answer. Deliberately NOT a fixed "6" regardless of
+        // garment: a well-standardized garment (a flannel shirt, a sock) can
+        // correctly have few real open decisions - the prompt EXPLICITLY
+        // tells the model not to ask what's already standard. Observed live:
+        // Mistral correctly assumed 9/14 fields for a "camisa de franela"
+        // (that silhouette really is that standardized), leaving 5 genuine
+        // asks - a flat ">= 6" rejected a CORRECT, confident answer.
+        asked.length >= 3 &&
         // every question the user will see must offer numbered choices
-        asked.every((field) => field.options.length >= 2 && field.options.length <= 4)
+        asked.every((field) => field.options.length >= 2 && field.options.length <= 4) &&
+        // an assumed/known field with no actual value resolves nothing - it
+        // claims the fact is handled but hands the factory no default at all
+        resolved.every((field) => field.value.trim().length > 0)
       )
     },
     // Deliberately no `fallback`: if neither provider can reason about this

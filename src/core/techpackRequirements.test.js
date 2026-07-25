@@ -481,6 +481,60 @@ describe("analyzeRequirements onProgress wiring", () => {
     await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
   })
 
+  // Observed live: Mistral correctly assumed 9 of 14 fields for a "camisa de
+  // franela" (flannel shirt) - that silhouette really is that standardized -
+  // leaving only 5 genuine "ask" fields. A flat "asked.length >= 6" rejected
+  // this CORRECT, confident answer, since the prompt itself tells the model
+  // not to ask what a factory already knows. Coverage is now judged on the
+  // TOTAL general field count (matching the prompt's own "8-14 fields"
+  // instruction), with only a low floor (>=3) on genuine open questions -
+  // enough to catch a lazy non-answer without punishing a well-reasoned one.
+  it("accepts a well-standardized garment with fewer than 6 ask fields, as long as total coverage holds", async () => {
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      const resolved = Array.from({ length: 9 }, (_, i) =>
+        `{"key":"r${i}","label":"R${i}","category":"general","status":"assumed","value":"Estandar de fabrica","why":"x"}`)
+      const asked = Array.from({ length: 5 }, (_, i) =>
+        `{"key":"a${i}","label":"A${i}","category":"general","status":"ask","value":"","options":["Opcion A","Opcion B"],"why":"x"}`)
+      const flannel = '{"garmentType":"camisa de franela","fields":[' + [...resolved, ...asked].join(",") + ']}'
+      expect(validator(flannel)).toBe(true)
+      return flannel
+    })
+    await analyzeRequirements({ garmentType: "camisa de franela", seed: {}, tecs: [] })
+  })
+
+  it("still rejects too few TOTAL fields even when the ask-field floor is met", async () => {
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      const thin = '{"garmentType":"polo","fields":[' + Array.from({ length: 5 }, (_, i) =>
+        `{"key":"a${i}","label":"A${i}","category":"general","status":"ask","value":"","options":["A","B"],"why":"x"}`).join(",") + ']}'
+      expect(validator(thin)).toBe(false)
+      return thin
+    })
+    await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
+  })
+
+  it("still rejects too few ask fields even when total coverage is met (assumes literally everything)", async () => {
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      const allAssumed = '{"garmentType":"polo","fields":[' + Array.from({ length: 8 }, (_, i) =>
+        `{"key":"r${i}","label":"R${i}","category":"general","status":"assumed","value":"Estandar","why":"x"}`).join(",") + ']}'
+      expect(validator(allAssumed)).toBe(false)
+      return allAssumed
+    })
+    await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
+  })
+
+  it("rejects an assumed/known field with no actual value - it resolves nothing", async () => {
+    deepseekChat.mockImplementation(async ({ validator }) => {
+      const resolved = Array.from({ length: 9 }, (_, i) =>
+        `{"key":"r${i}","label":"R${i}","category":"general","status":"assumed","value":"${i === 0 ? "" : "Estandar"}","why":"x"}`)
+      const asked = Array.from({ length: 5 }, (_, i) =>
+        `{"key":"a${i}","label":"A${i}","category":"general","status":"ask","value":"","options":["A","B"],"why":"x"}`)
+      const emptyValue = '{"garmentType":"polo","fields":[' + [...resolved, ...asked].join(",") + ']}'
+      expect(validator(emptyValue)).toBe(false)
+      return emptyValue
+    })
+    await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
+  })
+
   it("streams completed technical fields when onProgress is given, still returning a valid result", async () => {
     deepseekChatStream.mockImplementation(async ({ onEvent }) => {
       onEvent({ contentSoFar: '{"fields":[{"label":"Tela","why":"x"}', tokensSoFar: 10 })
