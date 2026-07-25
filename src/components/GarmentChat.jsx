@@ -11,11 +11,12 @@ import { readDesignImageFile } from "../core/helpers.js"
 import { ambiguousGarmentTerm } from "../core/garmentLexicon.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
+import {
+  UI, uiAssumedStandard, uiPhotoConfirmedFields, uiAnalysisFailedPrefix, uiAddedFields, uiMissingQuestions, uiFieldsDetectedSuffix,
+} from "../core/i18n.js"
 
 const C = palette
 const hair = `1px solid ${C.ink.hex}`
-
-const OPENING = "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa, Jogger)"
 // Phase-aware "systemic thinking" intake (F3.1). Instead of a free-form
 // per-turn DeepSeek conversation, it builds a deterministic requirements
 // contract up front and then WALKS that list locally. A model may enrich a
@@ -55,9 +56,10 @@ function Bubble({ role: msgRole, children }) {
   )
 }
 
-export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, generalOnly }) {
+export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, generalOnly, uiLang = "ES" }) {
+  const ui = UI[uiLang] || UI.ES
   const [phase, setPhase] = useState(initialGarmentType ? "analyzing" : "naming")
-  const [history, setHistory] = useState([{ role: "assistant", content: initialGarmentType ? "Analizando la prenda…" : OPENING }])
+  const [history, setHistory] = useState([{ role: "assistant", content: initialGarmentType ? ui.analyzingGarment + "…" : ui.chatOpening }])
   const [reqs, setReqs] = useState(null)
   const [briefs, setBriefs] = useState([]) // F3.3: [{ name, illustrationBrief }] authored once designs are done
   const [garmentLabel, setGarmentLabel] = useState(initialGarmentType || "")
@@ -123,7 +125,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
 
   function questionText(field) {
     const heading = field.layer ? field.layer.toUpperCase() + "\n" + field.label : field.label
-    const purpose = field.why ? "\nPara la ficha: " + field.why + "." : ""
+    const purpose = field.why ? "\n" + ui.forTheTechPack + ": " + field.why + "." : ""
     const example = field.example ? "\n" + field.example : ""
     return heading + purpose + example
   }
@@ -137,7 +139,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   function showStructuredStream(progressUpdate, action) {
     const labels = progressUpdate && progressUpdate.completedLabels ? progressUpdate.completedLabels : []
     if (labels.length > 0) {
-      setLiveReply(action + " " + labels.length + (labels.length === 1 ? " campo detectado…" : " campos detectados…"))
+      setLiveReply(action + " " + uiFieldsDetectedSuffix(uiLang, labels.length))
     }
   }
 
@@ -154,7 +156,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       return
     }
     setPhase("finalCheck")
-    post("assistant", "¿Hay algo que no te haya preguntado y creas importante para la fábrica? Podés escribirlo, o tocar \"Nada más\" para continuar.")
+    post("assistant", ui.anythingElseQuestion)
   }
 
   function askNext(nextReqs, category) {
@@ -162,17 +164,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     if (pending.length === 0) {
       setCurrentField(null)
       if (category === "general" && generalOnly) {
-        post("assistant", "Listo, ya tengo lo que faltaba. Podés continuar.")
+        post("assistant", ui.gotEverythingNeeded)
         finishIntake(nextReqs)
       } else if (category === "general") {
-        post("assistant", "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…")
+        post("assistant", ui.gotGeneralConstruction)
         setPhase("designAnalyzing")
         runDesignAnalysis(nextReqs)
       } else if (category === "production") {
         // Layer 3 finished - nothing else to investigate.
         finishIntake(nextReqs)
       } else if (reqsToDesigns(nextReqs).length > 0) {
-        post("assistant", "Ya tengo los diseños. Ahora redacto la instrucción de ilustración para cada página…")
+        post("assistant", ui.gotDesigns)
         setPhase("briefing")
         runBriefAuthoring(nextReqs)
       } else {
@@ -210,7 +212,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     const runId = ++analysisRun.current
     setSending(true)
     setError(null)
-    setLiveReply("Estoy estudiando esta prenda: qué lleva y qué necesita la ficha…")
+    setLiveReply(ui.studyingGarment)
     try {
       const analysis = await analyzeRequirements({
         garmentType,
@@ -219,7 +221,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         lang: "ES",
         onStatus: setAIStatus,
         onProgress: (p) => {
-          if (analysisRun.current === runId) showStructuredStream(p, "Ya identifiqué estas decisiones de producción:")
+          if (analysisRun.current === runId) showStructuredStream(p, ui.identifiedDecisions)
         },
       })
       // A newer analysis (or a rewound garment name) supersedes this one.
@@ -232,7 +234,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       // is standard for this garment anyway.
       const assumed = analysis.fields.filter((f) => f.status === FIELD_STATUS.ASSUMED && String(f.value || "").trim())
       if (assumed.length > 0) {
-        post("assistant", "Para una " + (analysis.garmentType || garmentType) + " doy por estandar: " + assumed.map((f) => f.label + " (" + f.value + ")").join(", ") + ". Si algo no aplica lo corregis despues. Ahora, lo que define tu prenda:")
+        post("assistant", uiAssumedStandard(uiLang, analysis.garmentType || garmentType, assumed.map((f) => f.label + " (" + f.value + ")").join(", ")))
       }
       // What the PHOTO answered (answerFromSeed, techpackRequirements.js) gets
       // confirmed out loud too, not silently locked in - a misread photo
@@ -245,7 +247,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       if (fromPhoto.length > 0) {
         post("assistant", (
           <div>
-            <div>Del análisis de fotos tomé: {fromPhoto.map((f) => f.label + " (" + f.value + ")").join(", ")}. ¿Todo correcto?</div>
+            <div>{uiPhotoConfirmedFields(uiLang, fromPhoto.map((f) => f.label + " (" + f.value + ")").join(", "))}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), marginTop: space(2) }}>
               {fromPhoto.map((f) => (
                 <button
@@ -253,7 +255,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
                   onClick={() => handleCorrectSeedField(f.key)}
                   style={{ padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
                 >
-                  Corregir: {f.label}
+                  {ui.correctPrefix}: {f.label}
                 </button>
               ))}
             </div>
@@ -270,8 +272,8 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       setReqs(null)
       setCurrentField(null)
       setPhase("analysisFailed")
-      setError(e instanceof DeepSeekError ? e.message : "No se pudo analizar la prenda.")
-      post("assistant", "No pude analizar esta prenda: " + (e instanceof DeepSeekError ? e.message : "los modelos no respondieron a tiempo") + ".\n\nNo voy a inventar preguntas genericas para disimularlo. Proba de nuevo, o revisa que la IA este disponible.")
+      setError(e instanceof DeepSeekError ? e.message : ui.couldNotAnalyzeGarment)
+      post("assistant", uiAnalysisFailedPrefix(uiLang, e instanceof DeepSeekError ? e.message : ui.couldNotAnalyzeGarmentTimeout) + "\n\n" + ui.analysisFailedMessage)
     } finally {
       setSending(false)
       setLiveReply("")
@@ -287,7 +289,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   async function runDesignAnalysis(generalReqs) {
     setSending(true)
     setError(null)
-    setLiveReply("Estoy revisando qué aplicaciones necesitan su propia especificación…")
+    setLiveReply(ui.reviewingApplications)
     try {
       const designAnalysis = await analyzeDesignExpression({
           garmentType: garmentLabel || generalReqs.garmentType,
@@ -295,7 +297,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           tecs,
           lang: "ES",
           onStatus: setAIStatus,
-          onProgress: (p) => showStructuredStream(p, "Ya detecté estas especificaciones de diseño:"),
+          onProgress: (p) => showStructuredStream(p, ui.detectedDesignSpecs),
       })
       const fields = designAnalysis.fields.length > 0 ? designAnalysis.fields : fallbackDesignFields(generalReqs)
       const merged = mergeDesignFields(generalReqs, fields)
@@ -308,11 +310,11 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
         const merged = mergeDesignFields(generalReqs, fields)
         setReqs(merged)
         setPhase("designing")
-        post("assistant", "No pude profundizar los diseños con IA, pero seguimos con las preguntas esenciales de esa aplicacion.")
+        post("assistant", ui.couldNotDeepenDesigns)
         askNext(merged, "design")
       } else {
         setError(null)
-        post("assistant", "No detecté aplicaciones que requieran una página propia.")
+        post("assistant", ui.noApplicationsDetected)
         await startRefinement(generalReqs)
       }
     } finally {
@@ -332,7 +334,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   async function runBriefAuthoring(finalReqs) {
     setSending(true)
     setError(null)
-    setLiveReply("Estoy redactando las instrucciones para ilustración…")
+    setLiveReply(ui.draftingIllustrationInstructions)
     try {
       const designs = reqsToDesigns(finalReqs)
       const { briefs: authored } = await authorIllustrationBriefs({
@@ -340,15 +342,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           designs,
           lang: "ES",
           onStatus: setAIStatus,
-          onProgress: (p) => showStructuredStream(p, "Ya quedaron definidos estos elementos:"),
+          onProgress: (p) => showStructuredStream(p, ui.elementsDefined),
         })
       setBriefs(authored)
       // Awaited so this function's `finally` cannot clear `sending` out from
       // under layer 3's own in-progress indicator.
       await startRefinement(finalReqs)
     } catch (e) {
-      setError(e instanceof DeepSeekError ? e.message : "No se pudieron redactar los briefs de ilustración. Podés continuar igual.")
-      post("assistant", "No pude redactar las instrucciones de ilustración todavía, pero podés continuar igual.")
+      setError(e instanceof DeepSeekError ? e.message : ui.couldNotDraftBriefsError)
+      post("assistant", ui.couldNotDraftBriefsMessage)
       await startRefinement(finalReqs)
     } finally {
       setSending(false)
@@ -375,7 +377,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     setPhase("refining")
     setSending(true)
     setError(null)
-    setLiveReply("Estoy revisando los detalles de producción propios de esta prenda…")
+    setLiveReply(ui.reviewingProductionOwnDetails)
     try {
       const questions = await authorProductionQuestions({
         hdr: {},
@@ -391,7 +393,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           key: q.key.trim(),
           label: q.label,
           category: "production",
-          layer: "Detalles de produccion",
+          layer: ui.productionDetailsLayer,
           status: FIELD_STATUS.ASK,
           value: "",
           options: q.options.slice(0, 4),
@@ -403,7 +405,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       }
       const merged = { ...baseReqs, fields: [...baseReqs.fields, ...fields] }
       setReqs(merged)
-      post("assistant", "Último repaso, pensando como diseñador técnico: los detalles que la fábrica tendría que adivinar si no los definimos.")
+      post("assistant", ui.finalReviewMessage)
       askNext(merged, "production")
     } catch {
       finishIntake(baseReqs)
@@ -418,7 +420,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     // A genuinely ambiguous term (see garmentLexicon.js) asks ONE clarifying
     // question instead of letting the model silently pick a meaning - stays
     // in "naming" phase until resolveDisambiguation() below fires.
-    const ambiguity = ambiguousGarmentTerm(value)
+    const ambiguity = ambiguousGarmentTerm(value, uiLang)
     if (ambiguity) {
       setDisambiguation(ambiguity)
       post("assistant", ambiguity.question)
@@ -459,14 +461,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   function handleCorrectSeedField(key) {
     const reverted = revertField(reqs, key)
     setReqs(reverted)
-    post("assistant", "Corrijamos eso.")
+    post("assistant", ui.correctingThat)
     setPhase("asking")
     askNext(reverted, "general")
   }
 
   function skipCurrentField() {
     if (!currentField || !currentField.optional || sending) return
-    post("user", "Saltar")
+    post("user", ui.skip)
     setAnswerStack((s) => [...s, { key: currentField.key, phase }])
     const nextReqs = skipField(reqs, currentField.key)
     setReqs(nextReqs)
@@ -497,18 +499,18 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     post("user", value)
     setSending(true)
     setError(null)
-    setLiveReply("Estoy revisando esa duda…")
+    setLiveReply(ui.reviewingDoubt)
     try {
       const answer = await answerFieldQuestion({
         field: currentField,
         garmentType: garmentLabel || (reqs && reqs.garmentType),
         question: value,
         onStatus: setAIStatus,
-        onProgress: ({ contentSoFar }) => setLiveReply(contentSoFar || "Estoy revisando esa duda…"),
+        onProgress: ({ contentSoFar }) => setLiveReply(contentSoFar || ui.reviewingDoubt),
       })
       post("assistant", answer)
     } catch (e) {
-      setError(e instanceof DeepSeekError ? e.message : "No pude responder eso. Podés seguir con la pregunta igual.")
+      setError(e instanceof DeepSeekError ? e.message : ui.couldNotAnswerTangent)
     } finally {
       setSending(false)
       setLiveReply("")
@@ -528,13 +530,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       const newFields = await analyzeAdditionalNotes({ garmentType: garmentLabel || (reqs && reqs.garmentType), existingFields: reqs.fields, notes: value, onStatus: setAIStatus })
       if (newFields.length > 0) {
         setReqs((r) => mergeDesignFields(r, newFields))
-        post("assistant", "Sumado: " + newFields.map((f) => f.label + " (" + f.value + ")").join(", ") + ". ¿Algo más? Si no, tocá \"Nada más\".")
+        post("assistant", uiAddedFields(uiLang, newFields.map((f) => f.label + " (" + f.value + ")").join(", ")))
       } else {
-        post("assistant", "No pude identificar datos nuevos concretos ahí, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?")
+        post("assistant", ui.noNewDataFound)
       }
     } catch (e) {
       setError(e instanceof DeepSeekError ? e.message : null)
-      post("assistant", "No pude procesarlo con la IA, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?")
+      post("assistant", ui.couldNotProcessWithAI)
     } finally {
       setSending(false)
       setAIStatus("")
@@ -542,9 +544,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   }
 
   function finishFinalCheck() {
-    post("user", "Nada más")
+    post("user", ui.nothingElse)
     setPhase("ready")
-    post("assistant", "Listo, ya tengo todo. Podés continuar.")
+    post("assistant", ui.allSetContinue)
   }
 
   // Mid-chat photo upload: answers the current field from one full-image pass
@@ -573,17 +575,17 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     try {
       const segmented = await splitImageIntoQuadrants(file)
       const segments = [segmented.full, ...segmented.quadrants]
-      post("user", <img src={"data:image/jpeg;base64," + segmented.full.base64} alt="Foto adjunta" style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
+      post("user", <img src={"data:image/jpeg;base64," + segmented.full.base64} alt={ui.attachedPhotoAlt} style={{ display: "block", maxWidth: 160, maxHeight: 160, objectFit: "cover", border: hair }} />)
       const suggestion = await answerFieldFromImageSegments({
         field: fieldAsked,
         garmentType: garmentLabel || (reqs && reqs.garmentType),
         segments,
         onProgress: (p) => setImageProgress(p),
       })
-      post("assistant", "Según la foto: " + suggestion)
+      post("assistant", ui.accordingToPhotoPrefix + ": " + suggestion)
       setInput(suggestion)
     } catch (err) {
-      setError(err instanceof DeepSeekError ? err.message : "No se pudo analizar la foto.")
+      setError(err instanceof DeepSeekError ? err.message : ui.couldNotAnalyzePhoto)
     } finally {
       setSending(false)
       setImageAnalyzing(false)
@@ -602,7 +604,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       const { imageData, imageType, imgNatW, imgNatH, fileName } = await readDesignImageFile(file)
       setDesignImages((prev) => ({ ...prev, [slot]: { imageData, imageType, imgNatW, imgNatH, fileName } }))
     } catch {
-      setDesignImageError("No se pudo leer esa imagen. Probá con otro archivo PNG o SVG.")
+      setDesignImageError(ui.couldNotReadImage)
     }
   }
 
@@ -678,7 +680,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           {phase === "designing" && currentField && designGroupFields.length > 0 && (
             <div style={{ alignSelf: "flex-start", maxWidth: "92%", border: hair, borderLeft: `${space(1)}px solid ${role.highlight.fill}`, background: C.white.hex, color: C.ink.hex, padding: space(2) }}>
               <div style={{ fontSize: type.size.xs, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(1) }}>
-                Sub-preguntas: {currentField.designSlot.replace(/_/g, " ")}
+                {ui.subQuestionsLabel}: {currentField.designSlot.replace(/_/g, " ")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: space(1) }}>
                 {designGroupFields.map((f, i) => {
@@ -699,14 +701,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
                       }}
                     >
                       <span style={{ width: 15, height: 15, flexShrink: 0, background: answered ? "#8A909A" : role.index.fill, color: C.white.hex, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
-                      <span>{f.label}{f.optional ? " (opcional)" : ""}</span>
+                      <span>{f.label}{f.optional ? ui.optionalSuffix : ""}</span>
                     </div>
                   )
                 })}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: space(1), marginTop: space(2), paddingTop: space(2), borderTop: `1px dashed ${C.ink.hex}` }}>
                 <label style={{ padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: `1.5px dashed ${role.priority.fill}`, borderRadius: 6, cursor: "pointer", fontSize: type.size.xs, fontWeight: 700, color: role.priority.fill }}>
-                  {designImages[currentField.designSlot] ? "Imagen cargada - cambiar" : "Subí el PNG/SVG ahora (o dejalo para después)"}
+                  {designImages[currentField.designSlot] ? ui.imageLoadedChange : ui.uploadDesignImageNow}
                   <input
                     type="file"
                     accept="image/png,image/svg+xml,image/jpeg"
@@ -722,14 +724,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
                   <>
                     <img
                       src={"data:" + (designImages[currentField.designSlot].imageType === "svg" ? "image/svg+xml" : "image/png") + ";base64," + designImages[currentField.designSlot].imageData}
-                      alt="Diseño adjunto"
+                      alt={ui.designAttachedAlt}
                       style={{ height: 32, maxWidth: 60, objectFit: "contain", border: hair, background: C.white.hex, padding: 2 }}
                     />
                     <button
                       onClick={() => clearDesignImage(currentField.designSlot)}
                       style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: type.size.xs }}
                     >
-                      quitar
+                      {ui.remove.toLowerCase()}
                     </button>
                   </>
                 )}
@@ -763,7 +765,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
                   style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
                 >
                   <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>1</span>
-                  Saltar
+                  {ui.skip}
                 </button>
               )}
               {currentField.options.map((opt, i) => (
@@ -782,9 +784,9 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             <Bubble role="assistant">
               {imageAnalyzing
                 ? (imageProgress
-                    ? `${imageProgress.label || "Analizando foto"} · ${imageProgress.segmentNumber || 1}/${imageProgress.totalSegments || 3}${imageProgress.partialText ? "\n" + imageProgress.partialText : ""}`
-                    : "Preparando vista completa y detalles…")
-                : (liveReply || aiStatus || "Estoy procesando la información…")}
+                    ? `${imageProgress.label || ui.analyzingPhotoDefault} · ${imageProgress.segmentNumber || 1}/${imageProgress.totalSegments || 3}${imageProgress.partialText ? "\n" + imageProgress.partialText : ""}`
+                    : ui.preparingFullView)
+                : (liveReply || aiStatus || ui.processingInfo)}
               <span aria-hidden="true"> ▍</span>
             </Bubble>
           )}
@@ -806,7 +808,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               disabled={sending}
               style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: "none", border: "none", cursor: sending ? "not-allowed" : "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}
             >
-              <Icon name="undo" size={14} /> Volver
+              <Icon name="undo" size={14} /> {ui.back}
             </button>
           </div>
         )}
@@ -818,13 +820,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               onKeyDown={(e) => {
                 if (e.key === "Enter") send()
               }}
-              placeholder={disambiguation ? "Elegí una opción o escribí la tuya..." : phase === "asking" ? "Elegí una opción, escribí la tuya, o preguntá algo..." : phase === "finalCheck" ? "Algo que no te pregunté (opcional)..." : "Escribí tu respuesta..."}
+              placeholder={disambiguation ? ui.disambiguationPlaceholder : phase === "asking" ? ui.askingPlaceholder : phase === "finalCheck" ? ui.finalCheckPlaceholder : ui.defaultAnswerPlaceholder}
               disabled={sending}
               style={{ flex: 1, padding: space(3), border: "none", outline: "none", fontFamily: type.fonts.ui, fontSize: type.size.base, background: sending ? "#F7F7F8" : C.white.hex }}
             />
             {isWalking && currentField && (
               <label
-                title="Responder esta pregunta con una foto"
+                title={ui.answerWithPhotoTitle}
                 style={{ display: "inline-flex", alignItems: "center", padding: `0 ${space(3)}px`, borderLeft: hair, cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.5 : 1 }}
               >
                 <Icon name="add_photo_alternate" size={20} color={C.ink.hex} />
@@ -845,7 +847,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               onClick={() => onComplete(buildDraft())}
               style={{ display: "inline-flex", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: role.priority.fill, color: role.priority.on, border: "none", fontFamily: type.fonts.ui, fontWeight: 700, fontSize: type.size.sm, textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer" }}
             >
-              Continuar con esta prenda <Icon name="arrow_forward" size={18} color={C.white.hex} />
+              {ui.continueWithGarment} <Icon name="arrow_forward" size={18} color={C.white.hex} />
             </button>
           </div>
         ) : null}
@@ -856,7 +858,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               disabled={sending}
               style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(3)}px`, background: C.white.hex, color: C.ink.hex, border: hair, fontFamily: type.fonts.ui, fontWeight: 700, fontSize: type.size.xs, textTransform: "uppercase", letterSpacing: "0.04em", cursor: sending ? "not-allowed" : "pointer" }}
             >
-              Nada más, continuar <Icon name="arrow_forward" size={16} color={C.ink.hex} />
+              {ui.nothingElseContinue} <Icon name="arrow_forward" size={16} color={C.ink.hex} />
             </button>
           </div>
         )}
@@ -871,7 +873,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               disabled={sending}
               style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(3)}px`, background: role.priority.fill, color: role.priority.on, border: "none", fontFamily: type.fonts.ui, fontWeight: 700, fontSize: type.size.xs, textTransform: "uppercase", letterSpacing: "0.04em", cursor: sending ? "not-allowed" : "pointer" }}
             >
-              <Icon name="undo" size={16} color={C.white.hex} /> Reintentar analisis
+              <Icon name="undo" size={16} color={C.white.hex} /> {ui.retryAnalysis}
             </button>
           </div>
         )}
@@ -879,8 +881,8 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
 
       {/* Live draft panel - so the intake is never a black box. */}
       <div style={{ width: 240, flexShrink: 0, border: hair, background: C.white.hex, padding: space(3) }}>
-        <div style={{ fontSize: type.size.xs, fontWeight: 700, fontFamily: type.fonts.ui, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(2) }}>Borrador</div>
-        {!reqs && <p style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6 }}>Todavía no hay datos.</p>}
+        <div style={{ fontSize: type.size.xs, fontWeight: 700, fontFamily: type.fonts.ui, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(2) }}>{ui.draftLabel}</div>
+        {!reqs && <p style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.6 }}>{ui.noDataYet}</p>}
         {reqs && (
           <div>
             <div style={{ fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, marginBottom: space(2) }}>{garmentLabel || reqs.garmentType || "..."}</div>
@@ -896,7 +898,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             </div>
             {designsSoFar.length > 0 && (
               <div style={{ marginTop: space(2), paddingTop: space(2), borderTop: "1px solid #E6E8EC" }}>
-                <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(1) }}>Diseños (páginas propias)</div>
+                <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: space(1) }}>{ui.designsPagesLabel}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: space(1) }}>
                   {designsSoFar.map((d, i) => (
                     <div key={i} style={{ display: "flex", gap: space(1), alignItems: "flex-start", fontSize: type.size.xs }}>
@@ -911,7 +913,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             )}
             {pendingCount > 0 && (
               <div style={{ marginTop: space(2), paddingTop: space(2), borderTop: "1px solid #E6E8EC", fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}>
-                Faltan {pendingCount} pregunta{pendingCount === 1 ? "" : "s"}.
+                {uiMissingQuestions(uiLang, pendingCount)}
               </div>
             )}
           </div>

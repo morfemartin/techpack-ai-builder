@@ -920,7 +920,7 @@ export default function App() {
     }
 
     if (step === 3 && garmentId === "custom") {
-      return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} seed={visionSeed ? visionSeed.seed : undefined} initialGarmentType={visionSeed ? visionSeed.garmentType : undefined} />
+      return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} seed={visionSeed ? visionSeed.seed : undefined} initialGarmentType={visionSeed ? visionSeed.garmentType : undefined} uiLang={uiLang} />
     }
 
     if (step === 3 && csvVerifying) {
@@ -929,7 +929,7 @@ export default function App() {
           <p style={{ marginBottom: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 480 }}>
             El CSV no cubre todo lo que esta ficha necesita — respondé lo que falta y despues seguís editando la tabla de piezas como siempre.
           </p>
-          <GarmentChat generalOnly onComplete={handleCsvVerificationComplete} tecs={tl.tecs} seed={csvVerifySeed.seed} initialGarmentType={csvVerifySeed.garmentType} />
+          <GarmentChat generalOnly onComplete={handleCsvVerificationComplete} tecs={tl.tecs} seed={csvVerifySeed.seed} initialGarmentType={csvVerifySeed.garmentType} uiLang={uiLang} />
         </div>
       )
     }

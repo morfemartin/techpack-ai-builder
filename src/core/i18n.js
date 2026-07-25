@@ -98,6 +98,61 @@ export const UI = {
     retry: "Reintentar",
     applyAndDownload: "Aplicar y descargar",
     reviewAssurance: "La revisión asegura que el documento sea 100% fiel a lo que pediste.",
+    chatOpening: "¿Qué prenda querés armar? (por ejemplo: Polo, Hoodie, Camisa, Jogger)",
+    studyingGarment: "Estoy estudiando esta prenda: qué lleva y qué necesita la ficha…",
+    identifiedDecisions: "Ya identifiqué estas decisiones de producción:",
+    couldNotAnalyzeGarment: "No se pudo analizar la prenda.",
+    couldNotAnalyzeGarmentTimeout: "los modelos no respondieron a tiempo",
+    analysisFailedMessage: "No voy a inventar preguntas genericas para disimularlo. Proba de nuevo, o revisa que la IA este disponible.",
+    reviewingApplications: "Estoy revisando qué aplicaciones necesitan su propia especificación…",
+    detectedDesignSpecs: "Ya detecté estas especificaciones de diseño:",
+    couldNotDeepenDesigns: "No pude profundizar los diseños con IA, pero seguimos con las preguntas esenciales de esa aplicacion.",
+    noApplicationsDetected: "No detecté aplicaciones que requieren una página propia.",
+    draftingIllustrationInstructions: "Estoy redactando las instrucciones para ilustración…",
+    elementsDefined: "Ya quedaron definidos estos elementos:",
+    couldNotDraftBriefsError: "No se pudieron redactar los briefs de ilustración. Podés continuar igual.",
+    couldNotDraftBriefsMessage: "No pude redactar las instrucciones de ilustración todavía, pero podés continuar igual.",
+    reviewingProductionOwnDetails: "Estoy revisando los detalles de producción propios de esta prenda…",
+    finalReviewMessage: "Último repaso, pensando como diseñador técnico: los detalles que la fábrica tendría que adivinar si no los definimos.",
+    anythingElseQuestion: "¿Hay algo que no te haya preguntado y creas importante para la fábrica? Podés escribirlo, o tocar \"Nada más\" para continuar.",
+    gotEverythingNeeded: "Listo, ya tengo lo que faltaba. Podés continuar.",
+    gotGeneralConstruction: "Ya tengo la construcción general. Ahora reviso qué elementos necesitan su propia página de diseño…",
+    gotDesigns: "Ya tengo los diseños. Ahora redacto la instrucción de ilustración para cada página…",
+    correctingThat: "Corrijamos eso.",
+    skip: "Saltar",
+    correctPrefix: "Corregir",
+    couldNotAnswerTangent: "No pude responder eso. Podés seguir con la pregunta igual.",
+    reviewingDoubt: "Estoy revisando esa duda…",
+    noNewDataFound: "No pude identificar datos nuevos concretos ahí, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?",
+    couldNotProcessWithAI: "No pude procesarlo con la IA, pero lo tengo anotado igual. ¿Algo más, o tocás \"Nada más\"?",
+    nothingElse: "Nada más",
+    allSetContinue: "Listo, ya tengo todo. Podés continuar.",
+    accordingToPhotoPrefix: "Según la foto",
+    couldNotAnalyzePhoto: "No se pudo analizar la foto.",
+    couldNotReadImage: "No se pudo leer esa imagen. Probá con otro archivo PNG o SVG.",
+    askingPlaceholder: "Elegí una opción, escribí la tuya, o preguntá algo...",
+    disambiguationPlaceholder: "Elegí una opción o escribí la tuya...",
+    finalCheckPlaceholder: "Algo que no te pregunté (opcional)...",
+    defaultAnswerPlaceholder: "Escribí tu respuesta...",
+    answerWithPhotoTitle: "Responder esta pregunta con una foto",
+    continueWithGarment: "Continuar con esta prenda",
+    nothingElseContinue: "Nada más, continuar",
+    retryAnalysis: "Reintentar analisis",
+    draftLabel: "Borrador",
+    noDataYet: "Todavía no hay datos.",
+    designsPagesLabel: "Diseños (páginas propias)",
+    subQuestionsLabel: "Sub-preguntas",
+    optionalSuffix: " (opcional)",
+    imageLoadedChange: "Imagen cargada - cambiar",
+    uploadDesignImageNow: "Subí el PNG/SVG ahora (o dejalo para después)",
+    designAttachedAlt: "Diseño adjunto",
+    analyzingPhotoDefault: "Analizando foto",
+    preparingFullView: "Preparando vista completa y detalles…",
+    processingInfo: "Estoy procesando la información…",
+    attachedPhotoAlt: "Foto adjunta",
+    productionDetailsLayer: "Detalles de produccion",
+    forTheTechPack: "Para la ficha",
+    back: "Volver",
   },
   EN: {
     garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same.",
@@ -183,6 +238,61 @@ export const UI = {
     retry: "Retry",
     applyAndDownload: "Apply and download",
     reviewAssurance: "The review makes sure the document is 100% faithful to what you asked for.",
+    chatOpening: "What garment do you want to build? (e.g. Polo, Hoodie, Shirt, Jogger)",
+    studyingGarment: "Studying this garment: what it has and what the tech pack needs…",
+    identifiedDecisions: "I've identified these production decisions:",
+    couldNotAnalyzeGarment: "Could not analyze the garment.",
+    couldNotAnalyzeGarmentTimeout: "the models did not respond in time",
+    analysisFailedMessage: "I'm not going to invent generic questions to cover for it. Try again, or check that the AI is available.",
+    reviewingApplications: "Reviewing which applications need their own specification…",
+    detectedDesignSpecs: "I've detected these design specifications:",
+    couldNotDeepenDesigns: "Could not go deeper on designs with AI, but we'll continue with the essential questions for that application.",
+    noApplicationsDetected: "No applications detected that need their own page.",
+    draftingIllustrationInstructions: "Drafting the illustration instructions…",
+    elementsDefined: "These elements are now defined:",
+    couldNotDraftBriefsError: "Could not draft the illustration briefs. You can continue anyway.",
+    couldNotDraftBriefsMessage: "Could not draft the illustration instructions yet, but you can continue anyway.",
+    reviewingProductionOwnDetails: "Reviewing this garment's own production details…",
+    finalReviewMessage: "Last pass, thinking like a technical designer: the details the factory would otherwise have to guess.",
+    anythingElseQuestion: "Is there anything I haven't asked that you think matters to the factory? You can type it, or tap \"Nothing else\" to continue.",
+    gotEverythingNeeded: "Done, I have what was missing. You can continue.",
+    gotGeneralConstruction: "I have the general construction. Now checking which elements need their own design page…",
+    gotDesigns: "I have the designs. Now drafting the illustration instruction for each page…",
+    correctingThat: "Let's fix that.",
+    skip: "Skip",
+    correctPrefix: "Fix",
+    couldNotAnswerTangent: "Could not answer that. You can continue with the question anyway.",
+    reviewingDoubt: "Looking into that…",
+    noNewDataFound: "Could not identify concrete new data there, but it's noted anyway. Anything else, or tap \"Nothing else\"?",
+    couldNotProcessWithAI: "Could not process it with AI, but it's noted anyway. Anything else, or tap \"Nothing else\"?",
+    nothingElse: "Nothing else",
+    allSetContinue: "Done, I have everything. You can continue.",
+    accordingToPhotoPrefix: "According to the photo",
+    couldNotAnalyzePhoto: "Could not analyze the photo.",
+    couldNotReadImage: "Could not read that image. Try another PNG or SVG file.",
+    askingPlaceholder: "Choose an option, type your own, or ask something...",
+    disambiguationPlaceholder: "Choose an option or type your own...",
+    finalCheckPlaceholder: "Something I didn't ask (optional)...",
+    defaultAnswerPlaceholder: "Type your answer...",
+    answerWithPhotoTitle: "Answer this question with a photo",
+    continueWithGarment: "Continue with this garment",
+    nothingElseContinue: "Nothing else, continue",
+    retryAnalysis: "Retry analysis",
+    draftLabel: "Draft",
+    noDataYet: "No data yet.",
+    designsPagesLabel: "Designs (own pages)",
+    subQuestionsLabel: "Sub-questions",
+    optionalSuffix: " (optional)",
+    imageLoadedChange: "Image loaded - change",
+    uploadDesignImageNow: "Upload the PNG/SVG now (or leave it for later)",
+    designAttachedAlt: "Attached design",
+    analyzingPhotoDefault: "Analyzing photo",
+    preparingFullView: "Preparing full view and details…",
+    processingInfo: "Processing the information…",
+    attachedPhotoAlt: "Attached photo",
+    productionDetailsLayer: "Production details",
+    forTheTechPack: "For the tech pack",
+    back: "Back",
   },
 }
 
@@ -310,6 +420,41 @@ export function uiWillApplyDecisions(uiLang, count) {
   return uiLang === "EN"
     ? `We'll apply ${count} decisions and only regenerate the affected pages.`
     : `Aplicaremos ${count} decisiones y regeneraremos únicamente las páginas afectadas.`
+}
+
+// The garment name and every field label/value interpolated here come from
+// the AI's own output (analyzeRequirements etc., always prompted in Spanish
+// - see i18n.js's top comment on why that stays out of scope) - only the
+// surrounding sentence structure follows uiLang. A fully-English UI still
+// shows Spanish field names inside these sentences; translating the AI's own
+// output would mean re-prompting it in English, a materially different and
+// riskier change than this phase's static-chrome scope.
+export function uiAssumedStandard(uiLang, garmentType, assumedList) {
+  return uiLang === "EN"
+    ? `For a ${garmentType} I'm assuming as standard: ${assumedList}. If something doesn't apply you can correct it later. Now, what defines your garment:`
+    : `Para una ${garmentType} doy por estandar: ${assumedList}. Si algo no aplica lo corregis despues. Ahora, lo que define tu prenda:`
+}
+
+export function uiPhotoConfirmedFields(uiLang, list) {
+  return uiLang === "EN" ? `According to the photo analysis, I took: ${list}. Is that all correct?` : `Del análisis de fotos tomé: ${list}. ¿Todo correcto?`
+}
+
+export function uiAnalysisFailedPrefix(uiLang, reason) {
+  return uiLang === "EN" ? `Could not analyze this garment: ${reason}.` : `No pude analizar esta prenda: ${reason}.`
+}
+
+export function uiAddedFields(uiLang, list) {
+  return uiLang === "EN" ? `Added: ${list}. Anything else? If not, tap "Nothing else".` : `Sumado: ${list}. ¿Algo más? Si no, tocá "Nada más".`
+}
+
+export function uiFieldsDetectedSuffix(uiLang, count) {
+  if (uiLang === "EN") return count + (count === 1 ? " field detected…" : " fields detected…")
+  return count + (count === 1 ? " campo detectado…" : " campos detectados…")
+}
+
+export function uiMissingQuestions(uiLang, count) {
+  if (uiLang === "EN") return count === 1 ? "1 question left." : `${count} questions left.`
+  return count === 1 ? "Falta 1 pregunta." : `Faltan ${count} preguntas.`
 }
 
 export function uiPageDesignFailed(uiLang, index, pageName) {

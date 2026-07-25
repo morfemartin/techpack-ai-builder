@@ -24,14 +24,28 @@ function normalize(value) {
     .trim()
 }
 
+// `resolvedType` is NOT display text - it is the literal string fed to
+// analyzeRequirements()'s garmentType prompt AND to
+// garmentAnatomy.classifyGarmentFamily(), whose keyword regexes are Spanish
+// ("camiseta", "camisa", "franela"...). It must stay this exact Spanish
+// vocabulary regardless of the app's UI language, or a resolved English
+// label would silently fall through classifyGarmentFamily as "unknown" and
+// skip the anatomy coherence guard entirely. Only `question`/`label` - what
+// the user actually reads - are translated; see ambiguousGarmentTerm below.
 const AMBIGUOUS_TERMS = [
   {
     term: "franela",
     match: /\bfranela\b/,
-    question: '¿A qué te referís con "franela"?',
+    question: { ES: '¿A qué te referís con "franela"?', EN: 'What do you mean by "franela"?' },
     options: [
-      { label: "Camiseta de punto (remera/t-shirt)", resolvedType: "Camiseta de punto (tipo franela)" },
-      { label: "Camisa de franela (tejido, tipo leñador)", resolvedType: "Camisa de franela (tejido de trama, tipo leñador)" },
+      {
+        label: { ES: "Camiseta de punto (remera/t-shirt)", EN: "Knit t-shirt (remera/tee)" },
+        resolvedType: "Camiseta de punto (tipo franela)",
+      },
+      {
+        label: { ES: "Camisa de franela (tejido, tipo leñador)", EN: "Flannel shirt (woven, lumberjack-style)" },
+        resolvedType: "Camisa de franela (tejido de trama, tipo leñador)",
+      },
     ],
   },
 ]
@@ -39,8 +53,17 @@ const AMBIGUOUS_TERMS = [
 // Returns the first matching ambiguity for a typed garment name, or null when
 // the term is unambiguous (the common case). Only ever the FIRST match, so a
 // name that happens to hit two entries still asks one question at a time.
-export function ambiguousGarmentTerm(garmentType) {
+// `uiLang` only selects which display strings (question/option labels) come
+// back - resolvedType is always the same canonical Spanish value.
+export function ambiguousGarmentTerm(garmentType, uiLang = "ES") {
   const name = normalize(garmentType)
   if (!name) return null
-  return AMBIGUOUS_TERMS.find((entry) => entry.match.test(name)) || null
+  const entry = AMBIGUOUS_TERMS.find((candidate) => candidate.match.test(name))
+  if (!entry) return null
+  const lang = uiLang === "EN" ? "EN" : "ES"
+  return {
+    term: entry.term,
+    question: entry.question[lang],
+    options: entry.options.map((opt) => ({ label: opt.label[lang], resolvedType: opt.resolvedType })),
+  }
 }

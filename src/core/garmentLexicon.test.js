@@ -40,4 +40,20 @@ describe("ambiguousGarmentTerm", () => {
     expect(classifyGarmentFamily(tee.resolvedType)).toBe("tee")
     expect(classifyGarmentFamily(shirt.resolvedType)).toBe("shirt")
   })
+
+  it("translates the question/option labels the user reads when uiLang is EN", () => {
+    const result = ambiguousGarmentTerm("franela", "EN")
+    expect(result.question).toMatch(/franela/i)
+    expect(result.question).not.toMatch(/referís/i)
+    expect(result.options.map((o) => o.label)).toEqual(["Knit t-shirt (remera/tee)", "Flannel shirt (woven, lumberjack-style)"])
+  })
+
+  it("keeps resolvedType in Spanish regardless of uiLang - it feeds the AI prompt and classifyGarmentFamily, not the screen", () => {
+    const es = ambiguousGarmentTerm("franela", "ES")
+    const en = ambiguousGarmentTerm("franela", "EN")
+    expect(en.options.map((o) => o.resolvedType)).toEqual(es.options.map((o) => o.resolvedType))
+    // Still classifies correctly even when the user is in the EN UI.
+    expect(classifyGarmentFamily(en.options[0].resolvedType)).toBe("tee")
+    expect(classifyGarmentFamily(en.options[1].resolvedType)).toBe("shirt")
+  })
 })
