@@ -170,8 +170,14 @@ function wrapFetchFailure(e, transport) {
 // so a single slow round-trip through the proxy fell straight through to
 // "no se pudo diseñar el documento con IA" instead of getting the same
 // automatic second attempt every other transient failure gets.
+//
+// Same story for 502: api/deepseek.js returns {error:"proxy_error"} when its
+// OWN outbound fetch() to NVIDIA throws outright (DNS hiccup, dropped
+// connection) rather than NVIDIA answering with an error - a transient blip
+// on our side of the wire, not a real "the model is broken" signal. Observed
+// live as a raw "fetch failed" detail reaching the user with zero retries.
 function isRetryable(err) {
-  return !!err.networkError || err.status === 503 || err.status === 504 || /ResourceExhausted/i.test(err.detail || "") || /Failed to generate completions/i.test(err.detail || "")
+  return !!err.networkError || err.status === 502 || err.status === 503 || err.status === 504 || /ResourceExhausted/i.test(err.detail || "") || /Failed to generate completions/i.test(err.detail || "")
 }
 
 async function callOnce({ messages, maxTokens, temperature, model, thinking, provider, signal, timeoutMs }) {

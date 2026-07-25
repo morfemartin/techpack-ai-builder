@@ -1,4 +1,4 @@
-import { DeepSeekError, getLocalAIHealth, requestAIOnce, requestAIStreamOnce } from "./deepseekClient.js"
+import { DeepSeekError, getLocalAIHealth, getTextAIProvider, requestAIOnce, requestAIStreamOnce } from "./deepseekClient.js"
 import { TASK_POLICIES } from "./hybridTasks.js"
 export { HYBRID_TASKS, TASK_POLICIES } from "./hybridTasks.js"
 
@@ -66,8 +66,14 @@ function localDeadline(sharedDeadline) {
   return Math.max(sharedDeadline, Date.now() + LOCAL_MIN_WINDOW_MS)
 }
 
+// 502 is api/deepseek.js's own catch-all for its outbound fetch() to NVIDIA
+// throwing outright (DNS hiccup, dropped connection) - the exact same kind of
+// transient blip 503/504 already get retried for, just a different status
+// because it's OUR proxy wrapping the failure rather than NVIDIA answering
+// with one. Observed live: this was falling straight through to the caller
+// with no second attempt while a 503/504 in the same situation would retry.
 function retryableCapacityError(error) {
-  return error && (error.status === 503 || error.status === 504)
+  return error && (error.status === 502 || error.status === 503 || error.status === 504)
 }
 
 function circuitIsOpen(now = Date.now()) {
@@ -261,6 +267,20 @@ async function streamProviderAttempt(provider, options, controller, deadline, on
   }
 }
 
+// studio.html's whole point is a Mistral-only, no-cloud-dependency build (see
+// scripts/studio-ai.mjs) - but no caller here ever restricted `providers`, so
+// every text task kept racing NVIDIA too as long as a valid NVIDIA_API_KEY
+// happened to be configured for local dev. Observed live: NVIDIA's flaky
+// free-tier DeepSeek answering first with a validator-rejecting response,
+// racing against Mistral joining late (qwenDelayMs), producing exactly the
+// "both providers failed" contract-violation error this was meant to avoid
+// by having a private, NVIDIA-independent build at all. The public build's
+// own default (nvidia+local, local as an opportunistic fallback) is
+// unchanged - only the studio page gets pinned to local-only.
+function defaultProviders() {
+  return getTextAIProvider() === "local" ? ["local"] : ["nvidia", "local"]
+}
+
 function requestKey(task, messages, options) {
   return JSON.stringify([task, messages, options.maxTokens, options.temperature])
 }
@@ -280,7 +300,7 @@ export function resetHybridAIForTests() {
   qwenTail = Promise.resolve()
 }
 
-export async function runHybridAI({ task, messages, validator, fallback, onStatus, signal, maxTokens, temperature = 0.2, providers = ["nvidia", "local"], operationId } = {}) {
+export async function runHybridAI({ task, messages, validator, fallback, onStatus, signal, maxTokens, temperature = 0.2, providers = defaultProviders(), operationId } = {}) {
   const policy = TASK_POLICIES[task]
   if (!policy) throw new Error("Unknown hybrid AI task: " + task)
   const options = { messages, validator, maxTokens: maxTokens || policy.maxTokens, temperature, thinking: !!policy.thinking }
@@ -360,7 +380,7 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
 // Streaming counterpart of runHybridAI. It keeps the same winner rule (the
 // first provider whose FINAL response satisfies the task contract), while
 // forwarding actual SSE chunks to the UI along the way.
-export async function runHybridAIStream({ task, messages, validator, fallback, onStatus, onEvent, signal, maxTokens, temperature = 0.2, providers = ["nvidia", "local"], operationId } = {}) {
+export async function runHybridAIStream({ task, messages, validator, fallback, onStatus, onEvent, signal, maxTokens, temperature = 0.2, providers = defaultProviders(), operationId } = {}) {
   const policy = TASK_POLICIES[task]
   if (!policy) throw new Error("Unknown hybrid AI task: " + task)
   const options = { messages, validator, maxTokens: maxTokens || policy.maxTokens, temperature, thinking: !!policy.thinking }

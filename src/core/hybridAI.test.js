@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("./deepseekClient.js", () => ({
   DeepSeekError: class DeepSeekError extends Error {},
   getLocalAIHealth: vi.fn(async () => ({ status: "ok", model: "qwen" })),
+  getTextAIProvider: vi.fn(() => "nvidia"),
   requestAIOnce: vi.fn(),
   requestAIStreamOnce: vi.fn(),
 }))
 
-import { getLocalAIHealth, requestAIOnce, requestAIStreamOnce } from "./deepseekClient.js"
+import { getLocalAIHealth, getTextAIProvider, requestAIOnce, requestAIStreamOnce } from "./deepseekClient.js"
 import { resetHybridAIForTests, runHybridAI, runHybridAIStream } from "./hybridAI.js"
 
 function waitForAbort(signal) {
@@ -20,6 +21,7 @@ describe("runHybridAI", () => {
     vi.clearAllMocks()
     resetHybridAIForTests()
     getLocalAIHealth.mockResolvedValue({ status: "ok", model: "qwen" })
+    getTextAIProvider.mockReturnValue("nvidia")
   })
 
   it("starts Qwen after the task grace and cancels slow DeepSeek", async () => {
@@ -173,6 +175,7 @@ describe("local model timeout window", () => {
     vi.clearAllMocks()
     resetHybridAIForTests()
     getLocalAIHealth.mockResolvedValue({ status: "ok", model: "qwen" })
+    getTextAIProvider.mockReturnValue("nvidia")
   })
 
   it("gives the local model a full window measured from when it starts", async () => {
@@ -335,6 +338,43 @@ describe("local model timeout window", () => {
       await vi.advanceTimersByTimeAsync(3000)
       await promise
       expect(messages.some((m) => /NVIDIA en pausa/i.test(m))).toBe(true)
+    })
+  })
+
+  // studio.html's whole point is a Mistral-only, no-cloud-dependency build -
+  // no caller passed an explicit `providers` list, so every text task was
+  // silently still racing NVIDIA too whenever a valid NVIDIA_API_KEY happened
+  // to be configured for local dev. Observed live: NVIDIA answering first
+  // with a validator-rejecting response while Mistral (joining late via
+  // qwenDelayMs) hadn't finished yet, producing a "both providers failed"
+  // error in the build that exists specifically to not depend on NVIDIA.
+  describe("studio build provider pinning", () => {
+    it("never calls NVIDIA when getTextAIProvider() reports 'local' (studio.html) and no explicit providers list is given", async () => {
+      getTextAIProvider.mockReturnValue("local")
+      requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: "valid", provider, model: "mistral-small-2603" }))
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "hola" }], validator: (v) => v === "valid", fallback: "fallback" })
+      await vi.advanceTimersByTimeAsync(3000)
+      const result = await promise
+      expect(result.provider).toBe("local")
+      expect(requestAIOnce.mock.calls.some(([args]) => args.provider === "nvidia")).toBe(false)
+    })
+
+    it("still races NVIDIA + local on the public build (getTextAIProvider() 'nvidia') when no explicit providers list is given", async () => {
+      getTextAIProvider.mockReturnValue("nvidia")
+      requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: "valid", provider, model: provider === "nvidia" ? "deepseek" : "qwen" }))
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "hola" }], validator: (v) => v === "valid", fallback: "fallback" })
+      await vi.advanceTimersByTimeAsync(3000)
+      await promise
+      expect(requestAIOnce.mock.calls.some(([args]) => args.provider === "nvidia")).toBe(true)
+    })
+
+    it("an explicit providers list still overrides getTextAIProvider() either way", async () => {
+      getTextAIProvider.mockReturnValue("local")
+      requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: "valid", provider, model: "deepseek" }))
+      const promise = runHybridAI({ task: "explain", messages: [{ role: "user", content: "hola" }], validator: (v) => v === "valid", fallback: "fallback", providers: ["nvidia"] })
+      await vi.advanceTimersByTimeAsync(3000)
+      const result = await promise
+      expect(result.provider).toBe("nvidia")
     })
   })
 })
