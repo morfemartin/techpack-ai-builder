@@ -457,8 +457,34 @@ export function uiMissingQuestions(uiLang, count) {
   return count === 1 ? "Falta 1 pregunta." : `Faltan ${count} preguntas.`
 }
 
-export function uiPageDesignFailed(uiLang, index, pageName) {
-  return uiLang === "EN"
+export function uiPageDesignFailed(uiLang, index, pageName, reason) {
+  const suffix = reason ? (uiLang === "EN" ? ` (${reason})` : ` (${reason})`) : ""
+  return (uiLang === "EN"
     ? `Page ${index} (${pageName}): the AI design failed - using the standard layout.`
-    : `Página ${index} (${pageName}): el diseño con IA falló - usando el layout estándar.`
+    : `Página ${index} (${pageName}): el diseño con IA falló - usando el layout estándar.`) + suffix
+}
+
+// Document-level outline failure - distinct from uiPageDesignFailed (a single
+// page). Previously a bare Spanish sentence with the actual reason
+// (HTTP status, contract violation, provider) always discarded by App.jsx's
+// bare `catch {}` - this is a dead end to debug when it happens (see the
+// documentPlan.js number/string id bug this uncovered live).
+export function uiPlanFailed(uiLang, reason) {
+  const suffix = reason ? ` (${reason})` : ""
+  return (uiLang === "EN"
+    ? "The AI document plan failed - using the standard page structure."
+    : "El plan de documento con IA falló - usando la estructura de páginas estándar.") + suffix
+}
+
+// A page's AI layout call resolved normally, but the CONTENT came from the
+// deterministic fallback (every provider either failed or the model's
+// answer failed the task's own validator) - runHybridAI already computes
+// this via result.provider === "contract" / result.fallbackReason, but
+// nothing surfaced it: a page could render 100% deterministic with zero
+// visible warning, indistinguishable from a genuine AI-authored layout.
+export function uiPageUsedFallback(uiLang, index, pageName, reason) {
+  const suffix = reason ? ` (${reason})` : ""
+  return (uiLang === "EN"
+    ? `Page ${index} (${pageName}): AI did not produce a usable layout - using the standard one.`
+    : `Página ${index} (${pageName}): la IA no produjo un layout usable - se usó el estándar.`) + suffix
 }

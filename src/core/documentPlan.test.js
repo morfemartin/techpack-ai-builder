@@ -126,6 +126,73 @@ describe("document plan AI wrappers", () => {
     expect(telemetry.refinements[0].accepted).toBe(true)
   })
 
+  // Every real part.id in the app is a NUMBER (App.jsx's uid()/i+1, and
+  // garments/*.js's hand-authored { id: 1, ... }) - every fixture above uses
+  // string ids like "P01" that never occur in production, so they never
+  // exercised the validator against a real id shape. The validator used to
+  // build `activeIds` from raw (numeric) part.id and compare it against
+  // `covered` (always string, from normalizeOutline) - `covered.every(id =>
+  // activeIds.has(id))` could then never be true for a garment with real
+  // parts, so a correct AI outline was rejected on every single call.
+  it("accepts an outline whose validator sees the same numeric part ids the app really produces", async () => {
+    const parts = [{ id: 1, val: "Tela", on: true }, { id: 2, val: "Cierre", on: true }]
+    let capturedValidator
+    deepseekChat.mockImplementationOnce(async (opts) => {
+      capturedValidator = opts.validator
+      return JSON.stringify({ pages: [
+        { id: "cover", title: "Cargo", purpose: "cover" },
+        { id: "body", title: "Body", purpose: "overview", pieces: [1, 2] },
+      ] })
+    })
+    await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] })
+
+    const candidate = JSON.stringify({ pages: [
+      { id: "cover", title: "Cargo", purpose: "cover" },
+      { id: "body", title: "Body", purpose: "overview", pieces: [1, 2] },
+    ] })
+    expect(capturedValidator(candidate)).toBe(true)
+  })
+
+  it("still rejects a numeric-id outline that genuinely omits or duplicates a piece", async () => {
+    const parts = [{ id: 1, val: "Tela", on: true }, { id: 2, val: "Cierre", on: true }]
+    let capturedValidator
+    deepseekChat.mockImplementationOnce(async (opts) => {
+      capturedValidator = opts.validator
+      return JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] })
+    })
+    await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] })
+
+    const missing = JSON.stringify({ pages: [
+      { id: "cover", title: "Cargo", purpose: "cover" },
+      { id: "body", title: "Body", purpose: "overview", pieces: [1] },
+    ] })
+    const duplicated = JSON.stringify({ pages: [
+      { id: "cover", title: "Cargo", purpose: "cover" },
+      { id: "body", title: "Body", purpose: "overview", pieces: [1, 1, 2] },
+    ] })
+    expect(capturedValidator(missing)).toBe(false)
+    expect(capturedValidator(duplicated)).toBe(false)
+  })
+
+  it("restores an omitted numeric-id piece to its system - the restoration path also compared numbers to strings", async () => {
+    const parts = Array.from({ length: 9 }, (_, index) => ({ id: index + 1, system: "upper-body", on: true }))
+    deepseekChat
+      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "upper", title: "Upper", purpose: "structure:upper-body", pieces: parts.slice(0, 8).map((part) => part.id) }] }))
+      .mockResolvedValueOnce(JSON.stringify({ pages: [
+        { id: "upper-shell", title: "Upper shell", purpose: "structure:upper-body", pieces: parts.slice(0, 6).map((part) => part.id) },
+        { id: "seat", title: "Seat", purpose: "structure:upper-body", pieces: parts.slice(6).map((part) => part.id) },
+      ] }))
+
+    let telemetry
+    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
+
+    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.pieces)).toEqual([
+      ["1", "2", "3", "4", "5", "6"],
+      ["7", "8", "9"],
+    ])
+    expect(telemetry.repairs).toContain("restored 9 to upper before semantic refinement")
+  })
+
   it("gives the model the confirmed textile brief instead of only names and parts", async () => {
     deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] }))
     await planDocumentOutline({

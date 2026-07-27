@@ -179,6 +179,25 @@ function validateContent(validator, content) {
   return validated === true ? content : validated
 }
 
+// The fallback is OUR OWN deterministic contract, not a model guess - if it
+// fails its own validator that is a bug in the fallback/validator pair, not
+// a reason to throw a hard failure at a user who already just watched every
+// AI provider fail. Observed live: documentPlan.js's outline validator
+// rejected its own fallbackDocumentOutline() (a number/string part-id
+// mismatch), which turned a solvable coverage bug into "no se pudo generar
+// el documento" with zero pages produced. Logged (so the mismatch stays
+// visible to fix) and the raw fallback content ships anyway - a
+// deterministic answer that skipped one contract check beats no answer.
+function applyFallbackContent(validator, task, fallbackContent) {
+  if (!validator) return fallbackContent
+  try {
+    return validateContent(validator, fallbackContent)
+  } catch (error) {
+    console.error("Hybrid AI: deterministic fallback failed its own validator (task: " + task + ")", error)
+    return fallbackContent
+  }
+}
+
 // A failure that reflects NVIDIA being unavailable/unusable (worth counting
 // toward the circuit breaker) vs. one that merely means "this answer didn't
 // pass the contract" (must NOT count). Real availability failures are HTTP
@@ -356,7 +375,7 @@ export async function runHybridAI({ task, messages, validator, fallback, onStatu
       if (operationAbort.controller.signal.aborted) throw abortError()
       let fallbackContent = typeof fallback === "function" ? await fallback() : fallback
       if (fallbackContent === undefined) throw failures[0] || new Error("No AI provider returned a valid response")
-      fallbackContent = validateContent(validator, fallbackContent)
+      fallbackContent = applyFallbackContent(validator, task, fallbackContent)
       const reason = failures.map((error) => error && (error.status || error.message)).filter(Boolean).join(",") || "providers_failed"
       const result = { content: fallbackContent, provider: "contract", model: "deterministic", latencyMs: Date.now() - started, degraded: true, fallbackReason: reason }
       heartbeat.status("Usando respuesta base verificable")
@@ -433,7 +452,7 @@ export async function runHybridAIStream({ task, messages, validator, fallback, o
       if (operationAbort.controller.signal.aborted) throw abortError()
       let fallbackContent = typeof fallback === "function" ? await fallback() : fallback
       if (fallbackContent === undefined) throw failures[0] || new Error("No AI provider returned a valid response")
-      fallbackContent = validateContent(validator, fallbackContent)
+      fallbackContent = applyFallbackContent(validator, task, fallbackContent)
       const reason = failures.map((error) => error && (error.status || error.message)).filter(Boolean).join(",") || "providers_failed"
       const result = { content: fallbackContent, provider: "contract", model: "deterministic", latencyMs: Date.now() - started, degraded: true, fallbackReason: reason }
       heartbeat.status("Usando respuesta base verificable")

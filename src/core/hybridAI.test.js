@@ -50,6 +50,21 @@ describe("runHybridAI", () => {
     expect(result).toMatchObject({ provider: "contract", content: "contract", degraded: true })
   })
 
+  // The fallback is OUR OWN deterministic contract, not a model guess - if
+  // it fails its own validator (a bug in the fallback/validator pair, see
+  // documentPlan.js's number/string id mismatch found live) that must not
+  // become a hard throw at a user who already watched every provider fail.
+  it("ships the fallback content even when the fallback itself fails its own validator, instead of throwing", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: "bad", provider, model: provider }))
+    const promise = runHybridAI({ task: "explain", messages: [], validator: (value) => value === "never matches this", fallback: "contract" })
+    await vi.advanceTimersByTimeAsync(3000)
+    const result = await promise
+    expect(result).toMatchObject({ provider: "contract", content: "contract", degraded: true })
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
   it("deduplicates identical in-flight requests", async () => {
     requestAIOnce.mockResolvedValue({ content: "valid", provider: "nvidia", model: "deepseek" })
     const input = { task: "review", messages: [{ role: "user", content: "same" }], validator: () => true, fallback: "fallback" }

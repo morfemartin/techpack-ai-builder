@@ -56,7 +56,15 @@ function normalizeOutline(raw, context) {
         // Which known part ids this page is actually about (e.g. the hood
         // page shows hood pieces, not the whole BOM) - consumed by
         // interpretPlan.js's effectivePartsForPage. Omitted/empty means "all".
-        pieces: Array.isArray(page.pieces) ? page.pieces.filter((p) => typeof p === "string" && p.trim()) : undefined,
+        // Every real part.id in this app is a NUMBER (uid()/i+1 - see
+        // App.jsx/garments/*.js), but this array is the single source of
+        // truth for "pieces are strings" from here on (the validator below,
+        // restoreMissingPartsToTheirSystems, refineOverloadedStructuralPages
+        // all compare against it) - so a model that correctly echoes back a
+        // numeric id must not be silently dropped for not being a string.
+        pieces: Array.isArray(page.pieces)
+          ? page.pieces.filter((p) => typeof p === "string" || typeof p === "number").map((p) => String(p).trim()).filter(Boolean)
+          : undefined,
         system: safeString(page.system, "") || undefined,
         objective: safeString(page.objective, "") || undefined,
         views: Array.isArray(page.views) ? page.views.filter((view) => typeof view === "string" && view.trim()) : undefined,
@@ -83,10 +91,13 @@ function validStructuralRefinement(sourcePage, pages) {
 function restoreMissingPartsToTheirSystems(outline, parts) {
   const pages = JSON.parse(JSON.stringify((outline && outline.pages) || []))
   const structural = pages.filter((page) => isStructuralPurpose(page.purpose))
+  // `page.pieces` is always STRING (see normalizeOutline); `part.id` is
+  // always NUMBER - normalize here too, or `covered.has(item.id)` silently
+  // treats every part as missing regardless of what the outline covered.
   const covered = new Set(structural.flatMap((page) => Array.isArray(page.pieces) ? page.pieces : []))
   const repairs = []
 
-  for (const part of (parts || []).filter((item) => item && item.on !== false && item.id && !covered.has(item.id))) {
+  for (const part of (parts || []).filter((item) => item && item.on !== false && item.id != null && !covered.has(String(item.id)))) {
     const system = safeString(part.system, "").toLowerCase()
     if (!system) continue
     const target = structural.find((page) => {
@@ -95,8 +106,8 @@ function restoreMissingPartsToTheirSystems(outline, parts) {
       return pageSystem === system || purpose === "structure:" + system
     })
     if (!target) continue
-    target.pieces = [...(target.pieces || []), part.id]
-    covered.add(part.id)
+    target.pieces = [...(target.pieces || []), String(part.id)]
+    covered.add(String(part.id))
     repairs.push("restored " + part.id + " to " + target.id + " before semantic refinement")
   }
 
@@ -106,7 +117,9 @@ function restoreMissingPartsToTheirSystems(outline, parts) {
 async function refineOverloadedStructuralPages(outline, context) {
   const refinements = []
   const pages = []
-  const partById = new Map((context.parts || []).map((part) => [part && part.id, part]))
+  // Keyed by String(id) to match page.pieces (always string - see
+  // normalizeOutline) against part.id (always number).
+  const partById = new Map((context.parts || []).map((part) => [part && part.id != null ? String(part.id) : null, part]))
 
   for (const page of outline.pages || []) {
     if (!isStructuralPurpose(page.purpose) || !Array.isArray(page.pieces) || page.pieces.length <= 8) {
@@ -200,7 +213,15 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
     task: HYBRID_TASKS.OUTLINE,
     validator: (content) => {
       const candidate = normalizeOutline(parseJSONOrRepair(content, "invalid outline"), context)
-      const activeIds = new Set((parts || []).filter((part) => part && part.on !== false && part.id).map((part) => part.id))
+      // part.id is always a NUMBER; candidate.pages[].pieces is always a
+      // STRING (see normalizeOutline above) - comparing them raw meant
+      // `covered.every(id => activeIds.has(id))` could never be true for a
+      // garment with real parts, so the model's outline was rejected on
+      // every single call regardless of what it actually proposed. That
+      // fallback then failed this SAME validator too (see hybridAI.js's
+      // fallback revalidation), turning a coverage mismatch into a hard
+      // throw instead of a normal accept/reject.
+      const activeIds = new Set((parts || []).filter((part) => part && part.on !== false && part.id != null).map((part) => String(part.id)))
       const covered = candidate.pages.filter((page) => isStructuralPurpose(page.purpose)).flatMap((page) => page.pieces || [])
       const requiredDesigns = (designs || []).filter((design) => design && design.name).map((design) => "design:" + design.name)
       const purposes = new Set(candidate.pages.map((page) => page.purpose))
@@ -228,7 +249,7 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
   return repaired.outline
 }
 
-export async function planPageLayout(pageOutline, context, { onProgress, onStatus, signal, providers } = {}) {
+export async function planPageLayout(pageOutline, context, { onProgress, onStatus, signal, providers, onResult } = {}) {
   const page = pageOutline && typeof pageOutline === "object" ? pageOutline : {}
   const instructions =
     "Sos disenador de layout para fichas tecnicas textiles. Para ESTA pagina, repartí el espacio por jerarquia visual usando solamente este vocabulario cerrado de bloques hoja: " +
@@ -262,6 +283,12 @@ export async function planPageLayout(pageOutline, context, { onProgress, onStatu
     onStatus,
     signal,
     providers,
+    // Surfaces which provider actually answered (or "contract" when every
+    // provider failed and the deterministic fallback shipped instead) plus
+    // WHY, via runHybridAI's already-computed fallbackReason - previously
+    // discarded here, so a page could render 100% deterministic with zero
+    // visible warning. See App.jsx's buildCustomDocumentPages.
+    onResult,
   }
   const call = onProgress
     ? deepseekChatStream({

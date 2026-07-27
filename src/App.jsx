@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { uid } from "./core/idGen.js"
-import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed } from "./core/i18n.js"
+import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { translateContent } from "./core/claudeApi.js"
@@ -119,6 +119,18 @@ const dashedActionStyle = {
 
 function iconBtn(color) {
   return { background: "none", border: "none", color, cursor: "pointer", display: "inline-flex", padding: 0 }
+}
+
+// Turns a caught AI-call error into one short, honest phrase for a warning
+// message - status/contract-violation/network detail instead of a bare
+// "falló la IA" that discards the actual reason. Used by
+// buildCustomDocumentPages's two catch blocks (outline + per-page layout).
+function describeAIError(error) {
+  if (!error) return ""
+  if (error.contractViolation) return "el modelo no cumplio el contrato de la tarea"
+  if (typeof error.status === "number") return "HTTP " + error.status + (error.detail ? ": " + error.detail : "")
+  if (error.networkError) return "fallo de red"
+  return String((error && error.message) || error).slice(0, 140)
 }
 
 function newDesign() {
@@ -528,10 +540,23 @@ export default function App() {
             setDocumentPlanStatus(status)
             drawWaiting(provisionalOutline.pages, { label: ui.structuringDocument, detail: status, done: 0 })
           },
+          // Mirrors planPageLayout's onResult below - the outline call can
+          // resolve NORMALLY with the deterministic fallback's content (every
+          // provider either failed or failed the outline's own validator),
+          // which never throws and so never hit the catch block - the whole
+          // document structure came from fallbackDocumentOutline() with zero
+          // visible warning. Observed live even after the id-type-mismatch
+          // fix: the fallback is a legitimate, honest outcome, it just must
+          // not be silent.
+          onProposal: (proposal) => {
+            if (proposal && proposal.aiResult && proposal.aiResult.provider === "contract") {
+              setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiPlanFailed(uiLang, proposal.aiResult.fallbackReason) }])
+            }
+          },
         })
-      } catch {
+      } catch (error) {
         outline = provisionalOutline
-        setDocumentPlanWarnings((w) => [...w, ui.planFailed])
+        setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiPlanFailed(uiLang, describeAIError(error)) }])
       }
       var total = outline.pages.length
       var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, total, { label: ui.queued, done: 0 }) }))
@@ -568,12 +593,25 @@ export default function App() {
                     repaint(index, detail)
                   }
                 })(i, human),
+                // The call can resolve NORMALLY with fallback content (every
+                // provider failed or failed the task's own validator, so
+                // runHybridAI shipped the deterministic layout instead) -
+                // that never threw, so the catch below never saw it and the
+                // page rendered with zero warning. onResult exposes exactly
+                // that via result.provider === "contract".
+                onResult: (function (index, pageName) {
+                  return function (result) {
+                    if (result && result.provider === "contract") {
+                      setDocumentPlanWarnings((w) => [...w, { level: "page", text: uiPageUsedFallback(uiLang, index + 1, pageName, result.fallbackReason) }])
+                    }
+                  }
+                })(i, plannedPageName(page, i)),
               },
             )
           plannedPages.push(planned)
-        } catch {
+        } catch (error) {
           plannedPages.push(fallbackPageLayout(page))
-          setDocumentPlanWarnings((w) => [...w, uiPageDesignFailed(uiLang, i + 1, plannedPageName(page, i))])
+          setDocumentPlanWarnings((w) => [...w, { level: "page", text: uiPageDesignFailed(uiLang, i + 1, plannedPageName(page, i), describeAIError(error)) }])
         }
         var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
         publishPages(outline.pages.map(function (p, idx) {
@@ -1188,15 +1226,37 @@ export default function App() {
                   <Icon name="check" size={14} color={role.priority.fill} /> {ui.documentReadyLabel}
                 </span>
               )}
-              {documentPlanWarnings.length > 0 && (
-                <span
-                  title={documentPlanWarnings.join("\n")}
-                  style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}
-                >
-                  <Icon name="error" size={14} color={role.index.fill} />
-                  {uiPagesUsedFallback(uiLang, documentPlanWarnings.length)}
-                </span>
-              )}
+              {documentPlanWarnings.length > 0 && (() => {
+                // A document-level failure (the outline call) is not "N
+                // pages used the fallback" - it means the WHOLE plan came
+                // from fallbackDocumentOutline(). Kept as a separate badge so
+                // it stops being miscounted as "1 página" (see i18n's
+                // uiPagesUsedFallback vs uiPlanFailed).
+                var pageWarnings = documentPlanWarnings.filter((w) => w.level === "page")
+                var docWarnings = documentPlanWarnings.filter((w) => w.level === "document")
+                return (
+                  <>
+                    {docWarnings.length > 0 && (
+                      <span
+                        title={docWarnings.map((w) => w.text).join("\n")}
+                        style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}
+                      >
+                        <Icon name="error" size={14} color={role.index.fill} />
+                        {docWarnings[docWarnings.length - 1].text}
+                      </span>
+                    )}
+                    {pageWarnings.length > 0 && (
+                      <span
+                        title={pageWarnings.map((w) => w.text).join("\n")}
+                        style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}
+                      >
+                        <Icon name="error" size={14} color={role.index.fill} />
+                        {uiPagesUsedFallback(uiLang, pageWarnings.length)}
+                      </span>
+                    )}
+                  </>
+                )
+              })()}
               {garmentId === "custom" && customGarment && (
                 <button
                   onClick={() => downloadGarmentFile(customGarment)}
