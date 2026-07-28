@@ -58,7 +58,14 @@ either provider for A/B tests.
 - Requests are capped at 1 MiB, 64 messages and 4096 output tokens.
 - The configured model is forced server-side; clients cannot select arbitrary
   local models or paths.
-- Image payloads are rejected by the local bridge. Vision remains on NVIDIA.
+- Image payloads are rejected by the local bridge's chat route. Vision remains
+  on NVIDIA.
+- The one exception is `/v1/ocr` (Wilcom PDF embroidery-spec extraction,
+  Mistral-only - returns 501 when the local upstream is the Qwen MLX text
+  model). It has its own separate size budget (8 MiB, vs. the chat route's
+  1 MiB) and returns only the document's plain OCR text - it never accepts or
+  echoes back arbitrary content, and the structured extraction step still
+  goes through the same capped, text-only chat route as everything else.
 - The bridge has no API key, shell endpoint, filesystem endpoint or arbitrary
   upstream URL.
 - Studio text is allowed to use DeepSeek automatically. This is an explicit

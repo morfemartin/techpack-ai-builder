@@ -102,6 +102,39 @@ export async function getLocalAIHealth() {
   return res.json()
 }
 
+// OCR a PDF via the studio bridge's /v1/ocr route (Mistral-only - see
+// studioBridge.mjs, which returns 501 when the local upstream is the Qwen
+// MLX text model instead). This module stays the sole custodian of the
+// bridge's URL shape, same as getLocalAIHealth() above - callers never
+// derive a bridge path themselves. Throws a real DeepSeekError instead of
+// returning null, so a caller can show the actual reason (no key, PDF too
+// large, upstream rejected the document) rather than silently doing nothing.
+export async function getLocalOcrText(base64) {
+  const ocrURL = LOCAL_STUDIO_URL.replace(/\/v1\/chat\/completions\/?$/, "/v1/ocr")
+  let res
+  try {
+    res = await fetchWithTimeout(ocrURL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document: base64 }),
+    }, 120000)
+  } catch (e) {
+    throw new DeepSeekError("No se pudo contactar el servicio de OCR del estudio.", e)
+  }
+  let data = {}
+  try {
+    data = await res.json()
+  } catch {}
+  if (!res.ok) {
+    const detail = (data && data.detail) || (data && data.error) || ("HTTP " + res.status)
+    if (data && data.error === "ocr_not_supported") {
+      throw new DeepSeekError("La extraccion de PDF requiere la version estudio con Mistral (no el modelo local Qwen).", data)
+    }
+    throw new DeepSeekError("El servicio de OCR no pudo procesar el PDF: " + detail, data)
+  }
+  return typeof data.text === "string" ? data.text : ""
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError, getTextAIProvider, resolveAITransport } from "./deepseekClient.js"
+import { deepseekChat, deepseekChatStream, deepseekJSON, extractStructured, DeepSeekError, getTextAIProvider, resolveAITransport, getLocalOcrText } from "./deepseekClient.js"
 
 function mockFetchOnce(body, ok = true, status = 200) {
   global.fetch = vi.fn().mockResolvedValue({
@@ -458,5 +458,34 @@ describe("deepseekChatStream", () => {
     global.fetch = vi.fn().mockResolvedValue(mockStreamResponse([sseEvent("antes"), "data: {esto no es json valido\n\n", sseEvent(" despues"), "data: [DONE]\n\n"]))
     const result = await deepseekChatStream({ messages: [] })
     expect(result).toBe("antes despues")
+  })
+})
+
+describe("getLocalOcrText", () => {
+  it("posts the base64 document to the bridge's /v1/ocr route and returns the joined text", async () => {
+    mockFetchOnce({ text: "Stitches: 4800\n\nColors: 2" })
+    const text = await getLocalOcrText("QUJD")
+    expect(text).toBe("Stitches: 4800\n\nColors: 2")
+    const [url, options] = global.fetch.mock.calls[0]
+    expect(url).toMatch(/\/v1\/ocr$/)
+    expect(JSON.parse(options.body)).toEqual({ document: "QUJD" })
+  })
+
+  // studioBridge.mjs returns 501 {error:"ocr_not_supported"} when the bridge
+  // is running the local Qwen MLX model instead of Mistral - a distinct,
+  // actionable message the caller (embExtract.js) should surface as-is.
+  it("throws a clear message when the bridge reports OCR is not supported (non-Mistral upstream)", async () => {
+    mockFetchOnce({ error: "ocr_not_supported" }, false, 501)
+    await expect(getLocalOcrText("QUJD")).rejects.toThrow(/estudio con Mistral/)
+  })
+
+  it("throws with the upstream detail on any other OCR failure", async () => {
+    mockFetchOnce({ error: "ocr_upstream_error", detail: "document rejected" }, false, 502)
+    await expect(getLocalOcrText("QUJD")).rejects.toThrow(/document rejected/)
+  })
+
+  it("throws instead of returning null when the bridge is unreachable", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new TypeError("fetch failed"))
+    await expect(getLocalOcrText("QUJD")).rejects.toBeInstanceOf(DeepSeekError)
   })
 })

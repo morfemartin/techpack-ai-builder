@@ -1,5 +1,6 @@
 import { extractStructured } from "./deepseekClient.js"
 import { uid } from "./idGen.js"
+import { EMB_FIELDS_PROMPT } from "./helpers.js"
 
 // Reads a File as text. Kept separate from importGarmentCSV() (which takes
 // plain text) so the actual parsing/mapping logic stays testable without a
@@ -41,7 +42,7 @@ export async function importGarmentCSV(csvText, { garment, lang = "ES", tecs, im
     "Posiciones de diseno validas: " + positions.join(", ") + " - si un diseno no calza exacto, elegi la mas parecida de esa lista. " +
     "Tecnicas validas: " + tecList.join(", ") + ". " +
     "Si el CSV trae datos de digitalizado de bordado (puntadas, cambios de color, paradas, cortes, estabilizador top/backing, hilo/bobina - tipico de una ficha exportada de Wilcom), " +
-    "agrega tambien un objeto 'emb' a ese diseno con estas claves exactas: machine, stitches, colorChanges, stops, trims, fabric, stabTopping, stabBacking, appliques, w, h, area, maxStitch, minStitch, maxJump, totalThread, totalBobbin, stopSeq (array de {stop,color,stitches,code,name}). " +
+    "agrega tambien un objeto 'emb' a ese diseno con estas claves exactas: " + EMB_FIELDS_PROMPT + ". " +
     "Dejá vacios (string vacio, o array vacio para stopSeq) los campos de emb que no encuentres. " +
     "Si agregas 'emb', el campo 'tec' de ese diseno DEBE ser exactamente uno de bordado de la lista de tecnicas de arriba - nunca un texto libre distinto." +
     (imageFileNames && imageFileNames.length > 0

@@ -1,10 +1,11 @@
 import { useState, useRef } from "react"
-import { extractEmbFromPDF } from "../core/claudeApi.js"
+import { extractEmbFromPDF } from "../core/embExtract.js"
 import { palette, role } from "../design/tokens.js"
 
 export function EmbForm({ emb, onChange }) {
   const [extracting, setExtracting] = useState(false)
   const [extracted, setExtracted] = useState(false)
+  const [extractError, setExtractError] = useState("")
   const fileRef = useRef()
   function upd(k, v) {
     onChange(Object.assign({}, emb, { [k]: v }))
@@ -28,13 +29,28 @@ export function EmbForm({ emb, onChange }) {
     var f = e.target.files[0]
     if (!f) return
     setExtracting(true)
+    setExtracted(false)
+    setExtractError("")
     var reader = new FileReader()
     reader.onload = async function (ev) {
-      var b64 = ev.target.result.split(",")[1]
-      var data = await extractEmbFromPDF(b64)
-      if (data) onChange(Object.assign({}, emb, data))
+      try {
+        var b64 = ev.target.result.split(",")[1]
+        var data = await extractEmbFromPDF(b64)
+        onChange(Object.assign({}, emb, data))
+        setExtracted(true)
+      } catch (err) {
+        // Previously this just returned null and the UI still said "PDF
+        // extraido" - a real error the user could not see or act on. Now
+        // it says exactly why (no Mistral/estudio, OCR found nothing, the
+        // upstream rejected the file) instead of pretending it worked.
+        setExtractError((err && err.message) || "No se pudo extraer el PDF.")
+      } finally {
+        setExtracting(false)
+      }
+    }
+    reader.onerror = function () {
       setExtracting(false)
-      setExtracted(true)
+      setExtractError("No se pudo leer el archivo.")
     }
     reader.readAsDataURL(f)
   }
@@ -57,6 +73,11 @@ export function EmbForm({ emb, onChange }) {
           </label>
         </div>
       </div>
+      {extractError && (
+        <div style={{ marginBottom: 12, padding: "6px 10px", background: role.highlight.fill, border: "1px solid " + role.highlight.keyline, borderRadius: 5, fontSize: 11, color: palette.ink.hex }}>
+          {extractError}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         {fields.map((f) => (
           <div key={f.k} style={{ display: "flex", flexDirection: "column", gap: 3 }}>

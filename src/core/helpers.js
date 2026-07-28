@@ -29,6 +29,13 @@ export const EMPTY_EMB = {
   maxStitch: "", minStitch: "", maxJump: "", totalThread: "", totalBobbin: "", stopSeq: [],
 }
 
+// The exact emb key list, shared by every AI extraction path that produces
+// an EMPTY_EMB-shaped object (csvImport.js's CSV interpreter and
+// embExtract.js's Wilcom-PDF OCR extractor) - one prompt fragment instead of
+// two independently-drifting copies of the same key list.
+export const EMB_FIELDS_PROMPT =
+  "machine, stitches, colorChanges, stops, trims, fabric, stabTopping, stabBacking, appliques, w, h, area, maxStitch, minStitch, maxJump, totalThread, totalBobbin, stopSeq (array de {stop,color,stitches,code,name})"
+
 // An EMPTY_EMB-shaped object is present on every design created by the UI,
 // so object truthiness cannot tell us whether an embroidery worksheet exists.
 // Keep this predicate shared by contracts, measurement and review so all three

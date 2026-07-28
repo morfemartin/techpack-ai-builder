@@ -12,6 +12,11 @@ const MAX_MESSAGES = 64
 const MAX_MESSAGE_CHARS = 120000
 const MAX_TOKENS = 4096
 
+// A base64 Wilcom worksheet PDF is comfortably larger than a chat message -
+// its own budget, separate from MAX_BODY_BYTES, so this stays generous
+// without loosening the text-only chat surface those caps exist to bound.
+const MAX_OCR_BODY_BYTES = 8 * 1024 * 1024
+
 function sendJSON(res, status, value) {
   res.statusCode = status
   res.setHeader("Content-Type", "application/json; charset=utf-8")
@@ -58,12 +63,12 @@ function setCors(req, res, allowedOrigins) {
   return true
 }
 
-async function readJSON(req) {
+async function readJSON(req, maxBytes = MAX_BODY_BYTES) {
   let size = 0
   const chunks = []
   for await (const chunk of req) {
     size += chunk.length
-    if (size > MAX_BODY_BYTES) throw new Error("body_too_large")
+    if (size > maxBytes) throw new Error("body_too_large")
     chunks.push(chunk)
   }
   try {
@@ -105,6 +110,28 @@ export function sanitizeCompletionPayload(body, model = DEFAULT_STUDIO_MODEL) {
   }
 }
 
+// Base64 only (no "data:application/pdf;base64," prefix - the bridge adds
+// that itself when it builds the upstream request, so the client never has
+// to know Mistral's exact document_url shape). A loose but real shape check:
+// base64 is only [A-Za-z0-9+/=], and a real PDF is never a tiny string.
+function sanitizeOcrPayload(body) {
+  const document = body && body.document
+  if (typeof document !== "string" || document.length < 100 || !/^[A-Za-z0-9+/=]+$/.test(document)) {
+    throw new Error("document_invalid")
+  }
+  return { document }
+}
+
+// Mistral's OCR response nests text under pages[].markdown - joined into one
+// plain-text blob for the caller (GarmentChat's PDF-extraction flow feeds
+// this straight into the existing chat-based extractStructured(), the same
+// path csvImport.js already uses, rather than this bridge having to also
+// understand Mistral's structured-annotation JSON shape).
+function extractOcrText(data) {
+  const pages = (data && Array.isArray(data.pages)) ? data.pages : []
+  return pages.map((p) => (p && typeof p.markdown === "string" ? p.markdown : "")).filter(Boolean).join("\n\n")
+}
+
 async function pipeUpstream(upstream, res) {
   res.statusCode = upstream.status
   res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/json; charset=utf-8")
@@ -144,6 +171,40 @@ export function createStudioBridge({
     if (req.method === "GET" && url.pathname === "/health") {
       const ready = readiness.status === "ready"
       return sendJSON(res, ready ? 200 : 503, { status: readiness.status || "starting", provider, model, private: true })
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/ocr") {
+      // Only the hosted Mistral upstream can OCR a document at all - the
+      // local MLX branch (a text-only Qwen build, see studio-ai.mjs) has no
+      // document capability, so fail fast and honestly instead of forwarding
+      // a request the upstream can only reject.
+      if (provider !== "mistral") return sendJSON(res, 501, { error: "ocr_not_supported", detail: "OCR requires the Mistral-backed studio bridge" })
+      try {
+        const { document } = sanitizeOcrPayload(await readJSON(req, MAX_OCR_BODY_BYTES))
+        const upstream = await fetchImpl(upstreamBaseURL + "/ocr", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model: "mistral-ocr-latest",
+            document: { type: "document_url", document_url: "data:application/pdf;base64," + document },
+          }),
+          signal: AbortSignal.timeout(120000),
+        })
+        if (!upstream.ok) {
+          const detail = await upstream.text().catch(() => "")
+          return sendJSON(res, 502, { error: "ocr_upstream_error", detail: detail.slice(0, 500) })
+        }
+        const data = await upstream.json()
+        return sendJSON(res, 200, { text: extractOcrText(data) })
+      } catch (error) {
+        const detail = String((error && error.message) || error)
+        if (detail === "body_too_large") return sendJSON(res, 413, { error: detail })
+        if (/invalid|document/.test(detail)) return sendJSON(res, 400, { error: detail })
+        return sendJSON(res, 502, { error: "ocr_error", detail: "OCR request failed" })
+      }
     }
 
     if (req.method !== "POST" || url.pathname !== "/v1/chat/completions") {
