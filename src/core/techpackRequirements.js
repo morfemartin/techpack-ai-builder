@@ -16,6 +16,7 @@ import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
 import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk, sortFieldsForIntake } from "./requirementLayers.js"
 import { dropIncoherentFields, mootFieldsFromAnswer } from "./garmentAnatomy.js"
+import { parseMeasure } from "./units.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
@@ -262,7 +263,12 @@ export function answerFromSeed(reqs, seed) {
 
 // Defensive shaping so the walker helpers can trust the structure regardless
 // of small model deviations (missing arrays, bad status strings, etc.).
-const DESIGN_FIELD_KINDS = new Set(["name", "position", "technique", "driveLink", "detail"])
+// "width"/"height" let the model tag a design element's real physical size as
+// its own field, distinct from generic "detail" - without this, a chat-built
+// design could NEVER carry cotas (renderDesignArtHero requires numeric w/h;
+// see buildPages.js), because a typed "10cm x 8cm" only ever landed as prose
+// inside `notes`/`posDetail`, never as a number reqsToDesigns could use.
+const DESIGN_FIELD_KINDS = new Set(["name", "position", "technique", "driveLink", "detail", "width", "height"])
 
 export function normalizeRequirements(parsed, garmentType) {
   const validStatus = new Set([FIELD_STATUS.KNOWN, FIELD_STATUS.ASSUMED, FIELD_STATUS.ASK])
@@ -768,8 +774,10 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "ubicacion real en ESTA prenda), " +
     "'position' (donde va en la prenda), 'technique' (tecnica de aplicacion, DEBE ser una de esta lista exacta si aplica: " + (tecs || []).join(", ") + "), " +
     "'driveLink' (URL de Drive si el usuario menciona una - normalmente solo si es plausible que exista, la mayoria de elementos no necesitan este campo), " +
+    "'width'/'height' (ancho y alto FISICOS del elemento en centimetros - SOLO para elementos con arte/dimension real como logos, parches, bordados, etiquetas; " +
+    "el 'value' debe ser UN NUMERO simple en cm, ej '10', nunca texto ni '10cm x 8cm' junto - ancho y alto van en dos campos separados), " +
     "o 'detail' (cualquier otro atributo relevante para ese elemento especifico, ej: para botones 'cuantos huecos tiene, que material'). " +
-    "Puede haber MULTIPLES campos con 'designField: detail' en un mismo designSlot, pero solo UNO de cada uno de los otros tipos.\n\n" +
+    "Puede haber MULTIPLES campos con 'designField: detail' en un mismo designSlot, pero solo UNO de cada uno de los otros tipos (incluido width/height).\n\n" +
     "El 'key' de cada campo debe ser globalmente unico, usando el designSlot como prefijo (ej: 'botones_cantidad', 'logo_pecho_tecnica').\n" +
     "Cada campo sigue la misma forma de siempre: key, label, category (SIEMPRE 'design' para todo lo que emita esta funcion), status, value, options, why.\n" +
     "Para campos 'ask', inclui 'options' con 2 a 4 etiquetas CORTAS.\n\n" +
@@ -788,7 +796,7 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +
     "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
     '{"garmentType": "' + garmentType + '", "fields": [' +
-    '{"key": "identificadorUnico", "label": "Etiqueta en espanol", "category": "design", "designSlot": "slot_id", "designField": "name|position|technique|driveLink|detail", ' +
+    '{"key": "identificadorUnico", "label": "Etiqueta en espanol", "category": "design", "designSlot": "slot_id", "designField": "name|position|technique|driveLink|width|height|detail", ' +
     '"status": "ask", "value": "", "options": ["Opcion A", "Opcion B"], "why": "por que importa (breve)"}]}'
 
   const raw = onProgress
@@ -837,6 +845,14 @@ export function mergeDesignFields(reqs, designFields) {
 // (buildCustomGarment.js) expects: groups known/assumed "design" fields by
 // designSlot and reassembles each group into one {name, pos, tec, driveLink,
 // posDetail, notes} object - one per design element, in first-appearance order.
+// Pulls the first number out of a value regardless of stray unit text the
+// model might still tack on ("10cm", "10 cm", "10") - tolerant on purpose,
+// since the prompt asks for a bare number but nothing enforces that shape.
+function extractNumericValue(value) {
+  const match = String(value || "").match(/-?\d+(?:[.,]\d+)?/)
+  return match ? parseMeasure(match[0]) : null
+}
+
 export function reqsToDesigns(reqs) {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
   const designFields = fields.filter(
@@ -848,9 +864,9 @@ export function reqsToDesigns(reqs) {
     const slot = f.designSlot
     if (!slot || typeof slot !== "string" || !slot.trim()) continue
     const df = f.designField
-    if (!df || !["name", "position", "technique", "driveLink", "detail"].includes(df)) continue
+    if (!df || !DESIGN_FIELD_KINDS.has(df)) continue
     if (!slotMap.has(slot)) {
-      slotMap.set(slot, { name: "", pos: "", tec: "", driveLink: "", posDetail: "", details: [] })
+      slotMap.set(slot, { name: "", pos: "", tec: "", driveLink: "", posDetail: "", details: [], w: null, h: null })
       slotOrder.push(slot)
     }
     const group = slotMap.get(slot)
@@ -859,6 +875,8 @@ export function reqsToDesigns(reqs) {
     else if (df === "position") group.pos = val
     else if (df === "technique") group.tec = val
     else if (df === "driveLink") group.driveLink = val
+    else if (df === "width") { const n = extractNumericValue(val); if (n !== null) group.w = n }
+    else if (df === "height") { const n = extractNumericValue(val); if (n !== null) group.h = n }
     else if (df === "detail") {
       // A bare number ("25") is a measurement, not a place - promoting it to
       // posDetail makes the design page print "Ubicación: 25" and invent a
@@ -879,6 +897,14 @@ export function reqsToDesigns(reqs) {
       driveLink: g.driveLink,
       posDetail: g.posDetail,
       notes: g.details.join(", "),
+      // Only present when the model actually tagged a width/height field for
+      // this slot (see designField above) - w/h stay unset otherwise, same
+      // as a design built from the wizard's own blank form, so
+      // renderDesignArtHero's "PENDIENTE DE CONFIRMAR" path still fires
+      // honestly instead of a fabricated 0x0.
+      ...(g.w !== null ? { w: g.w } : {}),
+      ...(g.h !== null ? { h: g.h } : {}),
+      ...(g.w !== null || g.h !== null ? { unit: "cm" } : {}),
       // The stable designSlot key (not derived from `name`, which can be
       // renamed mid-chat) - lets a caller correlate this design across calls,
       // e.g. GarmentChat.jsx matching an inline-uploaded image (captured by

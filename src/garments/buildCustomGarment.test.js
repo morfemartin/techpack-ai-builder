@@ -85,4 +85,20 @@ describe("mapChatDesignsToDesigns", () => {
     const result = mapChatDesignsToDesigns([{ name: "Logo", pos: "Frente" }], "Toda la prenda")
     expect(result[0]).not.toHaveProperty("imageData")
   })
+
+  // Same story as the image pass-through above, for real cotas: without
+  // this, a size the user typed in the chat (reqsToDesigns' w/h/unit, see
+  // techpackRequirements.js) never reached the design object, so
+  // renderDesignArtHero never had numeric w/h to draw dimension lines from.
+  it("passes through width/height/unit the chat resolved for a design", () => {
+    const result = mapChatDesignsToDesigns([{ name: "Logo", pos: "Frente", w: 10, h: 8, unit: "cm" }], "Toda la prenda")
+    expect(result[0]).toMatchObject({ w: 10, h: 8, unit: "cm" })
+  })
+
+  it("does not add w/h/unit keys at all when the chat never resolved a size", () => {
+    const result = mapChatDesignsToDesigns([{ name: "Logo", pos: "Frente" }], "Toda la prenda")
+    expect(result[0]).not.toHaveProperty("w")
+    expect(result[0]).not.toHaveProperty("h")
+    expect(result[0]).not.toHaveProperty("unit")
+  })
 })

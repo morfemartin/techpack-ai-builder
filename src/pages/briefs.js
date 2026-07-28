@@ -96,24 +96,27 @@ export function normalizeSlotBriefs(region, page, ctx) {
       }
     }
 
+    // The design's own real w/h must never be silently dropped just because
+    // the model ALSO supplied unrelated measurements (e.g. "Largo total
+    // desde hombro" on a design page) - both are legitimate, distinct facts.
+    // Previously ANY model measurement replaced the real dimension line
+    // entirely, even when it described something else altogether; a known
+    // width/height is real data, not a guess to be overridden.
     const measurements = [];
+    for (const dm of defaultMeasurements) {
+      measurements.push({ ...dm });
+    }
     if (sourceObj && Array.isArray(sourceObj.measurements)) {
       for (const m of sourceObj.measurements) {
         if (m && typeof m === 'object') {
           const label = coerceString(m.label);
-          if (label) {
+          if (label && !measurements.some((existing) => existing.label === label)) {
             measurements.push({
               label: label,
               perSize: !!m.perSize
             });
           }
         }
-      }
-    }
-    if (measurements.length === 0) {
-      // Use defaults only if source had no valid measurements
-      for (const dm of defaultMeasurements) {
-        measurements.push({ ...dm });
       }
     }
 

@@ -225,7 +225,13 @@ function designBriefs(page, design) {
     garmentPart: clean(design && design.pos) || "Aplicacion grafica",
     view,
     mustMark: ["limite del arte", "eje de centrado", "referencia de colocacion"],
-    measurements: design && design.w && design.h ? [{ label: "Ancho " + design.w + " x alto " + design.h, perSize: false }] : [],
+    // No raw w/h measurement built here anymore - it duplicated (with worse
+    // formatting: no unit conversion, no unit suffix) what briefs.js's own
+    // defaultMeasurements already derives from design.w/h via
+    // formatDimensions(). Leaving this empty lets that single, properly
+    // converted dimension line be the only one, for both this deterministic
+    // path and the AI-planned one.
+    measurements: [],
     placementLandmark: clean(design && design.posDetail),
     factoryNote: clean(design && design.tec),
   }))

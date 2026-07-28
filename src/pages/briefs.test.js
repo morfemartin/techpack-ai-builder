@@ -49,11 +49,28 @@ describe("normalizeSlotBriefs", () => {
     expect(briefs).toHaveLength(1)
     expect(briefs[0].garmentPart).toBe("Panel frontal")
     expect(briefs[0].mustMark).toEqual(["logo bordado", "costura de hombro"])
-    expect(briefs[0].measurements).toEqual([{ id: "DIM-1", label: "Ancho logo", perSize: false, unit: "mm" }])
+    // The design's own real w/h (70x22mm) is never dropped just because the
+    // model ALSO supplied its own measurement - both are real, distinct
+    // facts and both must reach the illustrator.
+    expect(briefs[0].measurements).toEqual([
+      { id: "DIM-1", label: "Ancho 70mm x Alto 22mm", perSize: false, unit: "mm" },
+      { id: "DIM-2", label: "Ancho logo", perSize: false, unit: "mm" },
+    ])
     expect(briefs[0].callouts).toEqual([{ id: "V1.1", label: "logo bordado" }, { id: "V1.2", label: "costura de hombro" }])
     expect(briefs[0].slotCode).toBe("V1")
     expect(briefs[0].designCode).toBe("D1")
     expect(briefs[0].factoryNote).toBe("Bordado 3D foam")
+  })
+
+  it("does not duplicate the real dimension line when the model echoes the exact same label", () => {
+    const region = {
+      type: "illustration",
+      slots: 1,
+      refs: ["Frente"],
+      briefs: [{ measurements: [{ label: "Ancho 70mm x Alto 22mm", perSize: false }] }],
+    }
+    const briefs = normalizeSlotBriefs(region, page, ctx)
+    expect(briefs[0].measurements).toEqual([{ id: "DIM-1", label: "Ancho 70mm x Alto 22mm", perSize: false, unit: "mm" }])
   })
 
   it("pads missing slots with briefs derived from the design and refs", () => {

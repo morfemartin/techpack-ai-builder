@@ -54,6 +54,14 @@ export function mapChatDesignsToDesigns(draftDesigns, fallbackPosition) {
     // reached the design object, so the hero (renderDesignArtHero) never had
     // imageData to fire on and the page fell back to two empty boards.
     ...(dd.imageData ? { imageData: dd.imageData, imageType: dd.imageType || "png", imgNatW: dd.imgNatW || null, imgNatH: dd.imgNatH || null } : {}),
+    // Same story as imageData just above, for real cotas: reqsToDesigns()
+    // only sets w/h when the model tagged a width/height designField (see
+    // techpackRequirements.js) - without passing them through here, a
+    // chat-built design could NEVER carry dimension lines, the size the user
+    // typed just evaporated into `notes` as prose.
+    ...(dd.w != null ? { w: dd.w } : {}),
+    ...(dd.h != null ? { h: dd.h } : {}),
+    ...(dd.unit ? { unit: dd.unit } : {}),
   }))
 }
 

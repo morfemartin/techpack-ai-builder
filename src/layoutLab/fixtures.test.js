@@ -121,8 +121,12 @@ describe("Layout Lab closure fixtures", () => {
       expect(page.svg).not.toMatch(/NaN|undefined/)
     })
     const logoSvg = pages.find((page) => page.purpose === "design:Logo pecho reflectivo").svg
-    expect(logoSvg).toContain("DIM-1 Ancho 68 x")
-    expect(logoSvg).toContain("alto 22")
+    // designBriefs() no longer builds its own raw, unit-less "Ancho 68 x alto
+    // 22" string - that duplicated (with worse formatting) what briefs.js's
+    // own formatDimensions()-based default already derives from design.w/h.
+    // Wraps across two <text> lines, so check both halves.
+    expect(logoSvg).toContain("DIM-1 Ancho 68mm")
+    expect(logoSvg).toContain("x Alto 22mm")
   })
 
   it("changes composition from measured density while preserving complete candidates", () => {

@@ -677,6 +677,45 @@ describe("reqsToDesigns", () => {
     })
   })
 
+  // The whole point: a chat-built design could never carry real cotas before
+  // this, because a typed "10cm x 8cm" only ever landed as prose in
+  // notes/posDetail - renderDesignArtHero (buildPages.js) requires numeric
+  // w/h to draw dimension lines at all.
+  it("maps width/height designField values to numeric w/h in cm", () => {
+    const reqs = {
+      fields: [
+        { key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "known", value: "Logo Pecho", options: [], why: "", designSlot: "logo_pecho", designField: "name" },
+        { key: "logo_pecho_ancho", label: "Ancho (cm)", category: "design", status: "known", value: "10", options: [], why: "", designSlot: "logo_pecho", designField: "width" },
+        { key: "logo_pecho_alto", label: "Alto (cm)", category: "design", status: "known", value: "8", options: [], why: "", designSlot: "logo_pecho", designField: "height" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs[0]).toMatchObject({ w: 10, h: 8, unit: "cm" })
+  })
+
+  it("tolerates a model that still tacks unit text onto the width/height value", () => {
+    const reqs = {
+      fields: [
+        { key: "logo_pecho_ancho", label: "Ancho (cm)", category: "design", status: "known", value: "10cm", options: [], why: "", designSlot: "logo_pecho", designField: "width" },
+        { key: "logo_pecho_alto", label: "Alto (cm)", category: "design", status: "known", value: "8,5 cm", options: [], why: "", designSlot: "logo_pecho", designField: "height" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs[0]).toMatchObject({ w: 10, h: 8.5, unit: "cm" })
+  })
+
+  it("omits w/h/unit entirely when the model never tagged a width/height field - never a fabricated 0x0", () => {
+    const reqs = {
+      fields: [
+        { key: "logo_pecho_nombre", label: "Nombre", category: "design", status: "known", value: "Logo Pecho", options: [], why: "", designSlot: "logo_pecho", designField: "name" },
+      ],
+    }
+    const designs = reqsToDesigns(reqs)
+    expect(designs[0]).not.toHaveProperty("w")
+    expect(designs[0]).not.toHaveProperty("h")
+    expect(designs[0]).not.toHaveProperty("unit")
+  })
+
   it("falls back to humanized designSlot name when no name field exists", () => {
     const reqs = {
       fields: [
