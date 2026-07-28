@@ -29,7 +29,7 @@ import { buildReviewFindings } from "./core/reviewDiff.js"
 import { applyReviewAnswers } from "./core/applyReviewAnswers.js"
 import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
-import { getPaletteNames, palette, role, setPalette, type, space } from "./design/tokens.js"
+import { getPaletteNames, palette, role, setPalette, setCustomColor, CUSTOM_EDITABLE_KEYS, type, space } from "./design/tokens.js"
 import { GRID, PAGE } from "./design/metrics.js"
 import { deterministicPageLayout } from "./core/semanticOutline.js"
 
@@ -243,12 +243,37 @@ export default function App() {
     let name = "bauhaus"
     try { name = localStorage.getItem("techpack.palette") || "bauhaus" } catch {}
     setPalette(name)
+    try {
+      const custom = JSON.parse(localStorage.getItem("techpack.paletteCustom") || "{}")
+      for (const key of CUSTOM_EDITABLE_KEYS) if (custom[key]) setCustomColor(key, custom[key])
+    } catch {}
     return name
   })
+  // Bumped on every freehand color edit - setCustomColor() mutates palette/
+  // role in place (same reason as setPalette, see the comment above), so a
+  // plain object mutation needs a state change to force this component (and
+  // every uninvolved child, none memo'd) to actually re-render and pick it up.
+  const [paletteVersion, setPaletteVersion] = useState(0)
   function choosePalette(name) {
     setPalette(name)
     setPaletteName(name)
-    try { localStorage.setItem("techpack.palette", name) } catch {}
+    try {
+      localStorage.setItem("techpack.palette", name)
+      // Switching to a NAMED preset resets any freehand tweaks on top of it -
+      // "pick bauhaus" should give you bauhaus, not bauhaus-plus-a-leftover-
+      // custom-red from before.
+      localStorage.removeItem("techpack.paletteCustom")
+    } catch {}
+    setPaletteVersion((v) => v + 1)
+  }
+  function updateCustomColor(key, hex) {
+    setCustomColor(key, hex)
+    setPaletteVersion((v) => v + 1)
+    try {
+      const custom = JSON.parse(localStorage.getItem("techpack.paletteCustom") || "{}")
+      custom[key] = hex
+      localStorage.setItem("techpack.paletteCustom", JSON.stringify(custom))
+    } catch {}
   }
 
   useEffect(() => {
@@ -1090,11 +1115,14 @@ export default function App() {
       // this is just the place a designer is actually looking at when the
       // choice matters (about to add colors/artwork), with the printed-gray
       // check right there instead of buried in the app chrome.
+      // `key` is the underlying tokens.js primitive setCustomColor() edits -
+      // not just a display label, so each swatch's own <input type="color">
+      // can write straight back to it (index->red, priority->blue, etc).
       const paletteRoles = [
-        { label: uiLang === "EN" ? "Index" : "Índice", fill: role.index.fill },
-        { label: uiLang === "EN" ? "Priority" : "Prioridad", fill: role.priority.fill },
-        { label: uiLang === "EN" ? "Highlight" : "Resaltado", fill: role.highlight.fill },
-        { label: uiLang === "EN" ? "Structure" : "Estructura", fill: role.structure.fill },
+        { key: "red", label: uiLang === "EN" ? "Index" : "Índice", fill: role.index.fill },
+        { key: "blue", label: uiLang === "EN" ? "Priority" : "Prioridad", fill: role.priority.fill },
+        { key: "yellow", label: uiLang === "EN" ? "Highlight" : "Resaltado", fill: role.highlight.fill },
+        { key: "ink", label: uiLang === "EN" ? "Structure" : "Estructura", fill: role.structure.fill },
       ]
       return (
         <div>
@@ -1106,7 +1134,7 @@ export default function App() {
               <select
                 value={paletteName}
                 onChange={(e) => choosePalette(e.target.value)}
-                title={uiLang === "EN" ? "Color palette" : "Paleta de colores"}
+                title={uiLang === "EN" ? "Start from a preset" : "Partir de una paleta preestablecida"}
                 style={{ padding: `${space(1)}px ${space(2)}px`, border: hair, background: C.white.hex, color: C.ink.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", cursor: "pointer" }}
               >
                 {getPaletteNames().map((name) => (
@@ -1116,11 +1144,24 @@ export default function App() {
                 ))}
               </select>
             </div>
+            <p style={{ margin: "0 0 " + space(2) + "px", fontSize: type.size.xs, fontFamily: type.fonts.ui, color: C.ink.hex, opacity: 0.65 }}>
+              {uiLang === "EN"
+                ? "Pick a preset to start, then click any swatch below to set that exact color yourself."
+                : "Elegí una paleta para arrancar, y despues tocá cualquier color de abajo para ponerle el tono exacto que quieras."}
+            </p>
             <div style={{ display: "flex", gap: space(4), flexWrap: "wrap" }}>
               {paletteRoles.map((r) => (
                 <div key={r.label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: space(1) }}>
                   <div style={{ display: "flex" }}>
-                    <div style={{ width: 28, height: 28, background: r.fill, border: hair }} title={r.fill} />
+                    <label style={{ position: "relative", display: "block", cursor: "pointer" }} title={uiLang === "EN" ? "Click to pick this color" : "Toca para elegir este color"}>
+                      <div style={{ width: 28, height: 28, background: r.fill, border: hair }} />
+                      <input
+                        type="color"
+                        value={r.fill}
+                        onChange={(e) => updateCustomColor(r.key, e.target.value)}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: 0, padding: 0 }}
+                      />
+                    </label>
                     <div style={{ width: 28, height: 28, background: hexToGray(r.fill), border: hair }} title={uiLang === "EN" ? "Grayscale equivalent" : "Equivalente en gris"} />
                   </div>
                   <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.ui, color: C.ink.hex }}>{r.label}</span>

@@ -1,3 +1,5 @@
+import { hexToGray } from "../core/colorUtils.js"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DESIGN TOKENS — single source of truth for the whole app.
 //
@@ -191,6 +193,29 @@ export function setPalette(name) {
   resyncRoles()
   applyCssVars()
   return preset
+}
+
+// The five primitives a preset can vary (see PALETTES above) - the only keys
+// setCustomColor() is allowed to touch. Exported so a picker UI can build its
+// list of editable swatches without hardcoding this set a second time.
+export const CUSTOM_EDITABLE_KEYS = ["white", "yellow", "red", "blue", "ink"]
+
+// Freehand color editing, one primitive at a time - the picker's actual ask
+// ("dejame elegir yo cada color", not just pick among 3 presets). Mutates
+// `palette` in place exactly like setPalette() (see the comment above
+// `palette` itself for why: dozens of modules hold a live reference to this
+// SAME object). grayValue is recomputed from the real hex via hexToGray() -
+// never hand-typed - so it can never drift the way the original preset
+// values once did (see tokens.test.js's grayValue-matches-hexToGray guard).
+// Deliberately does NOT touch `activePaletteName`: picking "bauhaus" and then
+// nudging one color is "bauhaus, tweaked", not a fourth named preset - the
+// dropdown still tells you which built-in set you started from.
+export function setCustomColor(key, hex) {
+  if (!CUSTOM_EDITABLE_KEYS.includes(key) || !/^#[0-9a-fA-F]{6}$/.test(String(hex || ""))) return
+  palette[key].hex = hex
+  palette[key].grayValue = parseInt(hexToGray(hex).slice(1, 3), 16)
+  resyncRoles()
+  applyCssVars()
 }
 
 // ── Typography — 2 families, 3 roles ─────────────────────────────────────────

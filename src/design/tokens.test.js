@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { PALETTES, getActivePaletteName, getPaletteNames, palette, role, setPalette } from "./tokens.js"
+import { PALETTES, getActivePaletteName, getPaletteNames, palette, role, setPalette, setCustomColor, CUSTOM_EDITABLE_KEYS } from "./tokens.js"
 import { hexToGray } from "../core/colorUtils.js"
 
 // The default preset must reproduce EXACTLY today's hardcoded values - any
@@ -88,5 +88,40 @@ describe("tokens palette presets", () => {
         expect(color.grayValue, `${name}.${key}`).toBe(computed)
       }
     }
+  })
+
+  describe("setCustomColor - freehand editing, not just picking among presets", () => {
+    it("sets an editable primitive's hex and recomputes its grayValue from the real color", () => {
+      setCustomColor("red", "#00FF00")
+      expect(palette.red.hex).toBe("#00FF00")
+      expect(palette.red.grayValue).toBe(parseInt(hexToGray("#00FF00").slice(1, 3), 16))
+      expect(role.index.fill).toBe("#00FF00")
+    })
+
+    it("mutates the same palette/role objects in place, same discipline as setPalette", () => {
+      const paletteRef = palette
+      const roleRef = role
+      setCustomColor("blue", "#123456")
+      expect(palette).toBe(paletteRef)
+      expect(role).toBe(roleRef)
+    })
+
+    it("never touches activePaletteName - a tweaked preset is still that preset, not a fourth named one", () => {
+      setPalette("bauhaus")
+      setCustomColor("yellow", "#ABCDEF")
+      expect(getActivePaletteName()).toBe("bauhaus")
+    })
+
+    it("ignores a key outside CUSTOM_EDITABLE_KEYS and an invalid hex, without throwing", () => {
+      const before = palette.red.hex
+      setCustomColor("shell", "#00FF00")
+      expect(palette.red.hex).toBe(before)
+      setCustomColor("red", "not-a-hex")
+      expect(palette.red.hex).toBe(before)
+    })
+
+    it("CUSTOM_EDITABLE_KEYS matches exactly the five preset-varying primitives", () => {
+      expect(CUSTOM_EDITABLE_KEYS.sort()).toEqual(["blue", "ink", "red", "white", "yellow"])
+    })
   })
 })
