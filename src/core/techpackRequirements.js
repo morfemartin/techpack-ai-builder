@@ -791,9 +791,15 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "Antes de escribir una posicion, preguntate si esa parte existe en esta prenda. Unas medias no tienen pecho ni " +
     "espalda: sus ubicaciones son puno, tobillo, empeine, talon, planta. Un pantalon no tiene manga ni cuello. " +
     "Nombrar una parte que la prenda no tiene invalida la ficha entera.\n" +
-    "IMPORTANTE - se conciso: una prenda tipica tiene 1 a 4 elementos de diseno reales que merecen su propia pagina. " +
-    "No inventes elementos que no tengan sentido para esta prenda especifica y los campos generales ya definidos. " +
-    "Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +
+    "REGLA DURA - NO agregues elementos de relleno: devolve SOLO los elementos de diseno que los campos generales, " +
+    "el tipo de prenda o el usuario YA establecieron o implicaron claramente. Un elemento de diseno real tiene una " +
+    "razon concreta para existir en ESTA prenda - si no podes justificar por que existe con lo que ya sabes, no lo " +
+    "inventes. Errores observados en produccion, NUNCA los repitas: proponer 'hebillas' o un 'logo bordado en el " +
+    "pecho' para una prenda cuyos campos generales no mencionan hebillas ni un logo de pecho - eso es ruido, no un " +
+    "elemento real. Si ya identificaste UN elemento genuino (ej. una etiqueta tejida) y no hay evidencia de ningun " +
+    "otro, devolve SOLO ese uno; NO sigas buscando un segundo o tercer elemento para completar una cuota. " +
+    "La mayoria de prendas tienen 0 a 2 elementos de diseno reales, no 1 a 4 - una cifra mas alta es la excepcion, " +
+    "nunca el objetivo. Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +
     "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
     '{"garmentType": "' + garmentType + '", "fields": [' +
     '{"key": "identificadorUnico", "label": "Etiqueta en espanol", "category": "design", "designSlot": "slot_id", "designField": "name|position|technique|driveLink|width|height|detail", ' +
