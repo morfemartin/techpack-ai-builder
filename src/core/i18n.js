@@ -457,6 +457,23 @@ export function uiMissingQuestions(uiLang, count) {
   return count === 1 ? "Falta 1 pregunta." : `Faltan ${count} preguntas.`
 }
 
+// Announces that an answer silenced other pending questions (see
+// garmentAnatomy.js's mootFieldsFromAnswer - "no lleva botones" stops the
+// walk from still asking button color/count/ojales). Never silent: the user
+// sees exactly what got skipped and why, and can still "↩ Atras" to bring
+// them back if the pruning guessed wrong.
+export function uiMootedFields(uiLang, count) {
+  if (uiLang === "EN") return `(skipped ${count} related question${count === 1 ? "" : "s"} - already covered by "no")`
+  return `(salteé ${count} pregunta${count === 1 ? "" : "s"} relacionada${count === 1 ? "" : "s"} - ya contestada por "no")`
+}
+
+// The derived value stored on a moot-pruned field - it must say something,
+// not sit empty, since a factory reading the finished sheet should see WHY
+// this was never asked instead of a blank cell.
+export function uiMootedValue(uiLang, answerValue) {
+  return uiLang === "EN" ? `Not applicable (${answerValue})` : `No aplica (${answerValue})`
+}
+
 export function uiPageDesignFailed(uiLang, index, pageName, reason) {
   const suffix = reason ? (uiLang === "EN" ? ` (${reason})` : ` (${reason})`) : ""
   return (uiLang === "EN"

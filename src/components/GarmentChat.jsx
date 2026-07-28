@@ -3,7 +3,7 @@ import { DeepSeekError } from "../core/deepseekClient.js"
 import {
   analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
   looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
-  attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements,
+  attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements, fieldsMootedByAnswer, pruneMootFields,
 } from "../core/techpackRequirements.js"
 import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
 import { authorProductionQuestions } from "../core/productionReview.js"
@@ -13,6 +13,7 @@ import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 import {
   UI, uiAssumedStandard, uiPhotoConfirmedFields, uiAnalysisFailedPrefix, uiAddedFields, uiMissingQuestions, uiFieldsDetectedSuffix,
+  uiMootedFields, uiMootedValue,
 } from "../core/i18n.js"
 
 const C = palette
@@ -444,10 +445,18 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
 
   function submitAnswer(value) {
     post("user", value)
-    setAnswerStack((s) => [...s, { key: currentField.key, phase }])
-    const nextReqs = applyAnswer(reqs, currentField.key, value)
-    setReqs(nextReqs)
-    askNext(nextReqs, currentField.category)
+    const answeredKey = currentField.key
+    const nextReqs = applyAnswer(reqs, answeredKey, value)
+    // "no lleva botones" must stop the walk from still asking button color/
+    // count/ojales (the literal complaint this fixes) - see garmentAnatomy.js's
+    // topic table. Pruned fields are marked ASSUMED with a derived value, never
+    // deleted, so goBack can restore them exactly like the answer itself.
+    const mootKeys = fieldsMootedByAnswer(nextReqs, answeredKey, value)
+    const finalReqs = mootKeys.length > 0 ? pruneMootFields(nextReqs, mootKeys, uiMootedValue(uiLang, value)) : nextReqs
+    setAnswerStack((s) => [...s, { key: answeredKey, phase, mootedKeys: mootKeys }])
+    setReqs(finalReqs)
+    if (mootKeys.length > 0) post("assistant", uiMootedFields(uiLang, mootKeys.length))
+    askNext(finalReqs, currentField.category)
   }
 
   // "Corregir: X" on the photo-confirmation batch (see runAnalysis) - puts
@@ -483,7 +492,11 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     if (answerStack.length === 0 || sending) return
     const top = answerStack[answerStack.length - 1]
     if (top.phase !== phase) return
-    const reverted = revertField(reqs, top.key)
+    // Undoing an answer must also undo whatever it silenced - otherwise
+    // "no lleva botones" gets reverted but the button questions it pruned
+    // stay gone, a silent data-loss trap the user has no way to notice.
+    let reverted = revertField(reqs, top.key)
+    for (const mootedKey of top.mootedKeys || []) reverted = revertField(reverted, mootedKey)
     setReqs(reverted)
     setAnswerStack((s) => s.slice(0, -1))
     const field = reverted.fields.find((f) => f.key === top.key)

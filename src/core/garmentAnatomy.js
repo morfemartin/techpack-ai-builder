@@ -73,6 +73,45 @@ export function incoherentPart(field, family) {
   return hit ? hit.part : null
 }
 
+// Which questions become moot once THIS one is answered "none" - e.g. once
+// the user says "no lleva botones", the walker must stop asking button
+// color/count/ojales, not plow through them anyway (observed live: the chat
+// visibly ignored a direct answer and kept interrogating a closed topic).
+// Each topic's `subject` matches BOTH the answered field (to find which
+// topic it belongs to) and every OTHER still-pending field in that same
+// topic (to find what becomes moot) - so answering ANY question inside a
+// topic with a "none"-shaped value silences the rest of that same topic.
+// Deliberately narrow and offline: no AI call, no risk of over-pruning a
+// genuine follow-up question outside the topic.
+// "ningun" has no trailing \b - Spanish inflects it ("ninguno", "ninguna",
+// "ningunos"). The rest are fixed word-forms in this context, so they keep
+// both boundaries for precision (no false match inside a longer word).
+const NONE_VALUE = /\b(sin|no lleva|no tiene|no aplica|none|not applicable)\b|\bningun/
+// No trailing \b on purpose - Spanish inflects ("boton" -> "botones",
+// "capuch" -> "capucha"), so anchoring only the START (matching this file's
+// existing IMPOSSIBLE_PARTS style) is what actually matches real labels.
+const MOOT_TOPICS = [
+  { subject: /\b(cierre|closure|zipper|cremallera|boton|button|ojal|buttonhole|tapeta|placket|broche|snap|velcro|bragueta|\bfly\b)/ },
+  { subject: /\b(bolsillo|pocket)/ },
+  { subject: /\b(capuch|hood)/ },
+  { subject: /\b(forro|lining|entretela)/ },
+  { subject: /\b(cordon|drawcord|drawstring)/ },
+]
+
+// Returns the keys of other still-pending ("ask") fields made moot by
+// answering `answeredField` with `value` - empty array if the answer does
+// not say "none" or the field does not belong to a recognized topic. Never
+// touches design fields or fields already known/assumed.
+export function mootFieldsFromAnswer(fields, answeredField, value) {
+  if (!answeredField || !NONE_VALUE.test(normalize(value))) return []
+  const answeredSubject = fieldSubject(answeredField)
+  const topic = MOOT_TOPICS.find((t) => t.subject.test(answeredSubject))
+  if (!topic) return []
+  return (fields || [])
+    .filter((f) => f && f.key !== answeredField.key && f.category === "general" && f.status === "ask" && topic.subject.test(fieldSubject(f)))
+    .map((f) => f.key)
+}
+
 // Removes model-generated general fields that describe a part the identified
 // garment cannot have. Returns the trimmed reqs plus the human-readable list of
 // what was dropped (so a caller can log it or show "descarté: capucha, cierre").

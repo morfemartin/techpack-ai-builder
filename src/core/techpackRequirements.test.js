@@ -54,6 +54,37 @@ describe("answerFromSeed (photo already answered it)", () => {
     expect(out.fields.find((f) => f.key === "cuello").fromSeed).toBe(true)
     expect(out.fields.find((f) => f.key === "talles").fromSeed).toBeUndefined()
   })
+
+  // The model's field list used to be the only thing that decided what the
+  // user ever sees - a seed fact with no fuzzy label match anywhere in it
+  // (e.g. a real detail the photo caught that the model just never thought
+  // to ask about) silently vanished. Ported from requirementLayers.js's
+  // fallback-only "Evidencia recibida" idiom onto this live path.
+  it("keeps a seed fact the model's field list never named at all, as its own known field", () => {
+    const out = answerFromSeed(reqs(), { "Cuello visible": "Redondo rib", "Bolsillo canguro": "Si, con cordon" })
+    const evidence = out.fields.find((f) => f.label === "Bolsillo canguro")
+    expect(evidence).toBeTruthy()
+    expect(evidence.status).toBe("known")
+    expect(evidence.value).toBe("Si, con cordon")
+    expect(evidence.fromSeed).toBe(true)
+    expect(evidence.layer).toBe("Evidencia recibida")
+    // still answers the field it DOES match, same as before
+    expect(out.fields.find((f) => f.key === "cuello").status).toBe("known")
+  })
+
+  it("gives each unmatched seed fact a unique key, even with duplicate/empty labels", () => {
+    const out = answerFromSeed(reqs(), { "Bolsillo canguro": "Si", "Refuerzo hombro": "Si" })
+    const keys = out.fields.filter((f) => f.layer === "Evidencia recibida").map((f) => f.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(keys.length).toBe(2)
+  })
+
+  it("does not turn an all-stopword seed label into evidence noise", () => {
+    // "Tipo visible" shares no real subject with anything - same floor the
+    // field-matching side already applies (see the stopword test above).
+    const out = answerFromSeed(reqs(), { "Tipo visible": "algo" })
+    expect(out.fields.some((f) => f.layer === "Evidencia recibida")).toBe(false)
+  })
 })
 
 describe("normalizeRequirements dedup", () => {

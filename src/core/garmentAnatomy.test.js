@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classifyGarmentFamily, incoherentPart, dropIncoherentFields } from "./garmentAnatomy.js"
+import { classifyGarmentFamily, incoherentPart, dropIncoherentFields, mootFieldsFromAnswer } from "./garmentAnatomy.js"
 
 describe("classifyGarmentFamily", () => {
   it("maps light knit tops to the tee family", () => {
@@ -92,5 +92,50 @@ describe("dropIncoherentFields", () => {
       fields: [{ key: "closure", label: "Cierre", category: "general", status: "ask", value: "", options: ["a", "b"] }],
     }
     expect(dropIncoherentFields(reqs).fields).toHaveLength(1)
+  })
+})
+
+describe("mootFieldsFromAnswer", () => {
+  const buttonFields = [
+    { key: "has_buttons", label: "¿Lleva botones?", category: "general", status: "ask" },
+    { key: "button_count", label: "Cantidad de botones", category: "general", status: "ask" },
+    { key: "button_material", label: "Material de los botones", category: "general", status: "ask" },
+    { key: "buttonholes", label: "Ojales", category: "general", status: "ask" },
+    { key: "fabric", label: "Tela principal", category: "general", status: "ask" },
+  ]
+
+  it("silences the rest of the same topic when the answer says 'none' - the literal 'no lleva botones' complaint", () => {
+    const answered = buttonFields[0]
+    const moot = mootFieldsFromAnswer(buttonFields, answered, "No lleva botones")
+    expect(moot.sort()).toEqual(["button_count", "button_material", "buttonholes"])
+    // an unrelated field is never touched
+    expect(moot).not.toContain("fabric")
+    // the answered field itself is never in its own moot list
+    expect(moot).not.toContain("has_buttons")
+  })
+
+  it("recognizes several phrasings of 'none'", () => {
+    for (const value of ["Sin cierre", "Ninguno", "No tiene", "no aplica", "None"]) {
+      expect(mootFieldsFromAnswer(buttonFields, buttonFields[0], value).length).toBeGreaterThan(0)
+    }
+  })
+
+  it("does nothing when the answer is a real choice, not a 'none'", () => {
+    expect(mootFieldsFromAnswer(buttonFields, buttonFields[0], "Si, 4 botones")).toEqual([])
+  })
+
+  it("only moots fields still pending 'ask' - never re-opens known/assumed/design fields", () => {
+    const mixed = [
+      { key: "has_buttons", label: "¿Lleva botones?", category: "general", status: "ask" },
+      { key: "button_count", label: "Cantidad de botones", category: "general", status: "known", value: "4" },
+      { key: "button_material", label: "Material de los botones", category: "general", status: "assumed", value: "plastico" },
+      { key: "button_logo", label: "Botón con logo", category: "design", status: "ask" },
+    ]
+    expect(mootFieldsFromAnswer(mixed, mixed[0], "No lleva botones")).toEqual([])
+  })
+
+  it("does nothing for a field outside any recognized topic", () => {
+    const fields = [{ key: "fabric", label: "Tela principal", category: "general", status: "ask" }]
+    expect(mootFieldsFromAnswer(fields, fields[0], "No aplica")).toEqual([])
   })
 })

@@ -15,7 +15,7 @@ import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClien
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
 import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk, sortFieldsForIntake } from "./requirementLayers.js"
-import { dropIncoherentFields } from "./garmentAnatomy.js"
+import { dropIncoherentFields, mootFieldsFromAnswer } from "./garmentAnatomy.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
 // cap (finish_reason: "length") still carries real, mostly-complete JSON -
@@ -202,6 +202,12 @@ function subjectTokens(label) {
   )
 }
 
+function slugKey(text) {
+  return String(text || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 36)
+}
+
 // The photo already answered some of these. The vision seed arrives as
 // {"Cierre visible": "sin cierre", "Cuello visible": "redondo", ...}; a weak
 // model is told not to re-ask what the seed covers but often does anyway. So
@@ -213,13 +219,14 @@ function subjectTokens(label) {
 export function answerFromSeed(reqs, seed) {
   const entries = Object.entries(seed || {}).filter(([, v]) => String(v || "").trim())
   if (entries.length === 0) return reqs
-  const seedSubjects = entries.map(([label, value]) => ({ tokens: subjectTokens(label), value: String(value).trim() }))
+  const seedSubjects = entries.map(([label, value]) => ({ label, tokens: subjectTokens(label), value: String(value).trim(), matched: false }))
   const fields = (reqs.fields || []).map((field) => {
     if (field.category !== "general" || field.status !== FIELD_STATUS.ASK) return field
     const tokens = subjectTokens(field.label)
     if (tokens.size === 0) return field
     const hit = seedSubjects.find((s) => [...s.tokens].some((t) => tokens.has(t)))
     if (!hit) return field
+    hit.matched = true
     // Marks a field the PHOTO answered (not the model's own reasoning), so
     // GarmentChat.jsx can show it in one batch confirmation ("Del analisis de
     // fotos tome: ... ¿todo correcto?") instead of silently locking it in -
@@ -227,7 +234,30 @@ export function answerFromSeed(reqs, seed) {
     // get, just for evidence instead of a guess.
     return { ...field, status: FIELD_STATUS.KNOWN, value: hit.value, fromSeed: true }
   })
-  return { ...reqs, fields }
+  // A seed fact the model's own field list never named at all (not even a
+  // fuzzy label match) used to just vanish here - the photo saw it, nobody
+  // asked about it, and it never reached the user in any form. Same
+  // "Evidencia recibida" idiom as buildLayeredRequirements' fallback path
+  // (requirementLayers.js), ported to the LIVE path: kept as its own KNOWN
+  // field, `fromSeed: true` so it lands in the exact same batch-confirmation
+  // panel GarmentChat.jsx already shows for matched seed facts - never
+  // silently trusted, always something the user can correct.
+  // tokens.size === 0 means the label was all stopwords ("Tipo visible") -
+  // not a real identifiable subject, so there is nothing meaningful to show
+  // as "evidence"; same floor the field-matching loop above already applies.
+  const unmatched = seedSubjects.filter((s) => !s.matched && s.tokens.size > 0)
+  const evidence = unmatched.map((s, index) => ({
+    key: "observed_" + (slugKey(s.label) || "fact") + "_" + index,
+    label: s.label,
+    category: "general",
+    layer: "Evidencia recibida",
+    status: FIELD_STATUS.KNOWN,
+    value: s.value,
+    options: [],
+    why: "",
+    fromSeed: true,
+  }))
+  return { ...reqs, fields: [...fields, ...evidence] }
 }
 
 // Defensive shaping so the walker helpers can trust the structure regardless
@@ -560,6 +590,35 @@ export function skipField(reqs, key) {
       if (!f || f.key !== key) return f
       return { ...f, status: FIELD_STATUS.ASSUMED, value: "" }
     }),
+  }
+}
+
+// Which pending "ask" fields a just-given answer makes moot (e.g. "no lleva
+// botones" silences the rest of that same button sub-questionnaire - see
+// garmentAnatomy.js's mootFieldsFromAnswer for the topic table). Exposed here
+// so GarmentChat.jsx only ever imports from this module for the walk, same
+// as skipField/applyAnswer/revertField.
+export function fieldsMootedByAnswer(reqs, answeredKey, value) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  const answeredField = fields.find((f) => f && f.key === answeredKey)
+  return mootFieldsFromAnswer(fields, answeredField, value)
+}
+
+// Marks each of `keys` ASSUMED with a derived value explaining WHY it was
+// never asked (idiom of skipField, just for many keys at once and a real
+// value instead of an empty one - a factory reading the finished sheet
+// should see "No aplica (sin botones)", not a blank). NEVER deletes fields
+// from the array - goBack/revertField can only flip a field's status, not
+// resurrect a removed entry, so pruning must stay reversible the same way.
+// `moot: true` tags these apart from the model's own "assumed" defaults, so
+// a caller (goBack) can tell "the model assumed this" from "an answer
+// silenced this" without re-deriving it.
+export function pruneMootFields(reqs, keys, derivedValue) {
+  if (!keys || keys.length === 0) return reqs
+  const keySet = new Set(keys)
+  return {
+    ...reqs,
+    fields: (reqs.fields || []).map((f) => (f && keySet.has(f.key) ? { ...f, status: FIELD_STATUS.ASSUMED, value: derivedValue, moot: true } : f)),
   }
 }
 
