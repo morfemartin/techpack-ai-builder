@@ -24,13 +24,21 @@
 // presets existed) and MUST stay the default so an existing document's colors
 // never change under anyone who doesn't touch the switcher - see the
 // byte-identical-default guarantee in tokens.test.js.
+// grayValue is the ACTUAL perceptual-luminance gray colorUtils.js's
+// hexToGray()/toGrayscale() compute for this hex (y = round(0.299r +
+// 0.587g + 0.114b)) - not a hand-picked approximation. These were
+// hand-authored once and had drifted from what really gets printed (e.g.
+// bauhaus red documented as 114, really 91) - a palette picker showing
+// "this is the gray you'll get" must show the real number, so they are
+// now the computed ones (verified in tokens.test.js against hexToGray
+// itself, not just repeated by hand a second time).
 export const PALETTES = {
   bauhaus: {
     white: { hex: "#FFFFFF", grayValue: 255 },
-    yellow: { hex: "#F5C518", grayValue: 200 },
-    red: { hex: "#E11D3A", grayValue: 114 },
-    blue: { hex: "#1A3FB0", grayValue: 76 },
-    ink: { hex: "#141518", grayValue: 25 },
+    yellow: { hex: "#F5C518", grayValue: 192 },
+    red: { hex: "#E11D3A", grayValue: 91 },
+    blue: { hex: "#1A3FB0", grayValue: 65 },
+    ink: { hex: "#141518", grayValue: 21 },
   },
   // Print-safe monochrome: same roles, no hue at all - for a factory whose
   // proofing is black/white anyway, or a designer who wants the exported SVG
@@ -42,7 +50,7 @@ export const PALETTES = {
     yellow: { hex: "#D8D8D8", grayValue: 216 },
     red: { hex: "#3A3A3A", grayValue: 58 },
     blue: { hex: "#6B6B6B", grayValue: 107 },
-    ink: { hex: "#141518", grayValue: 25 },
+    ink: { hex: "#141518", grayValue: 21 },
   },
   // A cooler alternate accent set - same B/W-legible spread requirement as
   // bauhaus, just a different hue family (teal/violet/amber instead of
@@ -50,10 +58,10 @@ export const PALETTES = {
   // client brand by editing just these three hex values.
   signal: {
     white: { hex: "#FFFFFF", grayValue: 255 },
-    yellow: { hex: "#F59E0B", grayValue: 176 },
-    red: { hex: "#7C3AED", grayValue: 97 },
-    blue: { hex: "#0F766E", grayValue: 84 },
-    ink: { hex: "#141518", grayValue: 25 },
+    yellow: { hex: "#F59E0B", grayValue: 167 },
+    red: { hex: "#7C3AED", grayValue: 98 },
+    blue: { hex: "#0F766E", grayValue: 86 },
+    ink: { hex: "#141518", grayValue: 21 },
   },
 }
 
@@ -61,11 +69,11 @@ const DEFAULT_PALETTE = "bauhaus"
 let activePaletteName = DEFAULT_PALETTE
 
 // ── Primitive palette ────────────────────────────────────────────────────────
-// Five values. `grayValue` is the approximate 0–255 gray each maps to when
-// printed / photocopied in black & white — they are deliberately spread out so
-// the whole system stays legible with no color at all (a hard requirement for a
-// factory tech pack). Ramp, lightest → darkest:
-//   white 255 › yellow ~200 › red ~114 › blue ~76 › ink ~25
+// Five values. `grayValue` is the real 0–255 gray each maps to when printed /
+// photocopied in black & white (computed via colorUtils.js's hexToGray) —
+// they are deliberately spread out so the whole system stays legible with no
+// color at all (a hard requirement for a factory tech pack). Ramp, lightest
+// → darkest (bauhaus): white 255 › yellow 192 › red 91 › blue 65 › ink 21.
 //
 // `palette` and `role` below are MUTATED IN PLACE by setPalette(), never
 // reassigned - every module that did `import { palette } from "./tokens.js"`

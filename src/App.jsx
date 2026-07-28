@@ -8,7 +8,7 @@ import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, 
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
 import { localProviderLabel } from "./core/hybridAI.js"
 import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
-import { toGrayscale } from "./core/colorUtils.js"
+import { toGrayscale, hexToGray } from "./core/colorUtils.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
@@ -131,6 +131,13 @@ function describeAIError(error) {
   if (typeof error.status === "number") return "HTTP " + error.status + (error.detail ? ": " + error.detail : "")
   if (error.networkError) return "fallo de red"
   return String((error && error.message) || error).slice(0, 140)
+}
+
+// The 0-255 gray colorUtils.js's toGrayscale() actually prints for this hex -
+// hexToGray() returns a "#rrggbb" gray string (R=G=B), so this just reads the
+// number back out for display next to a swatch.
+function grayValueOf(hex) {
+  return parseInt(hexToGray(hex).slice(1, 3), 16)
 }
 
 function newDesign() {
@@ -1076,8 +1083,52 @@ export default function App() {
 
     if (step === 4) {
       const positions = garment.positions.ES
+      // Where the user asked for this, not App.jsx's own header: "un
+      // marcador antes o en el momento donde se ponen los disenos que te
+      // permita elegir la paleta, senalando cual es cada color en escala de
+      // grises" - the header select (further down) picks the SAME palette,
+      // this is just the place a designer is actually looking at when the
+      // choice matters (about to add colors/artwork), with the printed-gray
+      // check right there instead of buried in the app chrome.
+      const paletteRoles = [
+        { label: uiLang === "EN" ? "Index" : "Índice", fill: role.index.fill },
+        { label: uiLang === "EN" ? "Priority" : "Prioridad", fill: role.priority.fill },
+        { label: uiLang === "EN" ? "Highlight" : "Resaltado", fill: role.highlight.fill },
+        { label: uiLang === "EN" ? "Structure" : "Estructura", fill: role.structure.fill },
+      ]
       return (
         <div>
+          <div style={{ marginBottom: space(4), border: hair, background: C.white.hex, padding: space(3) }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space(2), marginBottom: space(2) }}>
+              <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.ui, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: C.ink.hex }}>
+                {uiLang === "EN" ? "Document palette" : "Paleta del documento"}
+              </span>
+              <select
+                value={paletteName}
+                onChange={(e) => choosePalette(e.target.value)}
+                title={uiLang === "EN" ? "Color palette" : "Paleta de colores"}
+                style={{ padding: `${space(1)}px ${space(2)}px`, border: hair, background: C.white.hex, color: C.ink.hex, fontSize: type.size.xs, fontFamily: type.fonts.data, textTransform: "uppercase", cursor: "pointer" }}
+              >
+                {getPaletteNames().map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: "flex", gap: space(4), flexWrap: "wrap" }}>
+              {paletteRoles.map((r) => (
+                <div key={r.label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: space(1) }}>
+                  <div style={{ display: "flex" }}>
+                    <div style={{ width: 28, height: 28, background: r.fill, border: hair }} title={r.fill} />
+                    <div style={{ width: 28, height: 28, background: hexToGray(r.fill), border: hair }} title={uiLang === "EN" ? "Grayscale equivalent" : "Equivalente en gris"} />
+                  </div>
+                  <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.ui, color: C.ink.hex }}>{r.label}</span>
+                  <span style={{ fontSize: 9, fontFamily: type.fonts.data, color: role.structure.fill, opacity: 0.7 }}>{grayValueOf(r.fill)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
           {designs.map((d, i) => {
             var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
             return (

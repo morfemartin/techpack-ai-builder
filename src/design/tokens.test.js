@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { PALETTES, getActivePaletteName, getPaletteNames, palette, role, setPalette } from "./tokens.js"
+import { hexToGray } from "../core/colorUtils.js"
 
 // The default preset must reproduce EXACTLY today's hardcoded values - any
 // document generated before presets existed must render identically unless
@@ -72,6 +73,20 @@ describe("tokens palette presets", () => {
     for (const name of getPaletteNames()) {
       expect(PALETTES[name].white.hex).toBe("#FFFFFF")
       expect(PALETTES[name].ink.hex).toBe("#141518")
+    }
+  })
+
+  // Each grayValue used to be hand-picked and had drifted from what the
+  // export's actual toGrayscale()/hexToGray() post-processor computes (e.g.
+  // bauhaus red documented as 114, really 91) - a palette picker showing
+  // "this is the gray you'll get" is only honest if the number IS that
+  // computation, not a second hand-typed guess that can drift again.
+  it("every grayValue matches what hexToGray() actually computes for its hex - never a hand-typed guess", () => {
+    for (const name of getPaletteNames()) {
+      for (const [key, color] of Object.entries(PALETTES[name])) {
+        const computed = parseInt(hexToGray(color.hex).slice(1, 3), 16)
+        expect(color.grayValue, `${name}.${key}`).toBe(computed)
+      }
     }
   })
 })
