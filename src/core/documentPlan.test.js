@@ -193,6 +193,44 @@ describe("document plan AI wrappers", () => {
     expect(telemetry.repairs).toContain("restored 9 to upper before semantic refinement")
   })
 
+  // Observed live as a 413 that failed the entire document plan: a design's
+  // base64 `imageData` (hundreds of KB) was JSON.stringify'd straight into
+  // the TEXT prompt, blowing the studio bridge's 120000-char per-message cap.
+  // Even when it fit, it buried the few facts the planner reasons about.
+  it("never ships a design's base64 artwork into the prompt, only its specs", async () => {
+    const bigBase64 = "A".repeat(200000)
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "X", purpose: "cover" }] }))
+    await planDocumentOutline({
+      garmentType: "Campera",
+      parts: [{ id: 1, val: "Tela", on: true }],
+      designs: [{
+        name: "Logo pecho", pos: "Pecho", tec: "Bordado Plano", w: 10, h: 8, unit: "cm",
+        colors: [{ name: "Negro", hex: "#000000" }],
+        imageData: bigBase64, imageType: "png", imgNatW: 1200, imgNatH: 900,
+      }],
+    })
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).not.toContain(bigBase64)
+    expect(prompt.length).toBeLessThan(10000)
+    // the facts it DOES need survive
+    expect(prompt).toContain("Logo pecho")
+    expect(prompt).toContain("Bordado Plano")
+    expect(prompt).toContain("hasArtwork")
+    expect(prompt).toContain("colorCount")
+  })
+
+  it("strips the artwork blob on the per-page prompt too, where the cost is multiplied by page count", async () => {
+    const bigBase64 = "B".repeat(200000)
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ regions: [{ type: "header" }, { type: "illustration" }] }))
+    await planPageLayout(
+      { id: "d1", title: "Logo", purpose: "design:Logo pecho" },
+      { garmentType: "Campera", parts: [], designs: [{ name: "Logo pecho", tec: "Bordado Plano", imageData: bigBase64 }], lang: "ES" }
+    )
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).not.toContain(bigBase64)
+    expect(prompt).toContain("Logo pecho")
+  })
+
   it("gives the model the confirmed textile brief instead of only names and parts", async () => {
     deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] }))
     await planDocumentOutline({

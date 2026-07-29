@@ -5,6 +5,7 @@ import { repairOutline, repairPage } from "../pages/pageContracts.js"
 import { buildSemanticOutline } from "./semanticOutline.js"
 import { deterministicPageLayout } from "./semanticOutline.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
+import { hasEmbSpecs } from "./helpers.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
 const REMOTE_PLANNING_TIMEOUT_MS = 45000
@@ -188,6 +189,42 @@ export function extractLastCompletedRegionType(text) {
   return last
 }
 
+// A design object carries the uploaded artwork as a base64 `imageData` blob
+// (plus imgNatW/H) - hundreds of KB per design. JSON.stringify'ing the raw
+// design into a TEXT prompt shipped that blob to the model, which (a) blew
+// the studio bridge's 120000-char per-message cap outright - observed live
+// as a 413 that failed the whole document plan - and (b) even when it fit,
+// buried the handful of facts the planner actually reasons about under a
+// wall of base64 it can do nothing with. Layout planning needs the design's
+// IDENTITY and SPECS, never its pixels.
+function promptSafeDesigns(designs) {
+  return (Array.isArray(designs) ? designs : []).map((design) => {
+    const safe = {
+      name: design && design.name,
+      pos: design && design.pos,
+      posDetail: design && design.posDetail,
+      tec: design && design.tec,
+    }
+    if (design && design.w) safe.w = design.w
+    if (design && design.h) safe.h = design.h
+    if (design && design.unit) safe.unit = design.unit
+    // Counts, not contents: the planner decides whether a page needs a
+    // colorSpecs/embSpecs block, which depends on WHETHER data exists and
+    // roughly how much - never on each hex or stop row.
+    if (design && Array.isArray(design.colors) && design.colors.length) safe.colorCount = design.colors.length
+    if (design && hasEmbSpecs(design.emb)) safe.hasEmbroiderySheet = true
+    if (design && design.imageData) safe.hasArtwork = true
+    return safe
+  })
+}
+
+// Same discipline for parts: only the fields the planner groups/paginates by.
+function promptSafeParts(parts) {
+  return (Array.isArray(parts) ? parts : [])
+    .filter((part) => part && part.on !== false)
+    .map((part) => ({ id: part.id, val: part.val, ...(part.system ? { system: part.system } : {}) }))
+}
+
 export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal, onStatus, signal, providers } = {}) {
   const context = { garmentType, parts, designs, brief, lang, providers }
   const instructions =
@@ -196,8 +233,8 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
     "2. ¿Que no se repite nunca? Cada id de pieza activa debe aparecer exactamente una vez entre las paginas estructurales. NO concentres un BOM grande en una pagina general si puede dividirse con sentido. Los datos de un diseno viven solo en su pagina.\n" +
     "3. ¿Que agrupo? Piezas que la fabrica monta juntas y que el ilustrador necesita ver juntas (cuerpo, capucha/cuello, mangas/punos, cierres/bolsillos, interior, accesorios). Maximo 8 ids por pagina; si un sistema excede el limite, dividilo en subobjetivos coherentes.\n\n" +
     "Prenda: " + safeString(garmentType, "custom") + "\n" +
-    "Piezas conocidas (cada una con su id): " + JSON.stringify(parts || []) + "\n" +
-    "Disenos conocidos: " + JSON.stringify(designs || []) + "\n" +
+    "Piezas conocidas (cada una con su id): " + JSON.stringify(promptSafeParts(parts)) + "\n" +
+    "Disenos conocidos: " + JSON.stringify(promptSafeDesigns(designs)) + "\n" +
     "Brief textil confirmado (no inventes ni contradigas estos datos): " + JSON.stringify(brief || {}) + "\n" +
     "Idioma: " + lang + "\n\n" +
     "Para cada pagina estructural indica \"pieces\": los ids que cubre, \"objective\": la mision tecnica y \"views\": las vistas necesarias. Cada id debe aparecer exactamente una vez.\n" +
@@ -255,10 +292,13 @@ export async function planPageLayout(pageOutline, context, { onProgress, onStatu
     "Sos disenador de layout para fichas tecnicas textiles. Para ESTA pagina, repartí el espacio por jerarquia visual usando solamente este vocabulario cerrado de bloques hoja: " +
     "header, titleBar, illustration, partsList, colorSpecs, embSpecs, note, spacer, disclaimer.\n\n" +
     "Pagina: " + JSON.stringify(page) + "\n" +
+    // Same base64/bulk stripping as planDocumentOutline - see promptSafeDesigns.
+    // This path runs ONCE PER PAGE, so an unstripped design blob multiplied the
+    // waste (and the 413 risk) by the page count.
     "Contexto: " + JSON.stringify({
       garmentType: context && context.garmentType,
-      parts: context && context.parts,
-      designs: context && context.designs,
+      parts: promptSafeParts(context && context.parts),
+      designs: promptSafeDesigns(context && context.designs),
       brief: context && context.brief,
       lang: context && context.lang,
     }) + "\n\n" +

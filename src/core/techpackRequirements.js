@@ -15,7 +15,7 @@ import { deepseekChat, deepseekChatStream, DeepSeekError } from "./deepseekClien
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { repairTruncatedJSON } from "./jsonSalvage.js"
 import { buildLayeredRequirements, enrichLayersWithModel, mergeAdditionalGeneralAsk, sortFieldsForIntake } from "./requirementLayers.js"
-import { dropIncoherentFields, mootFieldsFromAnswer } from "./garmentAnatomy.js"
+import { dropIncoherentFields, mootFieldsFromAnswer, dropContradictedDesignFields } from "./garmentAnatomy.js"
 import { parseMeasure } from "./units.js"
 
 // Shared by the three DeepSeek calls below: a response cut off by the token
@@ -766,7 +766,11 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "Ya tenemos definidos los campos de construccion general (tela, cuello, manga, etc.): " + generalText + ". " +
     "Ahora pensa SOLO en elementos DISCRETOS que necesitan su propia pagina de diseno en la ficha tecnica: " +
     "cosas con su propio arte/referencia, un link de Drive, o una especificacion de bordado/estampado/parche/etiqueta/herraje personalizado. " +
-    "NO preguntes de nuevo por atributos de construccion planos (esos ya estan).\n\n" +
+    "NO preguntes de nuevo por atributos de construccion planos (esos ya estan).\n" +
+    "REGLA DURA - respeta las respuestas que el usuario YA dio: si un campo general dice 'Sin X', 'No aplica', " +
+    "'Ninguno' o 'No lleva X', ese elemento NO EXISTE en esta prenda y NO puede tener pagina de diseno ni una sola " +
+    "pregunta. Preguntarlo de nuevo despues de que el usuario dijo que no le hace perder la confianza en la ficha. " +
+    "Tampoco vuelvas a preguntar un dato que los campos generales de arriba YA responden.\n\n" +
     "Para cada elemento de diseno, pensalo como un GRUPO de 2 a 4 campos relacionados que juntos describen ESE elemento. " +
     "Todos los campos de un mismo grupo comparten un mismo 'designSlot': un identificador corto, url-safe, en ingles y lowercase, " +
     "derivado del elemento REAL de esta prenda (por ejemplo 'main_logo', 'woven_label', 'buttons').\n" +
@@ -835,7 +839,12 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
       })
   const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un analisis de disenos valido.")
   const normalized = normalizeRequirements(parsed, garmentType)
-  return { ...normalized, fields: ensureDetailUnits(normalized.fields) }
+  // The design round had no deterministic guard at all, unlike the general
+  // round's dropIncoherentFields - so an element the user already denied in
+  // the questionnaire ("sin cierre") came straight back as its own design
+  // page. The prompt states the rule; THIS enforces it.
+  const guarded = dropContradictedDesignFields(ensureDetailUnits(normalized.fields), generalFields)
+  return { ...normalized, fields: guarded.fields, droppedSlots: guarded.droppedSlots }
 }
 
 // Merges freshly-analyzed design fields into an existing reqs object without

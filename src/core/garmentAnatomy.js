@@ -96,6 +96,9 @@ const MOOT_TOPICS = [
   { subject: /\b(capuch|hood)/ },
   { subject: /\b(forro|lining|entretela)/ },
   { subject: /\b(cordon|drawcord|drawstring)/ },
+  { subject: /\b(hebilla|buckle|herraje|hardware|remache|rivet)/ },
+  { subject: /\b(etiqueta|label|marquilla|hangtag)/ },
+  { subject: /\b(logo|bordado|embroider|estampa|print|serigraf|aplique|applique|parche|patch)/ },
 ]
 
 // Returns the keys of other still-pending ("ask") fields made moot by
@@ -110,6 +113,47 @@ export function mootFieldsFromAnswer(fields, answeredField, value) {
   return (fields || [])
     .filter((f) => f && f.key !== answeredField.key && f.category === "general" && f.status === "ask" && topic.subject.test(fieldSubject(f)))
     .map((f) => f.key)
+}
+
+// The design round (analyzeDesignExpression) had NO deterministic guard at
+// all - unlike the general round, which has dropIncoherentFields. So a
+// design element the user had ALREADY denied in the questionnaire came right
+// back as its own design page: answer "sin cierre", then get asked for the
+// zipper's artwork anyway. The general facts were in the prompt; nothing
+// enforced them, and prompting alone is exactly what kept failing.
+//
+// `generalFacts` is reqsToParts()' output ({label, val}) - already-resolved
+// construction answers. Any fact whose VALUE reads as a negation ("Sin
+// cierre", "No aplica (no lleva botones)", "Ninguno") closes its whole topic:
+// every design field in a slot touching that topic is dropped, because a
+// design slot IS one element - if the element does not exist, none of its
+// sub-questions do either.
+//
+// Never drops a slot the facts don't contradict, and never reads a fact whose
+// value is affirmative - a garment that HAS a zipper still gets its zipper
+// design page.
+export function dropContradictedDesignFields(designFields, generalFacts) {
+  const fields = Array.isArray(designFields) ? designFields : []
+  const negatedTopics = MOOT_TOPICS.filter((topic) =>
+    (Array.isArray(generalFacts) ? generalFacts : []).some((fact) => {
+      if (!fact) return false
+      const value = normalize(fact.val != null ? fact.val : fact.value)
+      if (!value || !NONE_VALUE.test(value)) return false
+      return topic.subject.test(normalize(fact.label))
+    })
+  )
+  if (negatedTopics.length === 0) return { fields, droppedSlots: [] }
+
+  const contradicted = (field) => negatedTopics.some((topic) => topic.subject.test(fieldSubject(field)))
+  // Resolve at SLOT granularity: one contradicted field condemns its whole
+  // element, so a slot never survives as a half-element with its identity
+  // question gone.
+  const doomedSlots = new Set(fields.filter((f) => f && f.designSlot && contradicted(f)).map((f) => f.designSlot))
+  if (doomedSlots.size === 0) return { fields, droppedSlots: [] }
+  return {
+    fields: fields.filter((f) => !(f && f.designSlot && doomedSlots.has(f.designSlot))),
+    droppedSlots: [...doomedSlots],
+  }
 }
 
 // Removes model-generated general fields that describe a part the identified

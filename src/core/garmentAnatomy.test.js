@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classifyGarmentFamily, incoherentPart, dropIncoherentFields, mootFieldsFromAnswer } from "./garmentAnatomy.js"
+import { classifyGarmentFamily, incoherentPart, dropIncoherentFields, mootFieldsFromAnswer, dropContradictedDesignFields } from "./garmentAnatomy.js"
 
 describe("classifyGarmentFamily", () => {
   it("maps light knit tops to the tee family", () => {
@@ -137,5 +137,50 @@ describe("mootFieldsFromAnswer", () => {
   it("does nothing for a field outside any recognized topic", () => {
     const fields = [{ key: "fabric", label: "Tela principal", category: "general", status: "ask" }]
     expect(mootFieldsFromAnswer(fields, fields[0], "No aplica")).toEqual([])
+  })
+})
+
+describe("dropContradictedDesignFields", () => {
+  const zipperSlot = [
+    { key: "zip_name", label: "Nombre del cierre", category: "design", designSlot: "custom_zipper", designField: "name" },
+    { key: "zip_pos", label: "Posicion del cierre", category: "design", designSlot: "custom_zipper", designField: "position" },
+  ]
+  const labelSlot = [
+    { key: "lbl_name", label: "Etiqueta tejida", category: "design", designSlot: "woven_label", designField: "name" },
+    { key: "lbl_w", label: "Ancho de la etiqueta (cm)", category: "design", designSlot: "woven_label", designField: "width" },
+  ]
+
+  it("drops a whole design slot the user already denied in the questionnaire", () => {
+    const facts = [{ label: "Cierre frontal", val: "Sin cierre" }, { label: "Tipo de etiqueta", val: "Tejida" }]
+    const out = dropContradictedDesignFields([...zipperSlot, ...labelSlot], facts)
+    expect(out.fields.map((f) => f.key)).toEqual(["lbl_name", "lbl_w"])
+    expect(out.droppedSlots).toEqual(["custom_zipper"])
+  })
+
+  it("recognizes the derived value the moot-pruning writes back ('No aplica (no lleva botones)')", () => {
+    const buttonSlot = [{ key: "btn_name", label: "Botones personalizados", category: "design", designSlot: "buttons", designField: "name" }]
+    const facts = [{ label: "Ojales", val: "No aplica (No lleva botones)" }]
+    expect(dropContradictedDesignFields(buttonSlot, facts).droppedSlots).toEqual(["buttons"])
+  })
+
+  it("keeps every slot when the general facts are affirmative - a garment that HAS a zipper still gets its page", () => {
+    const facts = [{ label: "Cierre frontal", val: "Cremallera YKK #5" }]
+    const out = dropContradictedDesignFields(zipperSlot, facts)
+    expect(out.fields).toHaveLength(2)
+    expect(out.droppedSlots).toEqual([])
+  })
+
+  it("never drops a slot on an unrelated negation", () => {
+    // "sin bolsillos" must not take the woven label down with it.
+    const facts = [{ label: "Bolsillos", val: "Sin bolsillos" }]
+    const out = dropContradictedDesignFields(labelSlot, facts)
+    expect(out.fields).toHaveLength(2)
+    expect(out.droppedSlots).toEqual([])
+  })
+
+  it("is a no-op with no facts, no fields, or garbage input", () => {
+    expect(dropContradictedDesignFields(labelSlot, []).fields).toHaveLength(2)
+    expect(dropContradictedDesignFields(labelSlot, undefined).fields).toHaveLength(2)
+    expect(dropContradictedDesignFields(undefined, [{ label: "Cierre", val: "Sin cierre" }]).fields).toEqual([])
   })
 })

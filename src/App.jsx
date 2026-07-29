@@ -1149,24 +1149,30 @@ export default function App() {
                 ? "Pick a preset to start, then click any swatch below to set that exact color yourself."
                 : "Elegí una paleta para arrancar, y despues tocá cualquier color de abajo para ponerle el tono exacto que quieras."}
             </p>
-            <div style={{ display: "flex", gap: space(4), flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: space(3), flexWrap: "wrap" }}>
               {paletteRoles.map((r) => (
-                <div key={r.label} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: space(1) }}>
-                  <div style={{ display: "flex" }}>
-                    <label style={{ position: "relative", display: "block", cursor: "pointer" }} title={uiLang === "EN" ? "Click to pick this color" : "Toca para elegir este color"}>
-                      <div style={{ width: 28, height: 28, background: r.fill, border: hair }} />
-                      <input
-                        type="color"
-                        value={r.fill}
-                        onChange={(e) => updateCustomColor(r.key, e.target.value)}
-                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: 0, padding: 0 }}
-                      />
-                    </label>
-                    <div style={{ width: 28, height: 28, background: hexToGray(r.fill), border: hair }} title={uiLang === "EN" ? "Grayscale equivalent" : "Equivalente en gris"} />
-                  </div>
-                  <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.ui, color: C.ink.hex }}>{r.label}</span>
-                  <span style={{ fontSize: 9, fontFamily: type.fonts.data, color: role.structure.fill, opacity: 0.7 }}>{grayValueOf(r.fill)}</span>
-                </div>
+                <label
+                  key={r.label}
+                  title={uiLang === "EN" ? "Click to pick this exact color" : "Tocá para elegir este color exacto"}
+                  style={{ display: "flex", flexDirection: "column", gap: space(1), padding: space(2), border: hair, cursor: "pointer", background: C.white.hex, position: "relative" }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, fontFamily: type.fonts.ui, fontWeight: 700, color: C.ink.hex }}>
+                    <Icon name="edit" size={13} color={role.priority.fill} /> {r.label}
+                  </span>
+                  <span style={{ display: "flex" }}>
+                    <span style={{ width: 34, height: 34, background: r.fill, border: hair, display: "block" }} />
+                    <span style={{ width: 34, height: 34, background: hexToGray(r.fill), border: hair, display: "block" }} title={uiLang === "EN" ? "Grayscale equivalent" : "Equivalente en gris"} />
+                  </span>
+                  <span style={{ fontSize: 9, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.75 }}>
+                    {r.fill.toUpperCase()} · {uiLang === "EN" ? "gray" : "gris"} {grayValueOf(r.fill)}
+                  </span>
+                  <input
+                    type="color"
+                    value={r.fill}
+                    onChange={(e) => updateCustomColor(r.key, e.target.value)}
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer", border: 0, padding: 0 }}
+                  />
+                </label>
               ))}
             </div>
           </div>
