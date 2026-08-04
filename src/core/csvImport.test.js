@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { importGarmentCSV, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./csvImport.js"
+import { importGarmentCSV, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed, extractSeedFromDocument } from "./csvImport.js"
 import { capGarment } from "../garments/cap.js"
 
 vi.mock("./deepseekClient.js", () => ({
@@ -162,5 +162,39 @@ describe("csvSeedToRequirementsSeed", () => {
   it("returns an empty object when rawParts is missing", () => {
     expect(csvSeedToRequirementsSeed({})).toEqual({})
     expect(csvSeedToRequirementsSeed(null)).toEqual({})
+  })
+})
+
+describe("extractSeedFromDocument (custom-garment flow, CSV or Markdown/plain text)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("returns a flat {label: value} seed from whatever facts the document states", async () => {
+    extractStructured.mockResolvedValue({ facts: { "Tipo de tela": "Jersey algodon", "Cuello": "Redondo rib" } })
+    const result = await extractSeedFromDocument("tela: jersey\ncuello: redondo", { garmentType: "remera", tecs: ["Bordado 3D"] })
+    expect(result.seed).toEqual({ "Tipo de tela": "Jersey algodon", "Cuello": "Redondo rib" })
+    expect(result.garmentType).toBe("")
+  })
+
+  it("passes the garmentType through to the prompt instead of asking the model to guess it", async () => {
+    extractStructured.mockResolvedValue({ facts: {} })
+    await extractSeedFromDocument("x", { garmentType: "campera" })
+    expect(extractStructured.mock.calls[0][0].instructions).toContain("campera")
+  })
+
+  it("lets the model report the garment type when none was provided", async () => {
+    extractStructured.mockResolvedValue({ facts: { "Tela": "Popelina" }, garmentType: "Camisa" })
+    const result = await extractSeedFromDocument("es una camisa de popelina")
+    expect(result.garmentType).toBe("Camisa")
+  })
+
+  it("drops facts with an empty label or value, and tolerates a missing/malformed facts object", async () => {
+    extractStructured.mockResolvedValue({ facts: { "": "x", "Cierre": "", "Bolsillo": "Frontal" } })
+    expect((await extractSeedFromDocument("x")).seed).toEqual({ Bolsillo: "Frontal" })
+    extractStructured.mockResolvedValue({ facts: null })
+    expect((await extractSeedFromDocument("x")).seed).toEqual({})
+    extractStructured.mockResolvedValue({})
+    expect((await extractSeedFromDocument("x")).seed).toEqual({})
   })
 })

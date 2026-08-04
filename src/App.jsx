@@ -4,7 +4,7 @@ import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiResolving
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { translateContent } from "./core/translate.js"
-import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed } from "./core/csvImport.js"
+import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed, extractSeedFromDocument } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
 import { localProviderLabel } from "./core/hybridAI.js"
 import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
@@ -192,6 +192,15 @@ export default function App() {
   // instead of silently discovered later as "why didn't it catch the collar".
   const [visionWarnings, setVisionWarnings] = useState([])
   const [visionSeed, setVisionSeed] = useState(null) // { garmentType, seed } | null - feeds GarmentChat at the Piezas step
+  // Same idea as visionSeed, for a person whose workflow already has most of
+  // the data written down (a CSV or a Markdown/plain-text spec sheet) -
+  // "muchas veces ya tengo gran parte de los datos recopilados". Feeds the
+  // exact same GarmentChat props visionSeed does, so the chat opens straight
+  // into analysis with this seed instead of a blank naming phase, and only
+  // asks about whatever the document genuinely didn't cover.
+  const [docExtracting, setDocExtracting] = useState(false)
+  const [docError, setDocError] = useState(null)
+  const [docSeed, setDocSeed] = useState(null) // { garmentType, seed } | null
   const [csvVerifying, setCsvVerifying] = useState(false) // true while the post-CSV gate chat is up
   const [csvVerifySeed, setCsvVerifySeed] = useState(null) // { garmentType, seed } for that gate chat
   // The unit the printed tech pack uses. Per-design `unit` records what was
@@ -365,6 +374,29 @@ export default function App() {
       setVisionExtracting(false)
       setVisionProgress(null)
       e.target.value = ""
+    }
+  }
+
+  // Reads a CSV or Markdown/plain-text document and turns it into the same
+  // {garmentType, seed} shape visionSeed produces, so a person who already
+  // has most of the tech pack's data written down can skip typing it in one
+  // field at a time - the chat opens straight into analysis with this seed
+  // and only asks about genuine gaps (extractSeedFromDocument never invents
+  // what the document doesn't say).
+  async function handleDocumentUpload(e) {
+    var f = e.target.files[0]
+    e.target.value = ""
+    if (!f) return
+    setDocExtracting(true)
+    setDocError(null)
+    try {
+      var text = await readFileText(f)
+      var result = await extractSeedFromDocument(text, { tecs: tl.tecs })
+      setDocSeed(result)
+    } catch (err) {
+      setDocError(err instanceof DeepSeekError ? err.message : "No se pudo leer o interpretar el documento.")
+    } finally {
+      setDocExtracting(false)
     }
   }
 
@@ -892,9 +924,35 @@ export default function App() {
             </Chip>
           </div>
           {garmentId === "custom" && !visionEntry && (
-            <p style={{ marginTop: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 480 }}>
-              {ui.garmentHelp}
-            </p>
+            <div style={{ marginTop: space(3), maxWidth: 480, display: "flex", flexDirection: "column", gap: space(2) }}>
+              <p style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, margin: 0 }}>
+                {ui.garmentHelp}
+              </p>
+              <label style={{ display: "inline-flex", alignSelf: "flex-start", alignItems: "center", gap: space(2), padding: `${space(2)}px ${space(4)}px`, background: C.white.hex, border: `1px dashed ${C.ink.hex}`, cursor: docExtracting ? "wait" : "pointer", fontSize: type.size.sm, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                <Icon name="upload_file" size={18} />
+                {docExtracting ? ui.analyzingDocument : docSeed ? ui.changeDocument : ui.uploadDocument}
+                <input type="file" accept=".csv,text/csv,.md,text/markdown,.txt,text/plain" disabled={docExtracting} onChange={handleDocumentUpload} style={{ display: "none" }} />
+              </label>
+              {docError && (
+                <p style={{ fontSize: type.size.xs, color: role.index.fill, margin: 0 }}>
+                  <Icon name="error" size={14} color={role.index.fill} /> {docError}
+                </p>
+              )}
+              {docSeed && (
+                <div style={{ border: hair, padding: space(2), fontSize: type.size.xs, color: C.ink.hex, background: C.white.hex }}>
+                  <div style={{ fontWeight: 700, marginBottom: space(1) }}>{ui.detected}: {docSeed.garmentType || ui.notIdentified}</div>
+                  {Object.keys(docSeed.seed || {}).length > 0 ? (
+                    <ul style={{ margin: 0, paddingLeft: space(4) }}>
+                      {Object.entries(docSeed.seed).map(([k, v]) => (
+                        <li key={k}>{k}: {v}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ opacity: 0.7 }}>{ui.noAttributesDetected}</div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           {garmentId === "custom" && visionEntry && (
             <div style={{ marginTop: space(3), maxWidth: 480, display: "flex", flexDirection: "column", gap: space(2) }}>
@@ -1012,7 +1070,19 @@ export default function App() {
     }
 
     if (step === 3 && garmentId === "custom") {
-      return <GarmentChat onComplete={handleGarmentChatComplete} tecs={tl.tecs} seed={visionSeed ? visionSeed.seed : undefined} initialGarmentType={visionSeed ? visionSeed.garmentType : undefined} uiLang={uiLang} />
+      // docSeed (a CSV/Markdown upload, see handleDocumentUpload) and
+      // visionSeed (a photo, "Prenda desde foto") are mutually exclusive
+      // entry paths (chosen at step 0) - never both set, but docSeed wins if
+      // they somehow were, since it's the more literal/explicit source.
+      return (
+        <GarmentChat
+          onComplete={handleGarmentChatComplete}
+          tecs={tl.tecs}
+          seed={docSeed ? docSeed.seed : visionSeed ? visionSeed.seed : undefined}
+          initialGarmentType={docSeed ? docSeed.garmentType : visionSeed ? visionSeed.garmentType : undefined}
+          uiLang={uiLang}
+        />
+      )
     }
 
     if (step === 3 && csvVerifying) {

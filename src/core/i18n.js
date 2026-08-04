@@ -15,13 +15,16 @@
 // completar..."), which are business logic, not simple static labels.
 export const UI = {
   ES: {
-    garmentHelp: "Vas a charlar con la IA en el paso \"Piezas\" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual.",
+    garmentHelp: "Vas a charlar con la IA en el paso \"Piezas\" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual. Si ya tenés los datos recopilados en un CSV o un documento (Markdown/texto), subilo abajo: el chat arranca directo con eso y solo pregunta lo que realmente falta.",
     newGarmentAI: "Prenda nueva (con IA)",
     garmentFromPhoto: "Prenda desde foto (IA)",
     visionHelp: "Subí una o mas fotos de la prenda real. La IA identifica el tipo de prenda y lo que se ve con claridad (color, cuello, cierre, etc.); en el paso \"Piezas\" solo te va a preguntar lo que la foto no reveló.",
     analyzingPhotos: "Analizando foto(s)…",
     changePhotos: "Cambiar foto(s)",
     uploadPhotos: "Subir foto(s)",
+    analyzingDocument: "Analizando documento…",
+    changeDocument: "Cambiar documento",
+    uploadDocument: "Subir CSV o documento (opcional)",
     detected: "Detectado",
     notIdentified: "(no identificado)",
     noAttributesDetected: "No se detectaron atributos con certeza - se preguntará todo en \"Piezas\".",
@@ -135,6 +138,10 @@ export const UI = {
     finalCheckPlaceholder: "Algo que no te pregunté (opcional)...",
     defaultAnswerPlaceholder: "Escribí tu respuesta...",
     answerWithPhotoTitle: "Responder esta pregunta con una foto",
+    uploadDocumentMidChatTitle: "Subir un CSV o documento con datos ya recopilados",
+    couldNotAnalyzeDocument: "No se pudo leer o interpretar ese documento.",
+    noFieldsInDocument: "No encontré datos de construcción en ese documento.",
+    documentNoNewFields: "Ya tenía todo lo que trae ese documento — seguimos con lo que falta.",
     continueWithGarment: "Continuar con esta prenda",
     nothingElseContinue: "Nada más, continuar",
     retryAnalysis: "Reintentar analisis",
@@ -155,13 +162,16 @@ export const UI = {
     back: "Volver",
   },
   EN: {
-    garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same.",
+    garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same. If you already have the data collected in a CSV or a document (Markdown/plain text), upload it below: the chat starts right from that and only asks about what's genuinely missing.",
     newGarmentAI: "New garment (with AI)",
     garmentFromPhoto: "Garment from photo (AI)",
     visionHelp: "Upload one or more photos of the real garment. The AI identifies the garment type and whatever is clearly visible (color, collar, closure, etc.); in the \"Parts\" step it will only ask about what the photo didn't reveal.",
     analyzingPhotos: "Analyzing photo(s)…",
     changePhotos: "Change photo(s)",
     uploadPhotos: "Upload photo(s)",
+    analyzingDocument: "Analyzing document…",
+    changeDocument: "Change document",
+    uploadDocument: "Upload CSV or document (optional)",
     detected: "Detected",
     notIdentified: "(not identified)",
     noAttributesDetected: "No attributes were detected with confidence - everything will be asked in \"Parts\".",
@@ -275,6 +285,10 @@ export const UI = {
     finalCheckPlaceholder: "Something I didn't ask (optional)...",
     defaultAnswerPlaceholder: "Type your answer...",
     answerWithPhotoTitle: "Answer this question with a photo",
+    uploadDocumentMidChatTitle: "Upload a CSV or document with data you already have",
+    couldNotAnalyzeDocument: "Could not read or interpret that document.",
+    noFieldsInDocument: "I didn't find any construction data in that document.",
+    documentNoNewFields: "I already had everything that document covers - let's continue with what's left.",
     continueWithGarment: "Continue with this garment",
     nothingElseContinue: "Nothing else, continue",
     retryAnalysis: "Retry analysis",
@@ -437,6 +451,14 @@ export function uiAssumedStandard(uiLang, garmentType, assumedList) {
 
 export function uiPhotoConfirmedFields(uiLang, list) {
   return uiLang === "EN" ? `According to the photo analysis, I took: ${list}. Is that all correct?` : `Del análisis de fotos tomé: ${list}. ¿Todo correcto?`
+}
+
+// Same idiom as uiPhotoConfirmedFields, for a CSV/Markdown document uploaded
+// mid-chat (see GarmentChat.jsx's handleMidChatDocumentUpload) - confirmed
+// out loud with a "Corregir" path, never silently locked in, same as a
+// photo-derived fact.
+export function uiDocumentConfirmedFields(uiLang, list) {
+  return uiLang === "EN" ? `From your document I took: ${list}. Is that all correct?` : `De tu documento tomé: ${list}. ¿Todo correcto?`
 }
 
 export function uiAnalysisFailedPrefix(uiLang, reason) {

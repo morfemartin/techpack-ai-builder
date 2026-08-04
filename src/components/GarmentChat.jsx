@@ -3,17 +3,18 @@ import { DeepSeekError } from "../core/deepseekClient.js"
 import {
   analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
   looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
-  attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements, fieldsMootedByAnswer, pruneMootFields,
+  attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements, fieldsMootedByAnswer, pruneMootFields, answerFromSeed,
 } from "../core/techpackRequirements.js"
 import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
 import { authorProductionQuestions } from "../core/productionReview.js"
 import { readDesignImageFile } from "../core/helpers.js"
 import { ambiguousGarmentTerm } from "../core/garmentLexicon.js"
+import { readFileText, extractSeedFromDocument } from "../core/csvImport.js"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 import {
   UI, uiAssumedStandard, uiPhotoConfirmedFields, uiAnalysisFailedPrefix, uiAddedFields, uiMissingQuestions, uiFieldsDetectedSuffix,
-  uiMootedFields, uiMootedValue,
+  uiMootedFields, uiMootedValue, uiDocumentConfirmedFields,
 } from "../core/i18n.js"
 
 const C = palette
@@ -88,6 +89,12 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   // design page fell back to two empty V1/V2 boards no matter what was drawn.
   const [designImages, setDesignImages] = useState({})
   const [designImageError, setDesignImageError] = useState(null)
+  // Mid-chat CSV/Markdown upload (see handleMidChatDocumentUpload below) -
+  // "muchas veces ya tengo gran parte de los datos recopilados": lets a
+  // partway-through conversation absorb a document instead of answering
+  // every remaining field one at a time.
+  const [docUploading, setDocUploading] = useState(false)
+  const [docUploadError, setDocUploadError] = useState(null)
   // Set while a typed garment name is genuinely ambiguous (see
   // garmentLexicon.js) - phase stays "naming" until resolved, so the walker
   // never reaches the model with a name it would have had to guess at.
@@ -629,6 +636,70 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     })
   }
 
+  // "Muchas veces ya tengo gran parte de los datos recopilados" - a CSV or a
+  // Markdown/plain-text document uploaded PARTWAY through the general walk.
+  // Reuses answerFromSeed() (techpackRequirements.js) exactly like a photo's
+  // seed does at analysis time: matched pending fields flip to known, an
+  // unmatched-but-real fact survives as its own "Evidencia recibida" field,
+  // and every bit of it is tagged fromSeed so it lands in the SAME batch-
+  // confirmation UI a photo's seed already gets - never silently trusted,
+  // one click away from "Corregir" if the extraction guessed wrong.
+  //
+  // Deliberately does NOT ask anything new on its own - it only closes gaps
+  // the walk already knows about (or adds evidence fields), then hands
+  // straight back to askNext() so the very next question is whatever the
+  // document genuinely did not cover. No padding, no re-confirming what's
+  // already certain.
+  async function handleMidChatDocumentUpload(e) {
+    const file = (e.target.files || [])[0]
+    e.target.value = ""
+    if (!file || sending || docUploading || !reqs) return
+    setDocUploading(true)
+    setDocUploadError(null)
+    try {
+      const text = await readFileText(file)
+      const { seed: docFacts } = await extractSeedFromDocument(text, { garmentType: reqs.garmentType || garmentLabel, tecs })
+      if (Object.keys(docFacts).length === 0) {
+        setDocUploadError(ui.noFieldsInDocument)
+        return
+      }
+      const beforeFromSeedKeys = new Set((reqs.fields || []).filter((f) => f && f.fromSeed).map((f) => f.key))
+      const merged = answerFromSeed(reqs, docFacts)
+      const newlyConfirmed = merged.fields.filter((f) => f.fromSeed && !beforeFromSeedKeys.has(f.key))
+      setReqs(merged)
+      post("user", (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: space(1) }}>
+          <Icon name="upload_file" size={16} color={C.white.hex} /> {file.name}
+        </span>
+      ))
+      if (newlyConfirmed.length > 0) {
+        post("assistant", (
+          <div>
+            <div>{uiDocumentConfirmedFields(uiLang, newlyConfirmed.map((f) => f.label + " (" + f.value + ")").join(", "))}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), marginTop: space(2) }}>
+              {newlyConfirmed.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => handleCorrectSeedField(f.key)}
+                  style={{ padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
+                >
+                  {ui.correctPrefix}: {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))
+      } else {
+        post("assistant", ui.documentNoNewFields)
+      }
+      askNext(merged, "general")
+    } catch (err) {
+      setDocUploadError(err instanceof DeepSeekError ? err.message : ui.couldNotAnalyzeDocument)
+    } finally {
+      setDocUploading(false)
+    }
+  }
+
   function send(valueOverride) {
     const value = (valueOverride !== undefined ? valueOverride : input).trim()
     if (!value || sending) return
@@ -809,6 +880,11 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             <Icon name="error" size={16} color={role.index.fill} /> {error}
           </div>
         )}
+        {docUploadError && (
+          <div style={{ padding: `${space(2)}px ${space(3)}px`, borderTop: hair, display: "flex", alignItems: "center", gap: space(2), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>
+            <Icon name="error" size={16} color={role.index.fill} /> {docUploadError}
+          </div>
+        )}
         {!sending && aiStatus && (
           <div style={{ padding: `${space(1)}px ${space(3)}px`, borderTop: hair, fontSize: type.size.xs, color: C.ink.hex, fontFamily: type.fonts.data, opacity: 0.7 }}>
             {aiStatus}
@@ -844,6 +920,15 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
               >
                 <Icon name="add_photo_alternate" size={20} color={C.ink.hex} />
                 <input type="file" accept="image/png,image/jpeg" disabled={sending} onChange={handleAttachImage} style={{ display: "none" }} />
+              </label>
+            )}
+            {phase === "asking" && (
+              <label
+                title={ui.uploadDocumentMidChatTitle}
+                style={{ display: "inline-flex", alignItems: "center", padding: `0 ${space(3)}px`, borderLeft: hair, cursor: sending || docUploading ? "not-allowed" : "pointer", opacity: sending || docUploading ? 0.5 : 1 }}
+              >
+                <Icon name="upload_file" size={20} color={C.ink.hex} />
+                <input type="file" accept=".csv,text/csv,.md,text/markdown,.txt,text/plain" disabled={sending || docUploading} onChange={handleMidChatDocumentUpload} style={{ display: "none" }} />
               </label>
             )}
             <button

@@ -141,6 +141,41 @@ function mapParts(aiParts, garment, lang) {
   return [...base, ...extras]
 }
 
+// For the CUSTOM/chat-built garment flow, which has no fixed part schema to
+// reconcile against (unlike importGarmentCSV above, which needs
+// garment.partLabels/positions/defaultParts) - so this is deliberately
+// simpler: pull out whatever construction facts a document (CSV, or a
+// Markdown/plain-text spec sheet someone already wrote) states, as flat
+// {label: value} pairs, in the exact shape analyzeRequirements()'s `seed`
+// and answerFromSeed() already expect. Never invents what the document
+// doesn't say - if a fact isn't there, it's not in the returned seed, and
+// the walk asks about it normally.
+export async function extractSeedFromDocument(text, { garmentType, tecs } = {}) {
+  const instructions =
+    "Sos un asistente que interpreta un documento de datos de produccion (puede ser un CSV o notas en Markdown/texto libre) " +
+    "para armar una ficha tecnica" + (garmentType ? " de una prenda tipo '" + garmentType + "'" : "") + ". " +
+    "Extrae CADA dato de construccion o diseno que el documento YA provee, como pares clave-valor en espanol " +
+    "(ej: \"Tipo de tela\": \"Jersey algodon\", \"Cuello\": \"Redondo rib\"). " +
+    "NO inventes ni completes lo que el documento no dice explicitamente - si un dato no esta, no lo incluyas.\n" +
+    (tecs && tecs.length > 0 ? "Tecnicas de aplicacion validas (por si el documento las menciona): " + tecs.join(", ") + ".\n" : "") +
+    (garmentType ? "" : "Si el documento menciona o deja claro el tipo de prenda, agregalo como \"garmentType\".\n") +
+    "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
+    '{"garmentType": "opcional si no se proveyo arriba", "facts": {"Etiqueta en espanol": "valor", "Otra etiqueta": "otro valor"}}'
+
+  const result = await extractStructured({ instructions, content: text, maxTokens: 2500 })
+  const rawFacts = result && result.facts && typeof result.facts === "object" && !Array.isArray(result.facts) ? result.facts : {}
+  const seed = {}
+  for (const [label, value] of Object.entries(rawFacts)) {
+    const cleanLabel = String(label || "").trim()
+    const cleanValue = String(value == null ? "" : value).trim()
+    if (cleanLabel && cleanValue) seed[cleanLabel] = cleanValue
+  }
+  return {
+    garmentType: typeof result.garmentType === "string" ? result.garmentType.trim() : "",
+    seed,
+  }
+}
+
 // A suggested (not required) CSV shape, so a person filling one out by hand
 // has somewhere to start. importGarmentCSV() doesn't enforce this format.
 export function buildExampleCSV(garment, lang = "ES") {
