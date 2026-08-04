@@ -45,7 +45,9 @@ describe("runHybridAI", () => {
   it("uses the deterministic contract when both answers are invalid", async () => {
     requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: "bad", provider, model: provider }))
     const promise = runHybridAI({ task: "explain", messages: [], validator: (value) => value === "contract", fallback: "contract" })
-    await vi.advanceTimersByTimeAsync(3000)
+    // A contractViolation is retried once per provider (see retryableProviderError
+    // in hybridAI.js), each retry adding its own 500ms delay before giving up.
+    await vi.advanceTimersByTimeAsync(3600)
     const result = await promise
     expect(result).toMatchObject({ provider: "contract", content: "contract", degraded: true })
   })
@@ -58,11 +60,33 @@ describe("runHybridAI", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
     requestAIOnce.mockImplementation(({ provider }) => Promise.resolve({ content: "bad", provider, model: provider }))
     const promise = runHybridAI({ task: "explain", messages: [], validator: (value) => value === "never matches this", fallback: "contract" })
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(3600)
     const result = await promise
     expect(result).toMatchObject({ provider: "contract", content: "contract", degraded: true })
     expect(consoleError).toHaveBeenCalled()
     consoleError.mockRestore()
+  })
+
+  // A contractViolation means the provider answered but rolled badly this one
+  // time - retrying the SAME provider once is worth it precisely because the
+  // model is not deterministic (see analyzeRequirements' INTAKE task, which
+  // has no `fallback` and used to surface a single bad Mistral generation as
+  // a hard failure with zero automatic recovery in studio.html's local-only
+  // build).
+  it("retries a contractViolation once on the same provider instead of failing immediately", async () => {
+    let nvidiaCalls = 0
+    requestAIOnce.mockImplementation(({ provider }) => {
+      if (provider === "nvidia") {
+        nvidiaCalls++
+        return Promise.resolve({ content: nvidiaCalls === 1 ? "bad" : "valid", provider, model: provider })
+      }
+      return waitForAbort(new AbortController().signal) // never resolves in time - forces nvidia to win
+    })
+    const promise = runHybridAI({ task: "explain", messages: [], validator: (value) => value === "valid", fallback: "fallback", providers: ["nvidia"] })
+    await vi.advanceTimersByTimeAsync(1000)
+    const result = await promise
+    expect(nvidiaCalls).toBe(2)
+    expect(result).toMatchObject({ provider: "nvidia", content: "valid" })
   })
 
   it("deduplicates identical in-flight requests", async () => {

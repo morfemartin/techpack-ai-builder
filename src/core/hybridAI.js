@@ -76,6 +76,21 @@ function retryableCapacityError(error) {
   return error && (error.status === 502 || error.status === 503 || error.status === 504)
 }
 
+// A contractViolation means the provider DID answer, just not well enough
+// this one time - retrying is worth it precisely because the model is not
+// deterministic: the same prompt can pass the validator on a second roll
+// even though nothing else changed. This matters most for tasks with no
+// `fallback` (like analyzeRequirements' INTAKE task) racing local-only
+// (studio.html): there, one bad generation used to surface immediately as
+// a hard failure to the user, with zero automatic recovery. Observed live:
+// sampling the real intake prompt against Mistral passed the validator in
+// ~9 of 10 calls - so a single silent retry turns most of that remaining
+// ~10% failure rate into a success, without weakening the contract itself
+// (two straight rejections still throws, same as before).
+function retryableProviderError(error) {
+  return retryableCapacityError(error) || !!(error && error.contractViolation)
+}
+
 function circuitIsOpen(now = Date.now()) {
   if (!circuitOpenedAt) return false
   if (now - circuitOpenedAt >= CIRCUIT_OPEN_MS) {
@@ -247,7 +262,7 @@ async function providerAttempt(provider, options, controller, deadline) {
     } catch (error) {
       if (controller.signal.aborted) throw error
       if (provider === "nvidia" && isAvailabilityFailure(error)) recordNvidiaFailure()
-      if (!retryableCapacityError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
+      if (!retryableProviderError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
       await delay(Math.min(500, remaining), controller.signal)
     }
   }
@@ -280,7 +295,7 @@ async function streamProviderAttempt(provider, options, controller, deadline, on
     } catch (error) {
       if (controller.signal.aborted) throw error
       if (provider === "nvidia" && isAvailabilityFailure(error)) recordNvidiaFailure()
-      if (!retryableCapacityError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
+      if (!retryableProviderError(error) || attempts >= 2 || Date.now() + 500 >= deadline) throw error
       await delay(500, controller.signal)
     }
   }
