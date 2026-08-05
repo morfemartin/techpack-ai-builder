@@ -68,14 +68,33 @@ describe("document plan AI wrappers", () => {
     expect(deepseekChat.mock.calls[0][0].task).toBe("outline-index")
   })
 
-  it("provides a fallback that satisfies the section contract even when one bucket dominates", async () => {
+  it("provides a compact fallback even when one bucket dominates", async () => {
     const parts = Array.from({ length: 8 }, (_, index) => ({ id: index + 1, label: "Panel " + (index + 1), on: true }))
     deepseekChat.mockImplementationOnce(async (options) => {
       expect(options.validator(options.fallback)).toBe(true)
       return options.fallback
     })
     const result = await planDocumentSections({ garmentType: "Parka", parts, designs: [] })
-    expect(result.sections.length).toBeGreaterThanOrEqual(6)
+    expect(result.sections.length).toBeGreaterThan(0)
+    expect(result.sections.length).toBeLessThanOrEqual(8)
+  })
+
+  it("rejects an index that turns individual fields into pages", async () => {
+    const parts = Array.from({ length: 20 }, (_, index) => ({ id: index + 1, label: "Campo " + (index + 1), on: true }))
+    deepseekChat.mockImplementationOnce(async (options) => {
+      const fragmented = JSON.stringify({ sections: Array.from({ length: 14 }, (_, index) => ({
+        id: "field-" + index,
+        title: "Campo " + index,
+        purpose: "data:field-" + index,
+        objective: "Mostrar un campo",
+        criteria: "Un campo",
+      })) })
+      expect(options.validator(fragmented)).toBe(false)
+      expect(options.validator(options.fallback)).toBe(true)
+      return options.fallback
+    })
+    const result = await planDocumentSections({ garmentType: "Polo", parts, designs: [] })
+    expect(result.sections.length).toBeLessThanOrEqual(8)
   })
 
   it("filters cover and design pages out of a model-authored section index", async () => {
@@ -119,14 +138,33 @@ describe("document plan AI wrappers", () => {
     expect(result.assignments.map((item) => item.piece).sort()).toEqual(["1", "2"])
   })
 
-  it("composes sections without losing, duplicating, or overloading pieces", () => {
+  it("keeps one semantic objective intact until measured pagination", () => {
     const parts = Array.from({ length: 17 }, (_, index) => ({ id: index + 1, label: "Panel " + (index + 1), on: true }))
     const assignments = parts.map((part) => ({ piece: String(part.id), section: "construction" }))
     const { outline } = composeOutlineFromSections(SECTIONS, assignments, { garmentType: "Parka", parts, designs: [{ name: "Logo pecho" }] })
     const construction = outline.pages.filter((page) => page.purpose === "structure:shell-body")
-    expect(construction.map((page) => page.pieces.length)).toEqual([8, 8, 1])
+    expect(construction.map((page) => page.pieces.length)).toEqual([17])
     expect(construction.flatMap((page) => page.pieces)).toEqual(parts.map((part) => String(part.id)))
     expect(outline.pages.map((page) => page.purpose)).toContain("design:Logo pecho")
+  })
+
+  it("consolidates sparse data fields instead of producing one page per field", () => {
+    const sections = Array.from({ length: 8 }, (_, index) => ({
+      id: "data-" + index,
+      title: "Dato " + index,
+      purpose: "data:field-" + index,
+      objective: "Resolver el dato " + index,
+      criteria: "Un campo tecnico",
+    }))
+    const parts = sections.map((section, index) => ({ id: index + 1, label: section.title, on: true }))
+    const assignments = sections.map((section, index) => ({ piece: String(index + 1), section: section.id }))
+    const result = composeOutlineFromSections(sections, assignments, { garmentType: "Polo", parts })
+    const technicalPages = result.outline.pages.filter((page) => Array.isArray(page.pieces))
+
+    expect(technicalPages).toHaveLength(1)
+    expect(technicalPages[0]).toMatchObject({ purpose: "data:production", illustration: "optional" })
+    expect(technicalPages[0].pieces).toEqual(parts.map((part) => String(part.id)))
+    expect(result.changes).toContain("consolidated sparse data sections: " + sections.map((section) => section.id).join(", "))
   })
 
   it("preserves a section's objective, criteria, views, and illustration policy", () => {
@@ -196,7 +234,12 @@ describe("document plan AI wrappers", () => {
       })
     let telemetry
     await planDocumentOutline({ garmentType: "Polo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
-    expect(telemetry.aiResult).toMatchObject({ provider: "contract", degraded: true })
+    expect(telemetry.aiResult).toMatchObject({
+      provider: "contract",
+      degraded: true,
+      fallbackReason: "assignment_batches_completed_by_contract",
+      degradedStages: { index: false, assignmentBatches: [1] },
+    })
   })
 
   it("never ships artwork blobs into section, assignment, or page prompts", async () => {

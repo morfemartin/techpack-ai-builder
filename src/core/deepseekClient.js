@@ -14,6 +14,7 @@
 // function. Production Pages therefore uses the deployed, CORS-restricted
 // proxy while local/Vercel deployments keep their same-origin endpoint.
 import { loadLazyModule } from "./lazyModule.js"
+import { repairTruncatedJSON } from "./jsonSalvage.js"
 
 function defaultNvidiaProxyURL() {
   if (import.meta.env.VITE_DEEPSEEK_PROXY_URL) return import.meta.env.VITE_DEEPSEEK_PROXY_URL
@@ -519,7 +520,12 @@ export async function extractStructured({ instructions, content, maxTokens = 150
   const cleaned = raw.replace(/```json|```/g, "").trim()
   try {
     return JSON.parse(cleaned)
-  } catch (e) {
-    throw new DeepSeekError("El asistente de IA no devolvio JSON valido.", { raw })
+  } catch {}
+  const repaired = repairTruncatedJSON(cleaned)
+  if (repaired) {
+    try {
+      return JSON.parse(repaired)
+    } catch {}
   }
+  throw new DeepSeekError("El asistente de IA no devolvio JSON valido.", { raw })
 }

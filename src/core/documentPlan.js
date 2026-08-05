@@ -5,10 +5,13 @@ import { repairOutline, repairPage } from "../pages/pageContracts.js"
 import { buildSemanticOutline, classifyPartBucket, deterministicPageLayout, partitionPartsBySystem } from "./semanticOutline.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { hasEmbSpecs } from "./helpers.js"
+import { LANGUAGE_NAMES } from "./languageConfig.js"
+import { hasColorData } from "./colorSpecs.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
 const REMOTE_PLANNING_TIMEOUT_MS = 45000
 const LOCAL_PLANNING_TIMEOUT_MS = 300000
+const MAX_PRODUCTION_SECTIONS = 8
 
 export async function withPlanningTimeout(promise, timeoutMs = getTextAIProvider() === "local" ? LOCAL_PLANNING_TIMEOUT_MS : REMOTE_PLANNING_TIMEOUT_MS) {
   let timer = null
@@ -33,7 +36,7 @@ function slug(value, fallback) {
 }
 
 function fabricColorPage(context) {
-  const hasColors = Array.isArray(context && context.fabricColors) && context.fabricColors.some((color) => color && color.hex)
+  const hasColors = Array.isArray(context && context.fabricColors) && context.fabricColors.some(hasColorData)
   return hasColors ? {
     id: "data-colorways",
     title: "Colores de tela",
@@ -45,7 +48,12 @@ function fabricColorPage(context) {
 }
 
 function fallbackOutline({ garmentType, parts, designs, fabricColors }) {
-  const outline = buildSemanticOutline({ garmentType, parts, designs })
+  // Page capacity is a layout concern. Keep one descriptor per production
+  // objective here; buildPlannedPages measures the translated rows and adds
+  // continuations only when the selected composition genuinely runs out of
+  // room. Splitting every eight fields at outline time was the source of
+  // documents with 20+ sparse pages.
+  const outline = buildSemanticOutline({ garmentType, parts, designs, maxPartsPerPage: Number.POSITIVE_INFINITY })
   const page = fabricColorPage({ fabricColors })
   if (page) {
     const designIndex = outline.pages.findIndex((item) => String(item.purpose || "").startsWith("design:"))
@@ -89,8 +97,36 @@ function normalizeSections(raw) {
   })
 }
 
+function compactSections(sections, maxSections = MAX_PRODUCTION_SECTIONS) {
+  const unique = []
+  const seenPurposes = new Set()
+  for (const section of sections || []) {
+    if (!section || seenPurposes.has(section.purpose)) continue
+    seenPurposes.add(section.purpose)
+    unique.push(section)
+  }
+  if (unique.length <= maxSections) return unique
+
+  const structural = unique.filter((section) => !String(section.purpose || "").startsWith("data:"))
+  const data = unique.filter((section) => String(section.purpose || "").startsWith("data:"))
+  const structuralBudget = Math.min(structural.length, maxSections - 1)
+  const kept = structural.slice(0, structuralBudget)
+  const remaining = maxSections - kept.length
+  if (remaining > 1) kept.push(...data.slice(0, remaining - 1))
+  kept.push({
+    id: "production-data",
+    title: "Datos tecnicos de produccion",
+    purpose: "data:production",
+    objective: "Reunir datos tecnicos relacionados que no justifican una pagina independiente.",
+    criteria: "Datos confirmados de materiales, medidas, costuras, calidad, etiquetas y proceso.",
+    views: ["Vista general con llamadas"],
+    illustration: "optional",
+  })
+  return kept.slice(0, maxSections)
+}
+
 function deterministicSections(context) {
-  return fallbackOutline(context).pages
+  const sections = fallbackOutline(context).pages
     .filter((page) => validSectionPurpose(page.purpose))
     .map((page) => ({
       id: page.id,
@@ -101,6 +137,7 @@ function deterministicSections(context) {
       views: page.views || [],
       illustration: page.illustration,
     }))
+  return compactSections(sections)
 }
 
 function assignmentPieceId(item) {
@@ -129,11 +166,14 @@ function exactAssignmentCoverage(assignments, parts, sectionIds) {
 function deterministicAssignment(part, sections) {
   const classification = classifyPartBucket(part)
   const direct = sections.find((section) => section.id === classification.bucket || section.purpose === classification.purpose)
-  return { piece: String(part.id), section: direct ? direct.id : "" }
+  const consolidated = !direct && classification.purpose.startsWith("data:")
+    ? sections.find((section) => section.purpose === "data:production")
+    : null
+  return { piece: String(part.id), section: (direct || consolidated) ? (direct || consolidated).id : "" }
 }
 
 export function composeOutlineFromSections(sectionsInput, assignmentsInput, context = {}) {
-  const sections = normalizeSections({ sections: sectionsInput })
+  const sections = compactSections(normalizeSections({ sections: sectionsInput }))
   const parts = activeParts(context.parts)
   const partById = new Map(parts.map((part) => [String(part.id), part]))
   const sectionById = new Map(sections.map((section) => [section.id, section]))
@@ -144,6 +184,9 @@ export function composeOutlineFromSections(sectionsInput, assignmentsInput, cont
     const fallbackPage = partitionPartsBySystem([part], { maxPartsPerPage: 8 })[0]
     const fallbackId = fallbackPage ? fallbackPage.id.replace(/-(?:\d+)$/, "") : "data-general"
     let target = sections.find((section) => section.purpose === (fallbackPage && fallbackPage.purpose))
+    if (!target && fallbackPage && String(fallbackPage.purpose || "").startsWith("data:")) {
+      target = sections.find((section) => section.purpose === "data:production")
+    }
     if (!target) {
       target = {
         id: fallbackId,
@@ -181,6 +224,39 @@ export function composeOutlineFromSections(sectionsInput, assignmentsInput, cont
     changes.push("restored missing piece " + part.id + " by deterministic contract")
   }
 
+  const sparseDataSections = sections.filter((section) =>
+    String(section.purpose || "").startsWith("data:") &&
+    section.purpose !== "data:colorways" &&
+    (groups.get(section.id) || []).length > 0 &&
+    (groups.get(section.id) || []).length < 3
+  )
+  if (sparseDataSections.length > 1) {
+    let consolidated = sections.find((section) => section.purpose === "data:production")
+    if (!consolidated) {
+      consolidated = {
+        id: "production-data",
+        title: "Datos tecnicos de produccion",
+        purpose: "data:production",
+        objective: "Reunir datos tecnicos relacionados que no justifican una pagina independiente.",
+        criteria: "Datos confirmados de materiales, medidas, costuras, calidad, etiquetas y proceso.",
+        views: ["Vista general con llamadas"],
+        illustration: "optional",
+      }
+      sections.push(consolidated)
+      groups.set(consolidated.id, [])
+    }
+    const mergedIds = new Set(sparseDataSections.map((section) => section.id))
+    const mergedMembers = sparseDataSections.flatMap((section) => groups.get(section.id) || [])
+    groups.set(consolidated.id, [
+      ...(groups.get(consolidated.id) || []),
+      ...mergedMembers.filter((part) => !(groups.get(consolidated.id) || []).includes(part)),
+    ])
+    for (let index = sections.length - 1; index >= 0; index--) {
+      if (sections[index].id !== consolidated.id && mergedIds.has(sections[index].id)) sections.splice(index, 1)
+    }
+    changes.push("consolidated sparse data sections: " + sparseDataSections.map((section) => section.id).join(", "))
+  }
+
   const pages = [{ id: "cover", title: safeString(context.garmentType, "Illustration Handoff"), purpose: "cover" }]
   for (const section of sections) {
     const members = groups.get(section.id) || []
@@ -188,14 +264,15 @@ export function composeOutlineFromSections(sectionsInput, assignmentsInput, cont
       if (parts.length === 0 && section.purpose === "overview") pages.push({ ...section, pieces: undefined })
       continue
     }
-    const chunks = []
-    for (let index = 0; index < members.length; index += 8) chunks.push(members.slice(index, index + 8))
-    chunks.forEach((chunk, index) => pages.push({
+    pages.push({
       ...section,
-      id: section.id + (chunks.length > 1 ? "-" + (index + 1) : ""),
-      title: section.title + (chunks.length > 1 ? " · " + (index + 1) + "/" + chunks.length : ""),
-      pieces: chunk.map((part) => String(part.id)),
-    }))
+      pieces: members.map((part) => String(part.id)),
+      // A table without a visual target is not a useful production sheet.
+      // The compositor may place it in a rail or bottom band, but every page
+      // still has an artboard that explains what those facts belong to.
+      illustration: section.illustration === "none" ? "optional" : section.illustration,
+      views: Array.isArray(section.views) && section.views.length ? section.views : ["Vista tecnica de control"],
+    })
   }
   const designOnly = buildSemanticOutline({ garmentType: context.garmentType, parts: [], designs: context.designs }).pages
     .filter((page) => typeof page.purpose === "string" && page.purpose.startsWith("design:"))
@@ -254,9 +331,9 @@ function promptSafeParts(parts) {
 
 export async function planDocumentSections(context, { onStatus, signal, providers } = {}) {
   const parts = activeParts(context && context.parts)
-  const minimumSections = Math.min(6, Math.max(1, parts.length))
-  const labelsOnly = parts.map((part) => ({ id: String(part.id), label: safeString(part.label || part.customName, "Pieza " + part.id) }))
   const fallback = deterministicSections(context)
+  const minimumSections = Math.min(4, Math.max(1, fallback.length))
+  const labelsOnly = parts.map((part) => ({ id: String(part.id), label: safeString(part.label || part.customName, "Pieza " + part.id) }))
   const fallbackPurposes = new Set(fallback.map((section) => section.purpose))
   const padding = [
     ["materials", "Materiales y consumos", "data:materials"],
@@ -267,7 +344,7 @@ export async function planDocumentSections(context, { onStatus, signal, provider
     ["general", "Datos generales", "data:general"],
   ]
   for (const [id, title, purpose] of padding) {
-    if (fallback.length >= minimumSections) break
+    if (fallback.length >= minimumSections || fallback.length >= MAX_PRODUCTION_SECTIONS) break
     if (fallbackPurposes.has(purpose)) continue
     fallback.push({ id, title, purpose, objective: "Organizar " + title.toLowerCase() + ".", criteria: "Datos confirmados que pertenecen a " + title.toLowerCase() + ".", views: [] })
     fallbackPurposes.add(purpose)
@@ -275,12 +352,14 @@ export async function planDocumentSections(context, { onStatus, signal, provider
   const instructions =
     "Sos arquitecto de informacion de fichas tecnicas textiles. Decidi el INDICE PRODUCTIVO de este documento, no distribuyas piezas todavia. " +
     "Cada seccion debe tener una mision diferente para fabrica y un criterio que otro ingeniero pueda aplicar sin adivinar. " +
-    "Usa entre " + minimumSections + " y 14 secciones cuando el volumen lo permita. No incluyas portada, indice ni paginas de diseno: el contrato las agrega. " +
+    "Usa entre " + minimumSections + " y " + MAX_PRODUCTION_SECTIONS + " secciones. Una seccion es un OBJETIVO productivo, nunca una pregunta o un campo individual. " +
+    "Agrupa materiales relacionados, medidas relacionadas, costuras relacionadas y controles relacionados; no crees variantes numeradas de la misma seccion. " +
+    "No incluyas portada, indice ni paginas de diseno: el contrato las agrega. " +
     "Usa purpose structure:<slug> para sistemas que necesitan ilustracion, o data:<slug> para tablas/notas sin ilustracion obligatoria. " +
     "La lista es vocabulario abierto: crea una seccion especifica si la prenda lo exige. No inventes datos ni agrupes todo como cuerpo exterior.\n\n" +
     "Prenda: " + safeString(context && context.garmentType, "custom") + "\n" +
     "Campos disponibles (solo nombres, sin valores): " + JSON.stringify(labelsOnly) + "\n" +
-    "Idioma: " + safeString(context && context.lang, "ES") + "\n\n" +
+    "Idioma de fabrica: " + (LANGUAGE_NAMES[(context && context.lang) || "ES"] || "Spanish") + ". Redacta titulos, objetivos y criterios en ese idioma.\n\n" +
     'Devolve SOLO JSON: {"sections":[{"id":"materiales","title":"Materiales y consumos","purpose":"data:materials","objective":"...","criteria":"...","views":[]}]}'
 
   let aiResult = null
@@ -291,7 +370,7 @@ export async function planDocumentSections(context, { onStatus, signal, provider
     temperature: 0.1,
     validator: (content) => {
       const sections = normalizeSections(parseJSONOrRepair(content, "invalid section index"))
-      return sections.length >= minimumSections && sections.length <= 14 &&
+      return sections.length >= minimumSections && sections.length <= MAX_PRODUCTION_SECTIONS &&
         sections.every((section) => section.title && section.objective && section.criteria && validSectionPurpose(section.purpose))
     },
     fallback: JSON.stringify({ sections: fallback }),
@@ -357,10 +436,19 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
   const composed = composeOutlineFromSections(sectionResult.sections, assignmentResult.assignments, context)
   const repaired = repairOutline(composed.outline, context)
   const repairs = [...composed.changes, ...repaired.repairs]
-  const degraded = sectionResult.aiResult && sectionResult.aiResult.provider === "contract" ||
-    assignmentResult.results.some((result) => result.aiResult && result.aiResult.provider === "contract")
+  const indexUsedContract = !!(sectionResult.aiResult && sectionResult.aiResult.provider === "contract")
+  const assignmentBatchesUsingContract = assignmentResult.results
+    .filter((result) => result.aiResult && result.aiResult.provider === "contract")
+    .map((result) => result.batch)
+  const degraded = indexUsedContract || assignmentBatchesUsingContract.length > 0
   const aiResult = degraded
-    ? { provider: "contract", model: "deterministic", degraded: true, fallbackReason: "one_or_more_planning_stages_used_contract" }
+    ? {
+        provider: "contract",
+        model: "deterministic",
+        degraded: true,
+        fallbackReason: indexUsedContract ? "document_index_used_contract" : "assignment_batches_completed_by_contract",
+        degradedStages: { index: indexUsedContract, assignmentBatches: assignmentBatchesUsingContract },
+      }
     : sectionResult.aiResult
   if (typeof onProposal === "function") onProposal({
     raw: sectionResult.raw,
@@ -392,7 +480,9 @@ export async function planPageLayout(pageOutline, context, { onProgress, onStatu
       designs: promptSafeDesigns(context && context.designs),
       brief: context && context.brief,
       lang: context && context.lang,
+      designerLanguage: context && context.designerLanguage,
     }) + "\n\n" +
+    "IDIOMAS: redacta refs, garmentPart, view, mustMark, measurements y placementLandmark en " + (LANGUAGE_NAMES[(context && context.designerLanguage) || (context && context.lang) || "ES"] || "Spanish") + "; redacta factoryNote en " + (LANGUAGE_NAMES[(context && context.lang) || "ES"] || "Spanish") + ". Conserva codigos, numeros y unidades sin traducir.\n\n" +
     "Esta pagina existe para: " + safeString(page.objective, "comunicar su contenido tecnico sin ambiguedad") + ". " +
     "Su criterio de inclusion es: " + safeString(page.criteria, "solo datos que sirven a ese objetivo") + ". " +
     "Todo bloque y toda vista que propongas debe servir directamente a esa mision.\n\n" +

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react"
 import { DeepSeekError } from "../core/deepseekClient.js"
 import {
   analyzeDesignExpression, mergeDesignFields, pendingFields, applyAnswer, skipField, revertField,
-  looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
+  looksLikeQuestion, answerFieldQuestion, analyzeAdditionalNotes, reqsToParts, reqsToFabricColors, reqsToDesigns, authorIllustrationBriefs, fallbackDesignFields,
   attachIllustrationBriefs, FIELD_STATUS, analyzeRequirements, fieldsMootedByAnswer, pruneMootFields, answerFromSeed,
 } from "../core/techpackRequirements.js"
 import { answerFieldFromImageSegments, splitImageIntoQuadrants } from "../core/visionExtract.js"
@@ -724,6 +724,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
       id: garmentLabel,
       label: garmentLabel,
       parts: reqsToParts(reqs),
+      fabricColors: reqsToFabricColors(reqs),
       positions: ["Toda la prenda"],
       // A design element added during "finalCheck" (after runBriefAuthoring
       // already ran) never gets its own illustration brief - attachIllustrationBriefs

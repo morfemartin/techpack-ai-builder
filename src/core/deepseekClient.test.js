@@ -298,6 +298,12 @@ describe("deepseekClient", () => {
     expect(result).toEqual({ parts: [{ id: 1, val: "x" }] })
   })
 
+  it("extractStructured salvages complete data from a truncated JSON reply", async () => {
+    mockFetchOnce({ choices: [{ message: { content: '{"parts":[{"id":1,"val":"x"}],"designs":[' } }] })
+    const result = await extractStructured({ instructions: "extrae piezas", content: "csv text here" })
+    expect(result).toEqual({ parts: [{ id: 1, val: "x" }] })
+  })
+
   it("extractStructured throws DeepSeekError (not a silent fallback) on invalid JSON", async () => {
     mockFetchOnce({ choices: [{ message: { content: "esto no es json" } }] })
     await expect(extractStructured({ instructions: "x", content: "y" })).rejects.toBeInstanceOf(DeepSeekError)

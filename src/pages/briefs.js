@@ -50,14 +50,20 @@ export function normalizeSlotBriefs(region, page, ctx) {
   }
   const designIndex = design && ctx && Array.isArray(ctx.designs) ? ctx.designs.indexOf(design) : -1;
   const designCode = designIndex >= 0 ? 'D' + (designIndex + 1) : '';
+  const designerDesign = designIndex >= 0 && ctx?.designerTx && Array.isArray(ctx.designerTx.designs)
+    ? ctx.designerTx.designs[designIndex]
+    : null;
+  const factoryDesign = designIndex >= 0 && ctx?.txData && Array.isArray(ctx.txData.designs)
+    ? ctx.txData.designs[designIndex]
+    : null;
 
   // Build default values from design and context
   const defaultGarmentPart = design
-    ? (typeof design.pos === 'string' && design.pos.trim()) || (typeof design.name === 'string' && design.name.trim()) || ''
+    ? (typeof designerDesign?.pos === 'string' && designerDesign.pos.trim()) || (typeof design.pos === 'string' && design.pos.trim()) || (typeof design.name === 'string' && design.name.trim()) || ''
     : (ctx && typeof ctx.garmentType === 'string' ? ctx.garmentType.trim() : '');
-  const defaultPlacementLandmark = design && typeof design.posDetail === 'string' ? design.posDetail.trim() : '';
+  const defaultPlacementLandmark = (typeof designerDesign?.posDetail === 'string' && designerDesign.posDetail.trim()) || (design && typeof design.posDetail === 'string' ? design.posDetail.trim() : '');
   // Just the technique name - the template already prefixes "Fábrica: ".
-  const defaultFactoryNote = design && typeof design.tec === 'string' && design.tec.trim() ? design.tec.trim() : '';
+  const defaultFactoryNote = (typeof factoryDesign?.technique === 'string' && factoryDesign.technique.trim()) || (design && typeof design.tec === 'string' && design.tec.trim() ? design.tec.trim() : '');
   // Dimensions print in the unit this tech pack is set to, converted from the
   // unit they were typed in - the factory reads one unit, whoever fills the
   // form uses whatever they measured with. formatDimensions returns '' when
@@ -121,7 +127,9 @@ export function normalizeSlotBriefs(region, page, ctx) {
     }
 
     const placementLandmark = coerceString(sourceObj?.placementLandmark) || defaultPlacementLandmark;
-    const factoryNote = coerceString(sourceObj?.factoryNote) || defaultFactoryNote;
+    const factoryNote = ctx?.txData?.outputMode === 'multilingual'
+      ? defaultFactoryNote || coerceString(sourceObj?.factoryNote)
+      : coerceString(sourceObj?.factoryNote) || defaultFactoryNote;
 
     const slotOffset = Math.max(0, Number(region && region._slotOffset) || 0);
     const slotCode = 'V' + (slotOffset + i + 1);
@@ -194,7 +202,7 @@ function isBareNumber(value) {
  * @param {'title'|'checklist'|'full'} mode
  * @returns {string[]} Array of display lines.
  */
-export function briefLines(brief, mode) {
+export function briefLines(brief, mode, labels = {}) {
   const lines = [];
 
   // One identifying line, not three. The block already carries its view code
@@ -217,7 +225,7 @@ export function briefLines(brief, mode) {
     const marks = Array.isArray(brief.callouts) && brief.callouts.length
       ? brief.callouts.map(item => item.id + ' ' + item.label)
       : brief.mustMark;
-    lines.push('Señalar: ' + marks.join(', '));
+    lines.push((labels.mark || 'Señalar') + ': ' + marks.join(', '));
   }
 
   if (mode === 'checklist') {
@@ -226,7 +234,7 @@ export function briefLines(brief, mode) {
 
   // Full mode adds remaining sections
   if (brief.placementLandmark && brief.placementLandmark.length > 0 && !isBareNumber(brief.placementLandmark)) {
-    lines.push('Ubicación: ' + brief.placementLandmark);
+    lines.push((labels.location || 'Ubicación') + ': ' + brief.placementLandmark);
   }
 
   if (brief.measurements && Array.isArray(brief.measurements) && brief.measurements.length > 0) {
@@ -236,18 +244,25 @@ export function briefLines(brief, mode) {
       return s;
     }).filter(s => s.length > 0);
     if (measStrs.length > 0) {
-      lines.push('Acotar con líneas de medida (mm): ' + measStrs.join(', '));
+      lines.push((labels.dimension || 'Acotar con líneas de medida (mm)') + ': ' + measStrs.join(', '));
     }
   }
 
-  if (brief.factoryNote && brief.factoryNote.length > 0) {
-    lines.push('Fábrica: ' + brief.factoryNote);
-  }
-
-  if (brief.hasReference) lines.push('Referencia gráfica disponible · NO A ESCALA');
-  if (Array.isArray(brief.pending)) {
-    brief.pending.forEach(item => lines.push('PENDIENTE DE CONFIRMAR: ' + item));
-  }
+  if (brief.hasReference) lines.push(labels.reference || 'Referencia gráfica disponible · NO A ESCALA');
 
   return lines;
+}
+
+export function factoryBriefLines(brief, labels = {}) {
+  const lines = []
+  if (brief.factoryNote) lines.push((labels.factory || 'Fábrica') + ': ' + brief.factoryNote)
+  if (Array.isArray(brief.measurements)) {
+    brief.measurements.forEach((measurement) => {
+      if (measurement && measurement.label) lines.push((measurement.id ? measurement.id + ' · ' : '') + measurement.label)
+    })
+  }
+  if (Array.isArray(brief.pending)) {
+    brief.pending.forEach((item) => lines.push((labels.pending || 'PENDIENTE DE CONFIRMAR') + ': ' + item))
+  }
+  return lines
 }

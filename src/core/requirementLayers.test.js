@@ -7,9 +7,9 @@ describe("layered intake contract", () => {
     const asks = result.fields.filter((field) => field.status === "ask")
 
     expect(new Set(asks.map((field) => field.layer))).toEqual(new Set(requiredLayers("Polo de golf")))
-    expect(asks).toHaveLength(12)
+    expect(asks).toHaveLength(13)
     expect(asks.every((field) => field.label && field.example.startsWith("Ej.:") && field.options.length >= 2)).toBe(true)
-    expect(asks.map((field) => field.key)).toEqual(expect.arrayContaining(["fabric", "fit", "size_range", "collar", "sleeve", "placket", "production_notes", "applications"]))
+    expect(asks.map((field) => field.key)).toEqual(expect.arrayContaining(["fabric", "fabric_color", "fit", "size_range", "collar", "sleeve", "placket", "production_notes", "applications"]))
   })
 
   it("maps evidence into the canonical question without skipping the other layers", () => {
@@ -28,10 +28,8 @@ describe("layered intake contract", () => {
     const result = buildLayeredRequirements({ garmentType: "polo", seed: { Color: "Azul marino", Referencia: "foto frontal" } })
     const evidence = result.fields.filter((field) => field.layer === "Evidencia recibida")
 
-    expect(evidence.map((field) => [field.label, field.value])).toEqual(expect.arrayContaining([
-      ["Color", "Azul marino"],
-      ["Referencia", "foto frontal"],
-    ]))
+    expect(result.fields.find((field) => field.key === "fabric_color")).toMatchObject({ status: "known", value: "Azul marino" })
+    expect(evidence.map((field) => [field.label, field.value])).toEqual([["Referencia", "foto frontal"]])
   })
 })
 

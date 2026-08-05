@@ -15,7 +15,8 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { neutral, palette } from "../design/tokens.js"
 import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
-import { documentIndexRows, measureRegion, pageColors, selectedDesign } from "./measure.js"
+import { hasColorData } from "../core/colorSpecs.js"
+import { documentIndexRows, measureRegion, pageColors, paginateDocumentIndexEntries, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
@@ -321,7 +322,7 @@ function semanticGroup(type, markup) {
 }
 
 function leafForRegion(region, page, ctx) {
-  const t = T[(ctx && ctx.lang) || "ES"] || T.ES
+  const t = (ctx && ctx.txData && ctx.txData.lexicon) || T[(ctx && ctx.lang) || "ES"] || T.ES
   const design = selectedDesign(page, ctx)
   const garment = ctx && ctx.garment ? ctx.garment : null
   const partLabels = garment && garment.partLabels ? garment.partLabels[(ctx && ctx.lang) || "ES"] || garment.partLabels.ES || {} : {}
@@ -380,6 +381,8 @@ function leafForRegion(region, page, ctx) {
           // shows THAT at full size instead of empty "draw here" boards.
           design: isDesignPage ? design : null,
           dimensionUnit: ctx && ctx.dimensionUnit,
+          designerLabels: (ctx && ctx.designerTx && ctx.designerTx.lexicon) || t,
+          factoryLabels: t,
         })
         return region._mosaicSlot
           ? "<g id='ARTWORK__V" + (Number(region._slotOffset) + 1) + "'>" + artworkMarkup + "</g>"
@@ -704,11 +707,11 @@ export function buildPlannedPages(plan, ctx, opts) {
     // A BOM without a visual target is not a useful production page. Plans
     // from fixtures, fallbacks or a weak model are repaired here as a final
     // document-level invariant before measurement and pagination.
-    // EXCEPT a "data" family page (size chart, QC checklist, factory notes -
-    // see semanticOutline.js's DATA_SECTIONS): its contract legitimately
-    // omits illustration, and forcing one on here would silently override
-    // that after repairPage already agreed the page was complete.
-    if (purposeFamily(page.purpose) !== "data" && pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
+    // This applies to data pages too: a page made only of enumerated fields is
+    // a database dump, not a technical sheet. The visual target can be a
+    // general view, measurement map or detail artboard; the measured
+    // compositor then decides whether the table belongs in a rail or band.
+    if (pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
       const regions = page.regions.slice()
       const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
       regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, {
@@ -725,7 +728,7 @@ export function buildPlannedPages(plan, ctx, opts) {
     // technical data across pages while retaining the page's illustration and
     // chrome. No row is clipped and no font is reduced below its contract.
     const design = selectedDesign(page, ctx)
-    const colors = pageColors(page, ctx).filter((color) => color && color.hex)
+    const colors = pageColors(page, ctx).filter(hasColorData)
     const stopSeq = design && design.emb && Array.isArray(design.emb.stopSeq) ? design.emb.stopSeq : []
     const colorLeaf = findRegionLeaf(firstPass, "colorSpecs")
     const embLeaf = findRegionLeaf(firstPass, "embSpecs")
@@ -860,19 +863,32 @@ export function buildPlannedPages(plan, ctx, opts) {
   if (includeIndex) {
     const coverIndex = descriptors.findIndex((descriptor) => descriptor.page.purpose === "cover")
     const insertAt = coverIndex >= 0 ? coverIndex + 1 : 0
-    const indexPage = {
-      id: "document-index",
-      title: "Indice de produccion",
-      purpose: "index",
-      objective: "Mapa de navegacion y control de recepcion para fabrica.",
-      regions: [
-        { type: "header", weight: 1 },
-        { type: "titleBar", weight: 1 },
-        { type: "documentIndex", weight: 1 },
-        { type: "disclaimer", weight: 1 },
-      ],
-    }
-    descriptors.splice(insertAt, 0, { page: indexPage, pageCtx: baseCtx, sourceIndex: -1, name: "document_index" })
+    const productionEntries = descriptors
+      .filter((descriptor) => descriptor.page.purpose !== "cover" && descriptor.page.purpose !== "index")
+      .map((descriptor) => ({
+        title: descriptor.page.title,
+        purpose: descriptor.page.purpose,
+        description: pageDescription(descriptor.page),
+      }))
+    const indexChunks = paginateDocumentIndexEntries(productionEntries, CONTENT_W, workingHeight(baseCtx))
+    const indexDescriptors = indexChunks.map((_, index) => {
+      const count = indexChunks.length
+      const suffix = count > 1 ? " · " + (index + 1) + "/" + count : ""
+      const indexPage = {
+        id: "document-index" + (count > 1 ? "-" + (index + 1) : ""),
+        title: "Indice de produccion" + suffix,
+        purpose: "index",
+        objective: "Mapa de navegacion y control de recepcion para fabrica.",
+        regions: [
+          { type: "header", weight: 1 },
+          { type: "titleBar", weight: 1 },
+          { type: "documentIndex", weight: 1 },
+          { type: "disclaimer", weight: 1 },
+        ],
+      }
+      return { page: indexPage, pageCtx: baseCtx, sourceIndex: -1, name: "document_index" + (count > 1 ? "_" + (index + 1) : "") }
+    })
+    descriptors.splice(insertAt, 0, ...indexDescriptors)
   }
 
   const totalPages = descriptors.length
@@ -886,11 +902,11 @@ export function buildPlannedPages(plan, ctx, opts) {
   }))
 
   if (includeIndex) {
-    const descriptor = descriptors.find((item) => item.page.purpose === "index")
-    descriptor.pageCtx = {
-      ...descriptor.pageCtx,
-      documentIndex: indexEntries.filter((entry) => entry.purpose !== "cover" && entry.purpose !== "index"),
-    }
+    const productionEntries = indexEntries.filter((entry) => entry.purpose !== "cover" && entry.purpose !== "index")
+    const indexChunks = paginateDocumentIndexEntries(productionEntries, CONTENT_W, workingHeight(baseCtx))
+    descriptors.filter((item) => item.page.purpose === "index").forEach((descriptor, index) => {
+      descriptor.pageCtx = { ...descriptor.pageCtx, documentIndex: indexChunks[index] || [] }
+    })
   }
 
   return descriptors.map((descriptor, index) => {

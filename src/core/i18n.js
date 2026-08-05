@@ -80,11 +80,15 @@ export const UI = {
     toPublic: "→ publica",
     toStudio: "→ studio",
     exportTitle: "Exportación vectorial",
-    exportSubtitle: "Cada página = un SVG A4 con capas semánticas",
+    exportSubtitle: "Un SVG maestro autocontenido; paquete .AI disponible como opción avanzada",
     close: "Cerrar",
     downloadedNextStep: "Descargado — próximo paso:",
     preparing: "Preparando...",
     downloadCompletePack: "Descargar ficha completa",
+    downloadMasterSvg: "Descargar SVG maestro",
+    downloadMasterSvgTitle: "Un archivo autocontenido con todas las paginas y capas semanticas",
+    downloadAdvancedPack: "Illustrator .AI avanzado",
+    masterSvgFailed: "No se pudo generar el SVG maestro.",
     downloadCompletePackTitle: "pages/*.svg + el script que las fusiona en un solo .ai con capas nativas",
     packageFailed: "No se pudo generar el paquete.",
     reviewTitle: "Revisión final",
@@ -227,11 +231,15 @@ export const UI = {
     toPublic: "→ public",
     toStudio: "→ studio",
     exportTitle: "Vector export",
-    exportSubtitle: "Each page = one A4 SVG with semantic layers",
+    exportSubtitle: "One self-contained master SVG; native .AI package available as an advanced option",
     close: "Close",
     downloadedNextStep: "Downloaded — next step:",
     preparing: "Preparing...",
     downloadCompletePack: "Download complete tech pack",
+    downloadMasterSvg: "Download master SVG",
+    downloadMasterSvgTitle: "One self-contained file with every page and semantic layer",
+    downloadAdvancedPack: "Advanced Illustrator .AI",
+    masterSvgFailed: "Could not generate the master SVG.",
     downloadCompletePackTitle: "pages/*.svg + the script that fuses them into one .ai with native layers",
     packageFailed: "Could not generate the package.",
     reviewTitle: "Final review",
@@ -314,9 +322,9 @@ export const UI = {
 // positions live in src/garments/*.js instead, since they differ by garment.
 export const T = {
   ES: {
-    steps: ["Prenda", "Idioma", "Header", "Piezas", "Disenos", "Vista Previa"],
+    steps: ["Prenda", "Idiomas", "Header", "Piezas", "Disenos", "Vista Previa"],
     garmentStep: "Selecciona el tipo de prenda para esta ficha tecnica:",
-    langStep: "Selecciona los idiomas del SVG exportado:",
+    langStep: "Idioma o idiomas para la fabrica:",
     brand: "Marca", season: "Temporada", sno: "Codigo", cat: "Categoria", fab: "Tela", fac: "Fabrica",
     ind: "Fecha Entrada", outd: "Fecha Salida", pname: "Nombre Producto",
     nxt: "Siguiente", bk: "Atras", gen: "Generar",
@@ -331,11 +339,13 @@ export const T = {
     posDetail: "Posicion Detallada", wDes: "Ancho diseno (mm)", hDes: "Alto diseno (mm)",
     noApplica: "Diseno cubre toda la prenda - medidas no aplican",
     fileName: "Nombre del Archivo", driveLink: "Enlace Drive",
+    instructions: "INSTRUCCIONES", mark: "Senalar", location: "Ubicacion", dimension: "Acotar con lineas de medida (mm)",
+    factory: "Fabrica", reference: "Referencia grafica disponible - NO A ESCALA", pending: "PENDIENTE DE CONFIRMAR",
   },
   EN: {
-    steps: ["Garment", "Language", "Header", "Parts", "Designs", "Preview"],
+    steps: ["Garment", "Languages", "Header", "Parts", "Designs", "Preview"],
     garmentStep: "Select the garment type for this tech pack:",
-    langStep: "Select the export languages for the SVG:",
+    langStep: "Language or languages for the factory:",
     brand: "Brand", season: "Season", sno: "Style No", cat: "Category", fab: "Fabric", fac: "Factory",
     ind: "Input Date", outd: "Output Date", pname: "Product Name",
     nxt: "Next", bk: "Back", gen: "Generate",
@@ -350,6 +360,8 @@ export const T = {
     posDetail: "Detailed Position", wDes: "Design Width (mm)", hDes: "Design Height (mm)",
     noApplica: "Design covers entire garment - dimensions N/A",
     fileName: "File Name", driveLink: "Drive Link",
+    instructions: "INSTRUCTIONS", mark: "Mark", location: "Location", dimension: "Draw dimension lines (mm)",
+    factory: "Factory", reference: "Graphic reference available - NOT TO SCALE", pending: "PENDING CONFIRMATION",
   },
   ZH: {
     steps: ["服装类型", "语言", "标题", "零件", "设计", "预览"],
@@ -369,6 +381,8 @@ export const T = {
     posDetail: "详细位置", wDes: "设计宽度(mm)", hDes: "设计高度(mm)",
     noApplica: "设计覆盖整件服装 - 尺寸不适用",
     fileName: "文件名", driveLink: "Drive 链接",
+    instructions: "插图说明", mark: "标注", location: "位置", dimension: "绘制尺寸线(mm)",
+    factory: "工厂", reference: "有图形参考 · 非按比例", pending: "待确认",
   },
 }
 
@@ -410,8 +424,8 @@ export function uiPagesUsedFallback(uiLang, count) {
 
 export function uiExportHint(uiLang, pageCount) {
   return uiLang === "EN"
-    ? `Unzip and run Techpack-Import-Illustrator.jsx (File > Scripts > Other Script) to build one .ai with the ${pageCount} pages as named artboards and the 7 native layers. Affinity: open any SVG in pages/ directly, no script needed.`
-    : `Descomprimí el ZIP y corré Techpack-Import-Illustrator.jsx (Archivo > Secuencias de comandos > Otra secuencia de comandos) para armar un solo .ai con las ${pageCount} páginas como mesas de trabajo y las 7 capas nativas. Affinity: abrí cualquier SVG de pages/ directamente, sin script.`
+    ? `Master SVG: one self-contained file with all ${pageCount} pages. Advanced .AI: ZIP + JSX creates named native artboards and layers in Illustrator.`
+    : `SVG maestro: un archivo autocontenido con las ${pageCount} paginas. .AI avanzado: el ZIP + JSX crea mesas y capas nativas nombradas en Illustrator.`
 }
 
 export function uiExportSteps(uiLang, pageCount) {
@@ -521,6 +535,17 @@ export function uiPlanFailed(uiLang, reason) {
   return (uiLang === "EN"
     ? "The AI document plan failed - using the standard page structure."
     : "El plan de documento con IA falló - usando la estructura de páginas estándar.") + suffix
+}
+
+export function uiPlanContractAssisted(uiLang, count) {
+  if (uiLang === "EN") {
+    return count === 1
+      ? "The verified contract completed 1 data batch; the AI index was preserved."
+      : `The verified contract completed ${count} data batches; the AI index was preserved.`
+  }
+  return count === 1
+    ? "El contrato verificable completó 1 lote de datos; se conservó el índice de la IA."
+    : `El contrato verificable completó ${count} lotes de datos; se conservó el índice de la IA.`
 }
 
 // A page's AI layout call resolved normally, but the CONTENT came from the

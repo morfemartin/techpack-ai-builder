@@ -1,11 +1,12 @@
 import { T } from "../core/i18n.js"
 import { NA, sv, R, TX, LBL, VAL, dimLine, svgChip, svgHeader, svgDisc, svgSectionBar, wrapLines, fitText, headerHeight } from "../core/svgPrimitives.js"
 import { h2c } from "../core/colorUtils.js"
+import { hasColorData, normalizeFabricColor, pantoneDisplay } from "../core/colorSpecs.js"
 import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.js"
 import { neutral, palette, type } from "../design/tokens.js"
 import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
-import { briefLines } from "./briefs.js"
+import { briefLines, factoryBriefLines } from "./briefs.js"
 import { convertMeasure, formatMeasure, normalizeUnit } from "../core/units.js"
 import { partsTableLayout } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
@@ -95,7 +96,7 @@ export function renderColorSpecs(box, { colors } = {}) {
   var s = ""
   var ty = box.y
   var W = box.width
-  var safe = (colors || []).filter(function (c) { return c && c.hex })
+  var safe = (colors || []).filter(hasColorData)
 
   // Full-width rule + full-width section bar (svgSectionBar): the same edges
   // and left-aligned title grammar as the page titleBar, instead of the old
@@ -112,14 +113,19 @@ export function renderColorSpecs(box, { colors } = {}) {
   var small = rowH < 26 || W < 260
   var textX = box.x + INSET + swatch + TEXT_PAD * 2
   safe.forEach(function (col) {
-    var cm = h2c(col.hex)
+    var normalized = normalizeFabricColor(col)
+    var cm = h2c(normalized.hex)
     var rowMidY = ty + rowH / 2
-    s += R(box.x + INSET, rowMidY - swatch / 2, swatch, swatch, col.hex, palette.ink.hex, "0.5")
+    var madeira = normalized.madeira && normalized.madeira.code
+      ? "MADEIRA " + normalized.madeira.code + " · " + normalized.madeira.name + " · REFERENCIA PANTALLA"
+      : ""
+    s += R(box.x + INSET, rowMidY - swatch / 2, swatch, swatch, normalized.hex, palette.ink.hex, "0.5")
     if (small) {
-      s += TX(textX, rowMidY, (col.name || col.hex) + "  " + col.hex, PRINT.minFont, true, "start")
+      s += TX(textX, rowMidY - 5, normalized.name || normalized.hex, PRINT.minFont, true, "start")
+      s += TX(textX, rowMidY + 7, madeira || pantoneDisplay(normalized), PRINT.minFont, false, "start", madeira || normalized.pantoneStatus === "verified" ? palette.ink.hex : palette.red.hex, type.svgFonts.data)
     } else {
-      s += TX(textX, rowMidY - 6, col.name || col.hex, PRINT.minFont, true, "start")
-      s += TX(textX, rowMidY + 7, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + col.hex, PRINT.minFont, false, "start", undefined, type.svgFonts.data)
+      s += TX(textX, rowMidY - 6, (normalized.name || normalized.hex) + " · " + (madeira || pantoneDisplay(normalized)), PRINT.minFont, true, "start")
+      s += TX(textX, rowMidY + 7, "C:" + cm.c + " M:" + cm.m + " Y:" + cm.y + " K:" + cm.k + " | " + normalized.hex, PRINT.minFont, false, "start", undefined, type.svgFonts.data)
     }
     ty += rowH
   })
@@ -127,7 +133,7 @@ export function renderColorSpecs(box, { colors } = {}) {
 }
 
 function colorSpecsHeight(colors) {
-  var safe = (colors || []).filter(function (c) { return c && c.hex })
+  var safe = (colors || []).filter(hasColorData)
   var headH = BAR.h + SECTION_AFTER_BAR_GAP
   var rowH = colorRowHeight()
   return headH + safe.length * rowH
@@ -174,9 +180,16 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
     s += TX(box.x + INSET, ty, "Secuencia:", fontSize, true, "start")
     ty += rowH
     seq.forEach(function (st) {
-      s += TX(box.x + INSET + TEXT_PAD, ty, formatEmbroideryStop(st), fontSize, false, "start", undefined, type.svgFonts.data)
+      var threadHex = st.displayHex || (st.madeira && st.madeira.displayHex) || (/^#[0-9a-f]{6}$/i.test(st.color || "") ? st.color : "")
+      var threadX = box.x + INSET + TEXT_PAD
+      if (threadHex) {
+        s += R(threadX, ty - 7, 12, 12, threadHex, palette.ink.hex, "0.5")
+        threadX += 18
+      }
+      s += TX(threadX, ty, formatEmbroideryStop(st), fontSize, false, "start", undefined, type.svgFonts.data)
       ty += rowH
     })
+    s += TX(box.x + INSET, ty, "Muestra digital de referencia · codigo Madeira vinculante", PRINT.minFont, false, "start", neutral.mid.hex, type.svgFonts.data)
   }
   return s
 }
@@ -241,7 +254,7 @@ function renderDesignArtHero(box, design, dimensionUnit) {
   return "<g id='ARTWORK__V1'>" + s + "</g>"
 }
 
-export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset, clipPrefix, design, dimensionUnit } = {}) {
+export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOffset, clipPrefix, design, dimensionUnit, designerLabels, factoryLabels } = {}) {
   // Uploaded artwork owns the page: render it as the hero, not empty boards.
   if (design && design.imageData) return renderDesignArtHero(box, design, dimensionUnit)
   var slotCount = Math.max(1, Number(slots) || (Array.isArray(refs) ? refs.length : 1))
@@ -269,6 +282,7 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
   })
   var s = ""
   var designerCommunication = ""
+  var factoryCommunication = ""
 
   for (var i = 0; i < slotCount; i++) {
     var c = i % cols
@@ -307,7 +321,7 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     if (brief) {
       for (var modeIndex = 0; modeIndex < modes.length; modeIndex++) {
         var candidateLines = []
-        briefLines(brief, modes[modeIndex]).forEach(function (line) {
+        briefLines(brief, modes[modeIndex], designerLabels).forEach(function (line) {
           wrapLines(line, textW, PRINT.minFont).forEach(function (wrapped) {
             candidateLines.push({ text: wrapped, pending: line.indexOf("PENDIENTE DE CONFIRMAR") === 0 })
           })
@@ -321,7 +335,7 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     designerCommunication += "<g id='ILLUSTRATOR_INSTRUCTIONS__V" + viewNumber + "'>"
     // The view code already appears in this block's badge and heading, so the
     // caption does not repeat it (see briefLines for the other two copies).
-    designerCommunication += TX(textX, textY - GRID.baseline, "INSTRUCCIONES", PRINT.minFont, true, "start", neutral.strongText.hex)
+    designerCommunication += TX(textX, textY - GRID.baseline, (designerLabels && designerLabels.instructions) || "INSTRUCCIONES", PRINT.minFont, true, "start", neutral.strongText.hex)
     selectedLines.forEach(function (line, lineIndex) {
       var ly = textY + lineIndex * GRID.baseline
       if (line.pending) designerCommunication += R(textX - 4, ly - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
@@ -339,9 +353,27 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
     }
     designerCommunication += "</g>"
     designerCommunication += "</g>"
+
+    if (brief) {
+      var factoryLines = []
+      factoryBriefLines(brief, factoryLabels).forEach(function (line) {
+        wrapLines(line, textW, PRINT.minFont).forEach(function (wrapped) {
+          factoryLines.push({ text: wrapped, pending: line.indexOf((factoryLabels && factoryLabels.pending) || "PENDIENTE DE CONFIRMAR") === 0 })
+        })
+      })
+      factoryLines = factoryLines.slice(0, Math.max(1, Math.floor(cellH / GRID.baseline / 3)))
+      var factoryY = y + cellH - GRID.baseline * (factoryLines.length + 1)
+      factoryCommunication += "<g id='FACTORY_CALLOUTS__V" + viewNumber + "'>"
+      factoryLines.forEach(function (line, lineIndex) {
+        var fy = factoryY + lineIndex * GRID.baseline
+        if (line.pending) factoryCommunication += R(textX - 4, fy - GRID.baseline / 2, textW + 8, GRID.baseline, palette.yellow.hex, palette.ink.hex, "0.5")
+        factoryCommunication += TX(textX, fy, line.text, PRINT.minFont, true, "start", line.pending ? palette.ink.hex : neutral.strongText.hex, type.svgFonts.data)
+      })
+      factoryCommunication += "</g>"
+    }
   }
 
-  return s + "<g id='DESIGNER_COMMUNICATION' data-removable='true'>" + designerCommunication + "</g>"
+  return s + "<g id='CALLOUTS'>" + factoryCommunication + "</g><g id='DESIGNER_COMMUNICATION' data-removable='true'>" + designerCommunication + "</g>"
 }
 
 /* ---- PAGE 1: parts spec sheet + 4-view diagram (garment-specific) ----
@@ -353,7 +385,7 @@ export function renderIllustrationZone(box, { slots, refs, note, briefs, slotOff
  * active. That's the "flex by data volume" property the engine exists for.
  */
 export function buildPage1(lang, hdr, parts, logo, txData, garment) {
-  var t = T[lang] || T.ES
+  var t = (txData && txData.lexicon) || T[lang] || T.ES
   var pn = garment.partLabels[lang] || garment.partLabels.ES
   // discH: just enough for svgDisc's single centered 9px line + breathing
   // room - was 28, oversized for one line of text regardless of page content.
@@ -437,8 +469,8 @@ export function buildPage1(lang, hdr, parts, logo, txData, garment) {
 }
 
 /* ---- DESIGN PAGE: garment-independent, only needs the base translations ---- */
-export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
-  var t = T[lang] || T.ES
+export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail, txData) {
+  var t = (txData && txData.lexicon) || T[lang] || T.ES
   var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, PAGE.width), discH = CHROME.footer, bodyH = H - hH - discH
   var isEmb = isEmbTec(d.tec), isWhole = isWholePosF(d.pos)
   var LW = GRID.span(3)
@@ -551,8 +583,8 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   return s
 }
 
-export function buildFabricColorPage(lang, hdr, logo, fabricColors) {
-  var t = T[lang] || T.ES
+export function buildFabricColorPage(lang, hdr, logo, fabricColors, txData) {
+  var t = (txData && txData.lexicon) || T[lang] || T.ES
   var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, W), discH = CHROME.footer
   var barY = hH, barH = CHROME.titleBar
   var bodyY = barY + barH + GRID.baseline
@@ -571,13 +603,13 @@ export function buildAllPages(lang, hdr, parts, designs, logo, txData, garment, 
   var pages = []
   var txP = txData || null
   pages.push({ name: "pagina_principal", svg: buildPage1(lang, hdr, parts, logo, txP, garment) })
-  if (Array.isArray(fabricColors) && fabricColors.some(function (color) { return color && color.hex })) {
-    pages.push({ name: "colores_de_tela", svg: buildFabricColorPage(lang, hdr, logo, fabricColors) })
+  if (Array.isArray(fabricColors) && fabricColors.some(hasColorData)) {
+    pages.push({ name: "colores_de_tela", svg: buildFabricColorPage(lang, hdr, logo, fabricColors, txP) })
   }
   designs.forEach(function (d, i) {
     var txName = txP && txP.designs && txP.designs[i] ? txP.designs[i].name : null
     var txPos = txP && txP.designs && txP.designs[i] ? txP.designs[i].posDetail : null
-    pages.push({ name: "diseno_" + (i + 1) + "_" + (d.name || "").replace(/\s+/g, "_"), svg: buildDesignPage(lang, d, hdr, logo, i, txName, txPos) })
+    pages.push({ name: "diseno_" + (i + 1) + "_" + (d.name || "").replace(/\s+/g, "_"), svg: buildDesignPage(lang, d, hdr, logo, i, txName, txPos, txP) })
   })
   return pages
 }

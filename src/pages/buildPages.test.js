@@ -211,7 +211,8 @@ describe("reusable page block helpers", () => {
   it("uses compact color rows in a narrow design-data column", () => {
     const svg = renderColorSpecs({ x: 0, y: 0, width: 180, height: 500 }, { colors: [{ name: "Blue & White", hex: "#003DA5" }] })
 
-    expect(svg).toContain("Blue &amp; White  #003DA5")
+    expect(svg).toContain("Blue &amp; White")
+    expect(svg).toContain("PANTONE: PENDIENTE DE VERIFICAR")
     expect(svg).not.toContain("C:100 M:63")
   })
 
@@ -239,6 +240,27 @@ describe("reusable page block helpers", () => {
   it("prints the Madeira code, official name and descriptive color in each stop", () => {
     expect(formatEmbroideryStop({ stop: 2, code: "1055", name: "Latte", color: "Beige", stitches: 1800 }))
       .toBe("Stop 2: Madeira 1055 · Latte · Beige (1800 pt.)")
+  })
+
+  it("keeps factory facts outside the removable designer group", () => {
+    const svg = renderIllustrationZone({ x: 0, y: 0, width: 500, height: 400 }, {
+      slots: 1,
+      briefs: [{
+        slotCode: "V1",
+        garmentPart: "Panel frontal",
+        view: "Frente",
+        mustMark: ["Costura central"],
+        measurements: [{ id: "DIM-1", label: "Ancho 70mm", perSize: false }],
+        placementLandmark: "80mm bajo hombro",
+        factoryNote: "Bordado 3D con backing",
+        pending: ["Tolerancia pendiente"],
+      }],
+    })
+    expect(svg).toContain("id='DESIGNER_COMMUNICATION'")
+    expect(svg).toContain("id='CALLOUTS'")
+    const removable = svg.match(/<g id='DESIGNER_COMMUNICATION'[\s\S]*?<\/g>/)?.[0] || ""
+    expect(removable).not.toContain("Bordado 3D con backing")
+    expect(svg).toContain("Bordado 3D con backing")
   })
 
   it("renders illustration placeholders without drawing garment vectors", () => {

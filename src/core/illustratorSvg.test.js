@@ -131,6 +131,25 @@ describe("buildMultiArtboardSvg (one file, every page)", () => {
     expect(svg).toMatch(/id="ARTBOARD_01"[^>]*fill-opacity="0"/)
   })
 
+  it("prefixes repeated object ids and their references per page", () => {
+    const repeated = [1, 2].map((n) => ({
+      id: "p" + n,
+      title: "Pagina " + n,
+      svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1188 840'><defs><linearGradient id='paint'><stop offset='0'/></linearGradient></defs><g id='TECH_DATA'><rect id='sample' fill='url(#paint)'/></g></svg>",
+    }))
+    const svg = buildMultiArtboardSvg(repeated)
+    expect(svg).toContain('id="P01_sample"')
+    expect(svg).toContain('id="P02_sample"')
+    expect(svg).toContain('fill="url(#P01_paint)"')
+    expect(svg).toContain('fill="url(#P02_paint)"')
+  })
+
+  it("keeps embedded image data inside the master file", () => {
+    const svg = buildMultiArtboardSvg([{ id: "p1", title: "Imagen", svg: "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1188 840'><image id='logo' href='data:image/png;base64,QUJD'/></svg>" }])
+    expect(svg).toContain("data:image/png;base64,QUJD")
+    expect(svg).toContain('id="P01_logo"')
+  })
+
   it("refuses to build from nothing rather than emitting an empty document", () => {
     expect(() => buildMultiArtboardSvg([])).toThrow(/at least one page/i)
   })

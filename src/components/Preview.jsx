@@ -6,6 +6,7 @@ import { palette, role, type } from "../design/tokens.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 import { CHROME, GRID, PAGE } from "../design/metrics.js"
 import { buildFabricColorPage } from "../pages/buildPages.js"
+import { hasColorData } from "../core/colorSpecs.js"
 
 // This is the live on-screen mockup shown in the "Vista Previa" wizard step -
 // the thing a user actually looks at before clicking "Generar SVG". It has to
@@ -17,14 +18,14 @@ const hairThin = "0.5px solid " + C.ink.hex
 const hair = "1px solid " + C.ink.hex
 
 export function Preview({ lang, hdr, parts, designs, fabricColors, logo, page, txCache, garment }) {
-  var t = T[lang] || T.ES
+  var txData = txCache && txCache[lang]
+  var t = (txData && txData.lexicon) || T[lang] || T.ES
   var pn = garment.partLabels[lang] || garment.partLabels.ES
   var ap = parts.filter((p) => p.on)
   var SCALE = 0.54
   var W = PAGE.width, H = PAGE.height, hH = CHROME.header, discH = CHROME.footer, bodyH = H - hH - discH
   var lW = GRID.span(3), rW = W - lW, vW = rW / 2, vH = bodyH / 2
   var rH = Math.max(16, Math.floor((bodyH - 42) / Math.max(ap.length, 1)))
-  var txData = txCache && txCache[lang]
   var wrap = { width: W, height: H, transformOrigin: "top left", transform: "scale(" + SCALE + ")", background: C.white.hex, border: "1.5px solid " + C.ink.hex, position: "absolute", top: 0, left: 0, fontFamily: type.fonts.ui, boxSizing: "border-box", overflow: "hidden" }
 
   function HdrUI() {
@@ -123,7 +124,7 @@ export function Preview({ lang, hdr, parts, designs, fabricColors, logo, page, t
     )
   }
 
-  var hasFabricColorPage = Array.isArray(fabricColors) && fabricColors.some((color) => color && color.hex)
+  var hasFabricColorPage = Array.isArray(fabricColors) && fabricColors.some(hasColorData)
   if (hasFabricColorPage && page === 1) {
     return (
       <div style={{ overflow: "auto", background: C.canvas.hex, padding: 10 }}>
