@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("./deepseekClient.js", () => ({ extractStructured: vi.fn() }))
 import { extractStructured } from "./deepseekClient.js"
 import { buildTranslationPayload, combineTranslations, translateContent, validTranslation } from "./translate.js"
+import { T } from "./i18n.js"
 
 const hdr = { pname: "Chaqueta 20K" }
 const parts = [{ on: true, val: "Cierre YKK 5, largo 620mm" }]
@@ -28,7 +29,7 @@ describe("technical translation", () => {
     const valid = structuredClone(source)
     valid.pname = "20K Jacket"
     extractStructured.mockResolvedValueOnce(invalid).mockResolvedValueOnce(valid)
-    await expect(translateContent(hdr, parts, designs, "EN")).resolves.toEqual(valid)
+    await expect(translateContent(hdr, parts, designs, "EN")).resolves.toEqual({ ...valid, lexicon: T.EN })
     expect(extractStructured).toHaveBeenCalledTimes(2)
   })
 
@@ -37,7 +38,7 @@ describe("technical translation", () => {
     const valid = structuredClone(source)
     valid.pname = "20K Jacket"
     extractStructured.mockRejectedValueOnce(new Error("invalid JSON")).mockResolvedValueOnce(valid)
-    await expect(translateContent(hdr, parts, designs, "EN")).resolves.toEqual(valid)
+    await expect(translateContent(hdr, parts, designs, "EN")).resolves.toEqual({ ...valid, lexicon: T.EN })
     expect(extractStructured).toHaveBeenCalledTimes(2)
   })
 
@@ -57,6 +58,36 @@ describe("technical translation", () => {
     translated.fabricColors[0].hex = source.fabricColors[0].hex
     translated.fabricColors[0].pantoneStatus = "verified"
     expect(validTranslation(source, translated)).toBe(false)
+  })
+
+  it("lets the model translate color names while code restores technical color invariants", async () => {
+    const source = buildTranslationPayload(hdr, parts, designs, "ES", fabricColors)
+    const candidate = structuredClone(source)
+    candidate.fabricColors[0] = { name: "Navy blue", hex: "#FFFFFF", pantoneApprox: "invented" }
+    candidate.designs[0].colors = []
+    extractStructured.mockResolvedValueOnce(candidate)
+
+    const translated = await translateContent(hdr, parts, designs, "EN", { sourceLang: "ES", fabricColors })
+
+    expect(translated.fabricColors[0]).toEqual({
+      ...source.fabricColors[0],
+      name: "Navy blue",
+    })
+    expect(translated.lexicon).toEqual(T.EN)
+  })
+
+  it("sends the requested translation as the root object, not a source envelope", async () => {
+    const source = buildTranslationPayload(hdr, parts, designs)
+    const candidate = structuredClone(source)
+    candidate.pname = "20K Jacket"
+    extractStructured.mockResolvedValueOnce(candidate)
+
+    await translateContent(hdr, parts, designs, "EN")
+
+    const sent = JSON.parse(extractStructured.mock.calls[0][0].content)
+    expect(sent.pname).toBe(source.pname)
+    expect(sent.source).toBeUndefined()
+    expect(sent.previousInvalidAnswer).toBeUndefined()
   })
 
   it("combines validated translations without duplicating invariant structure", () => {

@@ -33,6 +33,63 @@ function colorPayload(color) {
   }
 }
 
+function translatablePayload(source) {
+  return {
+    pname: source.pname,
+    parts: source.parts,
+    designs: source.designs.map((design) => ({
+      name: design.name,
+      pos: design.pos,
+      posDetail: design.posDetail,
+      technique: design.technique,
+      illustrationBrief: design.illustrationBrief,
+      colors: design.colors.map((color) => color.name),
+    })),
+    fabricColors: source.fabricColors.map((color) => color.name),
+    lexicon: source.lexicon,
+  }
+}
+
+function translatedColorName(value) {
+  return typeof value === "string" ? value : value && typeof value.name === "string" ? value.name : undefined
+}
+
+// The model translates prose; code owns the schema and every production
+// invariant. Asking a provider to echo HEX, Pantone, Madeira and status fields
+// made a harmless formatting variation invalidate the entire document.
+function hydrateTranslation(source, candidate, targetLang) {
+  if (!candidate || typeof candidate !== "object") return candidate
+  const candidateDesigns = Array.isArray(candidate.designs) ? candidate.designs : []
+  const candidateFabricColors = Array.isArray(candidate.fabricColors) ? candidate.fabricColors : []
+  return {
+    pname: candidate.pname,
+    parts: candidate.parts,
+    designs: source.designs.map((design, designIndex) => {
+      const translated = candidateDesigns[designIndex] || {}
+      const colors = Array.isArray(translated.colors) ? translated.colors : []
+      return {
+        ...design,
+        name: translated.name,
+        pos: translated.pos,
+        posDetail: translated.posDetail,
+        technique: translated.technique,
+        illustrationBrief: translated.illustrationBrief,
+        colors: design.colors.map((color, colorIndex) => ({
+          ...color,
+          name: translatedColorName(colors[colorIndex]),
+        })),
+      }
+    }),
+    fabricColors: source.fabricColors.map((color, colorIndex) => ({
+      ...color,
+      name: translatedColorName(candidateFabricColors[colorIndex]),
+    })),
+    // ES and EN have reviewed built-in terminology. It is both more reliable
+    // and cheaper than asking the model to regenerate those 38 labels.
+    lexicon: T[targetLang] || candidate.lexicon,
+  }
+}
+
 export function buildTranslationPayload(hdr, parts, designs, sourceLang = "ES", fabricColors = []) {
   return {
     pname: (hdr && hdr.pname) || "",
@@ -123,8 +180,8 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
   const sourceName = LANGUAGE_NAMES[sourceLang]
   if (!targetName || !sourceName) throw new Error("Unsupported document language: " + targetLang)
 
-  let previous = null
   let lastError = null
+  const requestPayload = translatablePayload(source)
   for (let attempt = 1; attempt <= 3; attempt++) {
     const repair = attempt === 2
       ? " The previous answer failed validation. Repair it: keep every key and array item, and preserve every number, unit, code, Pantone/Madeira reference, DIM/D/V identifier and hexadecimal value exactly."
@@ -135,18 +192,20 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
       const result = await extractStructured({
         instructions:
           "Translate a garment technical document from " + sourceName + " to " + targetName + ". " +
-          "Return the exact same JSON structure. Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
-        content: JSON.stringify({ source, previousInvalidAnswer: attempt === 2 ? previous : null }),
+          "Return the exact same JSON structure and array order. Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references or Madeira codes." + repair,
+        // The payload itself is the requested root object. Wrapping it in a
+        // {source, previousInvalidAnswer} envelope taught Mistral to preserve
+        // that envelope, so a correct translation failed our root contract.
+        content: JSON.stringify(requestPayload),
         maxTokens: 4200,
       })
-      if (validTranslation(source, result)) return result
-      previous = result
+      const hydrated = hydrateTranslation(source, result, targetLang)
+      if (validTranslation(source, hydrated)) return hydrated
       lastError = null
     } catch (error) {
       // A formatting miss is one invalid attempt, not the end of the language
       // workflow. The following pass starts again from the intact source.
       lastError = error
-      previous = error && error.cause && error.cause.raw ? error.cause.raw : null
     }
   }
   const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
