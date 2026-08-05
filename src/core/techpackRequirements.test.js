@@ -502,6 +502,20 @@ describe("analyzeRequirements onProgress wiring", () => {
     await analyzeRequirements({ garmentType: "polo", seed: {}, tecs: [] })
   })
 
+  it("provides a garment-aware layered fallback when every model answer misses the contract", async () => {
+    deepseekChat.mockImplementation(async ({ fallback, validator }) => {
+      const thin = '{"garmentType":"hoodie","fields":[]}'
+      expect(validator(thin)).toBe(false)
+      expect(typeof fallback).toBe("string")
+      return fallback
+    })
+
+    const result = await analyzeRequirements({ garmentType: "hoodie", seed: {}, tecs: [] })
+    const pending = pendingFields(result, "general")
+    expect(pending.map((field) => field.label)).toEqual(expect.arrayContaining(["Capucha", "Tela principal", "Interior / forro"]))
+    expect(pending.every((field) => field.options.length >= 2)).toBe(true)
+  })
+
   it("requires every question it shows to carry 2-4 numbered options", async () => {
     deepseekChat.mockImplementation(async ({ validator }) => {
       const noOptions = '{"garmentType":"polo","fields":[' + Array.from({ length: 8 }, (_, i) =>

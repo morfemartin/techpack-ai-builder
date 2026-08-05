@@ -158,10 +158,13 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
         resolved.every((field) => field.value.trim().length > 0)
       )
     },
-    // Deliberately no `fallback`: if neither provider can reason about this
-    // garment, runHybridAI throws and the caller surfaces a real failure. A
-    // generic questionnaire here would look like success and quietly poison
-    // the tech pack with questions that do not belong to this garment.
+    // Keep the quality gate above: a thin answer still gives the other
+    // provider (or the same provider's one controlled retry) a chance. If
+    // every answer fails, the deterministic layered contract takes over so
+    // the intake never dead-ends. It is garment-aware for the supported
+    // families, preserves seed evidence, and is repaired by the same anatomy
+    // guard used after a model answer.
+    fallback: JSON.stringify(fallbackRequirements(garmentType, seed)),
     onStatus,
     signal,
   }
