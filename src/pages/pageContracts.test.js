@@ -270,7 +270,7 @@ describe("outline contract", () => {
     ]))
   })
 
-  it("splits an overloaded distributed page instead of shrinking its artboards", () => {
+  it("keeps semantic objectives intact so measured layout can paginate them", () => {
     const manyParts = Array.from({ length: 17 }, (_, index) => ({ id: "p" + (index + 1), on: true }))
     const outline = {
       pages: [
@@ -278,10 +278,10 @@ describe("outline contract", () => {
         { id: "all-parts", title: "All parts", purpose: "structure:body", pieces: manyParts.map((part) => part.id) },
       ],
     }
-    expect(validateOutline(outline, { parts: manyParts }).map((error) => error.code)).toContain("part-page-overloaded")
+    expect(validateOutline(outline, { parts: manyParts })).toEqual([])
     const repaired = repairOutline(outline, { parts: manyParts }).outline
     const structure = repaired.pages.filter((page) => page.purpose === "structure:body")
-    expect(structure.map((page) => page.pieces.length)).toEqual([6, 6, 5])
+    expect(structure.map((page) => page.pieces.length)).toEqual([17])
     expect(validateOutline(repaired, { parts: manyParts })).toEqual([])
   })
 

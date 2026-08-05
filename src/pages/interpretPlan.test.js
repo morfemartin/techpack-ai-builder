@@ -412,12 +412,7 @@ describe("buildPlannedPages parts-list pagination (F4.7)", () => {
   })
 })
 
-describe("buildPlannedPages honors the data: family's no-illustration contract", () => {
-  // Line 703 used to force an illustration onto ANY page with a partsList
-  // and none, regardless of purpose - correct for a structure:* page (a BOM
-  // without a visual target is useless), wrong for a data: page (a size
-  // chart or QC checklist legitimately has no illustration; repairPage
-  // already agreed the page was complete before this ran).
+describe("buildPlannedPages gives every technical list a visual target", () => {
   const dataParts = [{ id: "m1", val: "54 cm", on: true }]
   const ctx = { lang: "ES", hdr: { brand: "Morfe", pname: "Polo" }, parts: dataParts, designs: [], logo: null, txData: null, garment: { partLabels: { ES: {} } } }
   const basePage = (purpose) => ({
@@ -427,9 +422,9 @@ describe("buildPlannedPages honors the data: family's no-illustration contract",
     regions: [{ type: "header", weight: 8 }, { type: "titleBar", weight: 5 }, { type: "partsList", weight: 60 }, { type: "disclaimer", weight: 8 }],
   })
 
-  it("does not inject an illustration into a data: page missing one", () => {
+  it("injects an illustration into a data: page missing one", () => {
     const pages = buildPlannedPages({ pages: [basePage("data:measurements")] }, ctx)
-    expect(pages[0].svg).not.toContain("id='ARTWORK'")
+    expect(pages[0].svg).toContain("id='ARTWORK'")
   })
 
   it("still injects an illustration into a structure: page missing one", () => {

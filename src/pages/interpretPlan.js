@@ -707,11 +707,11 @@ export function buildPlannedPages(plan, ctx, opts) {
     // A BOM without a visual target is not a useful production page. Plans
     // from fixtures, fallbacks or a weak model are repaired here as a final
     // document-level invariant before measurement and pagination.
-    // EXCEPT a "data" family page (size chart, QC checklist, factory notes -
-    // see semanticOutline.js's DATA_SECTIONS): its contract legitimately
-    // omits illustration, and forcing one on here would silently override
-    // that after repairPage already agreed the page was complete.
-    if (purposeFamily(page.purpose) !== "data" && pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
+    // This applies to data pages too: a page made only of enumerated fields is
+    // a database dump, not a technical sheet. The visual target can be a
+    // general view, measurement map or detail artboard; the measured
+    // compositor then decides whether the table belongs in a rail or band.
+    if (pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
       const regions = page.regions.slice()
       const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
       regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, {

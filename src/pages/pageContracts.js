@@ -24,7 +24,7 @@
 import { pageColors, selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { hasColorData } from "../core/colorSpecs.js"
-import { balancedChunks, partitionPartsBySystem } from "../core/semanticOutline.js"
+import { partitionPartsBySystem } from "../core/semanticOutline.js"
 
 export const CONTRACTS = {
   index: {
@@ -328,8 +328,6 @@ export function repairPage(page, ctx) {
 
 // ── Document-level contract ──────────────────────────────────────────────────
 
-const MAX_PARTS_PER_STRUCTURAL_PAGE = 8
-
 function isFullBomPage(p) {
   const fam = purposeFamily(p && p.purpose)
   const restricted = Array.isArray(p && p.pieces) && p.pieces.length > 0
@@ -377,11 +375,6 @@ export function validateOutline(outline, ctx) {
   if (!pages.some((p) => p && p.purpose === "cover")) errors.push({ code: "missing-cover" })
   const partIds = activePartIds(ctx)
   if (partIds.length > 0 && !pages.some(isBomFamilyPage)) errors.push({ code: "missing-bom-page" })
-  for (const page of pages) {
-    if (isBomFamilyPage(page) && Array.isArray(page.pieces) && page.pieces.length > MAX_PARTS_PER_STRUCTURAL_PAGE) {
-      errors.push({ code: "part-page-overloaded", detail: page.id })
-    }
-  }
   for (const partId of partIds) {
     const coverage = partCoverage(pages, partId)
     if (coverage.length === 0) errors.push({ code: "part-uncovered", detail: partId })
@@ -418,20 +411,10 @@ export function repairOutline(outline, ctx) {
     pages.splice(coverIdx + 1, 0, ...inserted)
     repairs.push("inserted " + inserted.length + " semantic BOM pages")
   } else if (partIds.length > 0 && !structuralPages.some(isFullBomPage)) {
-    pages = pages.flatMap((page) => {
-      if (!isBomFamilyPage(page) || !Array.isArray(page.pieces) || page.pieces.length <= MAX_PARTS_PER_STRUCTURAL_PAGE) return [page]
-      const split = balancedChunks(page.pieces, MAX_PARTS_PER_STRUCTURAL_PAGE).map((pieces, index) => {
-        const number = index + 1
-        return {
-          ...page,
-          id: page.id + "-" + number,
-          title: page.title + " · " + number,
-          pieces,
-        }
-      })
-      repairs.push("split overloaded structural page " + page.id + " into " + split.length)
-      return split
-    })
+    // Do not paginate by an arbitrary row count here. The page contract does
+    // not know the selected composition, column width, translated copy or
+    // wrapped row heights. buildPlannedPages measures all of those and creates
+    // balanced continuation pages only when the rendered table cannot fit.
     const seen = new Set()
     pages = pages.filter((page) => {
       if (!isBomFamilyPage(page) || !Array.isArray(page.pieces)) return true
