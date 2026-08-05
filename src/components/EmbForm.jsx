@@ -1,6 +1,7 @@
 import { useState, useRef } from "react"
 import { extractEmbFromPDF } from "../core/embExtract.js"
-import { MADEIRA_CLASSIC_RAYON, findMadeiraThreadByCode } from "../core/madeiraThreads.js"
+import { MADEIRA_CLASSIC_RAYON, findMadeiraThreadByCode, searchMadeiraThreads } from "../core/madeiraThreads.js"
+import { normalizeMadeiraThread } from "../core/colorSpecs.js"
 import { palette, role } from "../design/tokens.js"
 
 export function EmbForm({ emb, onChange }) {
@@ -8,6 +9,7 @@ export function EmbForm({ emb, onChange }) {
   const [extracted, setExtracted] = useState(false)
   const [extractError, setExtractError] = useState("")
   const [corrections, setCorrections] = useState([])
+  const [threadSearches, setThreadSearches] = useState({})
   const fileRef = useRef()
   function upd(k, v) {
     onChange(Object.assign({}, emb, { [k]: v }))
@@ -20,7 +22,13 @@ export function EmbForm({ emb, onChange }) {
     // the pair inconsistent with itself.
     if (k === "code") {
       var match = findMadeiraThreadByCode(v)
+      var visual = normalizeMadeiraThread(v)
       if (match) next.name = match.name
+      if (visual) {
+        next.displayHex = visual.displayHex
+        next.madeira = visual
+        next.color = visual.displayHex
+      }
     }
     ss[i] = next
     onChange(Object.assign({}, emb, { stopSeq: ss }))
@@ -35,6 +43,11 @@ export function EmbForm({ emb, onChange }) {
     ss.splice(i, 1)
     onChange(Object.assign({}, emb, { stopSeq: ss }))
   }
+  function useCustomThread(i) {
+    var ss = emb.stopSeq ? emb.stopSeq.slice() : []
+    ss[i] = Object.assign({}, ss[i], { code: "", displayHex: "", madeira: { custom: true } })
+    onChange(Object.assign({}, emb, { stopSeq: ss }))
+  }
   async function handlePDF(e) {
     var f = e.target.files[0]
     if (!f) return
@@ -47,7 +60,14 @@ export function EmbForm({ emb, onChange }) {
       try {
         var b64 = ev.target.result.split(",")[1]
         var result = await extractEmbFromPDF(b64)
-        onChange(Object.assign({}, emb, result.emb))
+        var extractedEmb = Object.assign({}, result.emb)
+        if (Array.isArray(extractedEmb.stopSeq)) {
+          extractedEmb.stopSeq = extractedEmb.stopSeq.map(function (stop) {
+            var visual = normalizeMadeiraThread(stop && (stop.code || stop.name))
+            return visual ? Object.assign({}, stop, { code: visual.code, name: visual.name, color: visual.displayHex, displayHex: visual.displayHex, madeira: visual }) : stop
+          })
+        }
+        onChange(Object.assign({}, emb, extractedEmb))
         setCorrections(result.corrections)
         setExtracted(true)
       } catch (err) {
@@ -115,37 +135,32 @@ export function EmbForm({ emb, onChange }) {
             + Stop
           </button>
         </div>
-        {(emb.stopSeq || []).map((st, i) => (
-          <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "flex-end" }}>
-            <span style={{ fontSize: 11, color: "#888", minWidth: 18, paddingBottom: 4 }}>#{i + 1}</span>
-            {[["color", "Color"], ["stitches", "Punt."], ["name", "Nombre"]].map((kl) => (
-              <div key={kl[0]} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-                <label style={{ fontSize: 9, color: "#aaa" }}>{kl[1]}</label>
-                <input
-                  value={st[kl[0]] || ""}
-                  onChange={(e) => updSeq(i, kl[0], e.target.value)}
-                  style={{ padding: "3px 6px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 11, outline: "none" }}
-                />
+        {(emb.stopSeq || []).map((st, i) => {
+          var query = threadSearches[i] || ""
+          var matches = query ? searchMadeiraThreads(query, 16) : MADEIRA_CLASSIC_RAYON.slice(0, 16)
+          var catalogThread = st.madeira && st.madeira.code
+          return (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "28px minmax(0, 1fr) 100px 24px", gap: 8, marginBottom: 10, alignItems: "start", padding: 8, border: "1px solid #ddd", background: palette.white.hex }}>
+              <span style={{ fontSize: 11, color: "#666", paddingTop: 7 }}>#{i + 1}</span>
+              <div style={{ minWidth: 0 }}>
+                <input value={query} onChange={(event) => setThreadSearches((current) => ({ ...current, [i]: event.target.value }))} placeholder="Buscar codigo o nombre Madeira" style={{ width: "100%", boxSizing: "border-box", padding: "5px 7px", border: "1px solid #bbb", fontSize: 11 }} />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(112px, 1fr))", gap: 4, maxHeight: 112, overflowY: "auto", marginTop: 5 }}>
+                  {matches.map((thread) => {
+                    var visual = normalizeMadeiraThread(thread.code)
+                    return <button key={thread.code} type="button" onClick={() => updSeq(i, "code", thread.code)} style={{ display: "grid", gridTemplateColumns: "20px 1fr", gap: 5, alignItems: "center", padding: 4, border: catalogThread === thread.code ? "2px solid " + role.priority.fill : "1px solid #ddd", background: palette.white.hex, textAlign: "left", fontSize: 9, cursor: "pointer" }}><span style={{ width: 18, height: 18, background: visual.displayHex, border: "1px solid #777" }} /><span><b>{thread.code}</b><br />{thread.name}</span></button>
+                  })}
+                </div>
+                {catalogThread ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5, fontSize: 9, color: "#666" }}><span style={{ width: 16, height: 16, background: st.displayHex, border: "1px solid #777" }} /><b>{st.code}</b> {st.name}<button type="button" onClick={() => useCustomThread(i)} style={{ marginLeft: "auto", border: "1px solid #777", background: palette.white.hex, cursor: "pointer", fontSize: 9 }}>Hilo personalizado</button></div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "54px 1fr", gap: 5, marginTop: 5 }}><input type="color" value={st.color || "#FFFFFF"} onChange={(event) => updSeq(i, "color", event.target.value)} /><input value={st.name || ""} onChange={(event) => updSeq(i, "name", event.target.value)} placeholder="Nombre del hilo personalizado" style={{ padding: "4px 6px", border: "1px solid #ddd", fontSize: 10 }} /></div>
+                )}
               </div>
-            ))}
-            <div style={{ display: "flex", flexDirection: "column", flex: 1.35 }}>
-              <label style={{ fontSize: 9, color: "#777" }}>Hilo Madeira Classic Rayon</label>
-              <select
-                value={st.code || ""}
-                onChange={(e) => updSeq(i, "code", e.target.value)}
-                style={{ padding: "3px 6px", border: "1px solid #c8c8c8", borderRadius: 4, fontSize: 11, outline: "none", background: palette.white.hex }}
-              >
-                <option value="">Seleccionar codigo</option>
-                {MADEIRA_CLASSIC_RAYON.map((thread) => (
-                  <option key={thread.code} value={thread.code}>{thread.code} · {thread.name}</option>
-                ))}
-              </select>
+              <div><label style={{ fontSize: 9, color: "#777" }}>Puntadas</label><input value={st.stitches || ""} onChange={(event) => updSeq(i, "stitches", event.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "5px 6px", border: "1px solid #ddd", fontSize: 11 }} /></div>
+              <button onClick={() => delStop(i)} style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: 14, paddingTop: 5 }}>x</button>
             </div>
-            <button onClick={() => delStop(i)} style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: 14, paddingBottom: 4 }}>
-              x
-            </button>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

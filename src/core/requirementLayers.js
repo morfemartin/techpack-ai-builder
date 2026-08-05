@@ -30,6 +30,15 @@ const COMMON = [
     aliases: ["tela", "tela principal", "material", "composicion", "fabric"],
   }),
   field({
+    key: "fabric_color",
+    label: "Color de la tela",
+    layer: "Materiales",
+    example: "Ej.: azul marino #1B2A41; si tenes una referencia Pantone, incluila.",
+    options: ["Negro", "Blanco", "Color de referencia", "Otro / indicar"],
+    why: "crea la muestra y referencia de color",
+    aliases: ["color", "color de tela", "color de la tela", "fabric color", "colorway", "tono"],
+  }),
+  field({
     key: "fit",
     label: "Fit / silueta",
     layer: "Calce y talles",

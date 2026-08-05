@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { uid } from "./core/idGen.js"
 import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
-import { translateContent } from "./core/translate.js"
+import { combineTranslations, translateContent } from "./core/translate.js"
+import { languageLabel, sortedTextileLanguages, toggleFactoryLanguage } from "./core/languageConfig.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed, extractSeedFromDocument } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
 import { localProviderLabel } from "./core/hybridAI.js"
 import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
 import { toGrayscale, hexToGray } from "./core/colorUtils.js"
+import { hasColorData, madeiraColorsToStops, normalizeFabricColor } from "./core/colorSpecs.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
@@ -157,7 +159,9 @@ export default function App() {
   const [localAIModel, setLocalAIModel] = useState("")
   const [step, setStep] = useState(0)
   const [garmentId, setGarmentId] = useState("cap")
-  const [langs, setLangs] = useState(["ES"])
+  const [factoryLanguages, setFactoryLanguages] = useState(["ES"])
+  const [designerLanguage, setDesignerLanguage] = useState("ES")
+  const [outputMode, setOutputMode] = useState("separate")
   const [hdr, setHdr] = useState({ brand: "", season: "2027 SS/FW", sno: "", cat: "Accesorio", fab: "100% Poliester", fac: "", ind: "", outd: "", pname: "" })
   // "custom" is a chat-drafted garment (GarmentChat.jsx) - not in the static
   // registry, lives only in this state until/unless someone downloads it as
@@ -178,6 +182,8 @@ export default function App() {
   const [prevLang, setPrevLang] = useState("ES")
   const [prevPage, setPrevPage] = useState(0)
   const [translating, setTranslating] = useState(false)
+  const [translationError, setTranslationError] = useState(null)
+  const translationRuns = useRef(0)
   const [txCache, setTxCache] = useState({})
   const [svgPages, setSvgPages] = useState(null)
   const [csvImporting, setCsvImporting] = useState(false)
@@ -226,7 +232,8 @@ export default function App() {
   const [viewAllPages, setViewAllPages] = useState(false) // "see every page at once" contact sheet
   const [reviewFindings, setReviewFindings] = useState(null) // problems from the pre-download intent-vs-document diff
   const [pendingReview, setPendingReview] = useState(null) // {pages, plan, lang, tx, garmentType} held behind the review gate
-  // The APP's OWN chrome language - independent of `langs` (the EXPORTED
+  // The APP's OWN chrome language - also the source language Mistral authors
+  // from before producing the independent factory/designer translations.
   // document's languages, picked in the wizard's own "Idioma" step). Persisted
   // so the choice survives a reload; a builder working in English shouldn't
   // have to re-pick it every session.
@@ -236,6 +243,14 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem("techpack.uiLang", uiLang) } catch {}
   }, [uiLang])
+  const sourceLanguage = uiLang
+  useEffect(() => {
+    setTxCache({})
+    setTranslationError(null)
+  }, [sourceLanguage, hdr, parts, designs])
+  useEffect(() => {
+    if (!factoryLanguages.includes(prevLang)) setPrevLang(factoryLanguages[0])
+  }, [factoryLanguages, prevLang])
   const tl = T[uiLang] || T.ES
   const ui = UI[uiLang] || UI.ES
 
@@ -408,18 +423,28 @@ export default function App() {
     setParts(g.defaultParts.map((p) => Object.assign({}, p)))
     const mapped = mapChatDesignsToDesigns(draft.designs, g.positions.ES[0])
     setDesigns(mapped.map((d) => Object.assign(newDesign(), d)))
+    if (Array.isArray(draft.fabricColors)) setFabricColors(draft.fabricColors.map(normalizeFabricColor))
     setPlannedPreviewPages(null)
     setPlannedPreviewKey("")
     setPlannedPreviewError(null)
   }
   function toggleLang(c) {
-    setLangs((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]))
+    setFactoryLanguages((languages) => toggleFactoryLanguage(languages, c))
   }
   function updPart(id, k, v) {
     setParts((p) => p.map((x) => (x.id === id ? Object.assign({}, x, { [k]: v }) : x)))
   }
   function updDesign(id, k, v) {
     setDesigns((p) => p.map((x) => (x.id === id ? Object.assign({}, x, { [k]: v }) : x)))
+  }
+  function updDesignColors(id, colors) {
+    setDesigns((current) => current.map((design) => {
+      if (design.id !== id) return design
+      if (!isEmbTec(design.tec)) return { ...design, colors }
+      const previousStops = design.emb && Array.isArray(design.emb.stopSeq) ? design.emb.stopSeq : []
+      const stopSeq = madeiraColorsToStops(colors, previousStops)
+      return { ...design, colors, emb: { ...(design.emb || EMPTY_EMB), stops: stopSeq.length, stopSeq } }
+    }))
   }
   function updDesignMulti(id, obj) {
     setDesigns((p) => p.map((x) => (x.id === id ? Object.assign({}, x, obj) : x)))
@@ -507,12 +532,50 @@ export default function App() {
   }
 
   async function ensureTx(lang) {
-    if (lang === "ES" || txCache[lang]) return txCache[lang] || null
+    if (txCache[lang]) return txCache[lang]
+    translationRuns.current += 1
     setTranslating(true)
-    var tx = await translateContent(hdr, parts, designs, lang)
-    setTxCache((p) => Object.assign({}, p, { [lang]: tx }))
-    setTranslating(false)
-    return tx
+    setTranslationError(null)
+    try {
+      var tx = await translateContent(hdr, parts, designs, lang, { sourceLang: sourceLanguage, fabricColors })
+      setTxCache((p) => Object.assign({}, p, { [lang]: tx }))
+      return tx
+    } catch (error) {
+      setTranslationError({ language: lang, audience: "factory", message: (error && error.message) || "No se pudo traducir el documento." })
+      throw error
+    } finally {
+      translationRuns.current = Math.max(0, translationRuns.current - 1)
+      setTranslating(translationRuns.current > 0)
+    }
+  }
+
+  async function ensureDesignerTx() {
+    const key = "designer:" + designerLanguage
+    if (txCache[key]) return txCache[key]
+    translationRuns.current += 1
+    setTranslating(true)
+    setTranslationError(null)
+    try {
+      const tx = await translateContent(hdr, parts, designs, designerLanguage, { sourceLang: sourceLanguage, fabricColors })
+      setTxCache((current) => Object.assign({}, current, { [key]: tx }))
+      return tx
+    } catch (error) {
+      setTranslationError({ language: designerLanguage, audience: "designer", message: (error && error.message) || "No se pudo traducir la comunicacion del disenador." })
+      throw error
+    } finally {
+      translationRuns.current = Math.max(0, translationRuns.current - 1)
+      setTranslating(translationRuns.current > 0)
+    }
+  }
+
+  function retryTranslation(error) {
+    if (!error) return
+    return error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language)
+  }
+
+  async function ensureFactoryTranslations() {
+    const entries = await Promise.all(factoryLanguages.map(async (language) => [language, await ensureTx(language)]))
+    return Object.fromEntries(entries)
   }
 
   function svgSafeText(value) {
@@ -568,7 +631,7 @@ export default function App() {
     return deterministicPageLayout(page, { parts, designs, fabricColors })
   }
 
-  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan } = {}) {
+  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan, designerTx = null } = {}) {
     var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
     function publishPages(pages) {
       if (onPages) onPages(pages)
@@ -583,10 +646,10 @@ export default function App() {
       // ("180-220 GSM" instead of "Gramaje") - garment.partLabels holds the
       // name for a chat-built custom garment, but baseContext never carried
       // `garment` before, so nothing downstream could resolve it.
-      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, lang }
+      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, lang, sourceLanguage, designerLanguage }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
-      var ctx = { lang, hdr, parts, designs, fabricColors, logo, txData: tx, garment, dimensionUnit }
+      var ctx = { lang, hdr, parts, designs, fabricColors, logo, txData: tx, designerTx, garment, dimensionUnit }
       // Deliberately NOT publishing the rendered provisional plan here. It
       // looks exactly like a finished document, so the preview showed a
       // complete-looking tech pack while the AI had not started - the user
@@ -724,12 +787,22 @@ export default function App() {
   }
 
   async function handleGenerate(lang) {
-    var tx = await ensureTx(lang)
+    var results = await Promise.all([ensureTx(lang), ensureDesignerTx()])
+    return generateResolvedDocument(lang, results[0], results[1])
+  }
+
+  async function handleGenerateMultilingual() {
+    var results = await Promise.all([ensureFactoryTranslations(), ensureDesignerTx()])
+    var combined = combineTranslations(results[0], factoryLanguages)
+    return generateResolvedDocument(factoryLanguages[0], combined, results[1])
+  }
+
+  async function generateResolvedDocument(lang, tx, designerTx) {
     var pages
     var plan = null
     if (garmentId === "custom" && customGarment) {
       try {
-        pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p) })
+        pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p), designerTx })
       } catch {
         pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment, fabricColors)
       }
@@ -750,7 +823,7 @@ export default function App() {
     if (plan) {
       var findings = buildReviewFindings({ hdr, parts, designs }, plan)
       var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
-      setPendingReview({ pages, plan, lang, tx, garmentType })
+      setPendingReview({ pages, plan, lang, tx, designerTx, garmentType })
       setReviewFindings(findings)
       return
     }
@@ -806,6 +879,7 @@ export default function App() {
         fabricColors,
         logo,
         txData: pending.tx,
+        designerTx: pending.designerTx,
         garment,
         dimensionUnit,
       }
@@ -830,6 +904,10 @@ export default function App() {
   var previewPlanKey = step === 5 && garmentId === "custom" && customGarment
     ? JSON.stringify({
         lang: prevLang,
+        sourceLanguage,
+        designerLanguage,
+        factoryLanguages,
+        outputMode,
         hdr,
         parts,
         fabricColors,
@@ -861,9 +939,10 @@ export default function App() {
     setPlannedPreviewKey(previewPlanKey)
     setPlannedPreviewPages(null)
     setPlannedPreviewError(null)
-    ensureTx(prevLang)
-      .then((tx) => buildCustomDocumentPages(prevLang, tx, {
+    Promise.all([ensureTx(prevLang), ensureDesignerTx()])
+      .then(([tx, designerTx]) => buildCustomDocumentPages(prevLang, tx, {
         showModal: false,
+        designerTx,
         onPages: (pages) => {
           if (!active) return
           setPlannedPreviewPages(pages)
@@ -890,7 +969,7 @@ export default function App() {
 
   function canNext() {
     if (step === 0) return !!garmentId && !visionExtracting
-    if (step === 1) return langs.length > 0
+    if (step === 1) return factoryLanguages.length > 0 && !!designerLanguage
     if (step === 2) return hdr.brand.trim() && hdr.pname.trim()
     if (step === 3 && garmentId === "custom") return !!customGarment // chat must finish first
     if (step === 3 && csvVerifying) return false // F2 gate: answer what the CSV didn't cover first
@@ -1036,14 +1115,33 @@ export default function App() {
 
     if (step === 1)
       return (
-        <div>
-          {stepHelp(tl.langStep)}
-          <div style={{ display: "flex", gap: space(3), flexWrap: "wrap" }}>
-            {[{ c: "ES", l: "Espanol" }, { c: "EN", l: "English" }, { c: "ZH", l: "Zhongwen" }].map((item) => (
-              <Chip key={item.c} selected={langs.includes(item.c)} onClick={() => toggleLang(item.c)}>
-                {item.l}
-              </Chip>
-            ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: space(5) }}>
+          <div>
+            {stepHelp(uiLang === "EN" ? "Language or languages for the factory:" : "Idioma o idiomas para la fabrica:")}
+            <div style={{ display: "flex", gap: space(2), flexWrap: "wrap" }}>
+              {sortedTextileLanguages(uiLang).map((item) => (
+                <Chip key={item.code} selected={factoryLanguages.includes(item.code)} onClick={() => toggleLang(item.code)}>
+                  {languageLabel(item.code, uiLang)}
+                </Chip>
+              ))}
+            </div>
+          </div>
+          <Fld lbl={uiLang === "EN" ? "Language for the designer" : "Idioma para el disenador"}>
+            <select value={designerLanguage} onChange={(event) => setDesignerLanguage(event.target.value)} style={{ width: "100%", padding: `${space(2)}px ${space(3)}px`, border: hair, background: C.white.hex, fontFamily: type.fonts.ui, fontSize: type.size.sm }}>
+              {sortedTextileLanguages(uiLang).map((item) => <option key={item.code} value={item.code}>{languageLabel(item.code, uiLang)}</option>)}
+            </select>
+          </Fld>
+          <Fld lbl={uiLang === "EN" ? "Multiple-language delivery" : "Entrega con varios idiomas"}>
+            <div style={{ display: "flex", gap: 0 }}>
+              {[{ value: "separate", label: uiLang === "EN" ? "One document per language" : "Un documento por idioma" }, { value: "multilingual", label: uiLang === "EN" ? "Languages in one document" : "Idiomas en un documento" }].map((option) => (
+                <button key={option.value} type="button" onClick={() => setOutputMode(option.value)} style={{ padding: `${space(2)}px ${space(3)}px`, border: hair, background: outputMode === option.value ? role.priority.fill : C.white.hex, color: outputMode === option.value ? role.priority.on : C.ink.hex, fontWeight: 700, cursor: "pointer" }}>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </Fld>
+          <div style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.65 }}>
+            {uiLang === "EN" ? "Mistral drafts in the app language, then translates the factory and removable designer layers independently." : "Mistral redacta en el idioma de la app y luego traduce por separado la informacion de fabrica y la capa borrable del disenador."}
           </div>
         </div>
       )
@@ -1348,7 +1446,7 @@ export default function App() {
                   </div>
                   <div style={{ marginTop: space(3) }}>
                     <Fld lbl={ui.colorsFieldLabel}>
-                      <ColorsEditor colors={d.colors || []} onChange={(c) => updDesign(d.id, "colors", c)} madeira={isEmb} />
+                      <ColorsEditor colors={d.colors || []} onChange={(c) => updDesignColors(d.id, c)} madeira={isEmb} />
                     </Fld>
                   </div>
                   <div style={{ marginTop: space(3) }}>
@@ -1371,7 +1469,7 @@ export default function App() {
     if (step === 5) {
       var plannedMode = garmentId === "custom" && customGarment
       var activePlannedPages = plannedMode && plannedPreviewPages ? plannedPreviewPages : []
-      var hasFabricColorPage = fabricColors.some((color) => color && color.hex)
+      var hasFabricColorPage = fabricColors.some(hasColorData)
       var designPageOffset = hasFabricColorPage ? 2 : 1
       var allPgs = plannedMode
         ? activePlannedPages.map((p, i) => ({ l: p.name || "pagina_" + (i + 1), i }))
@@ -1408,7 +1506,7 @@ export default function App() {
                 <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}>{ui.designingPages}</span>
               )}
               <span style={{ width: 1, alignSelf: "stretch", background: C.ink.hex, margin: `0 ${space(1)}px` }} />
-              {langs.map((l) => (
+              {factoryLanguages.map((l) => (
                 <button key={l} onClick={() => { setPrevLang(l); ensureTx(l) }} style={miniBtn(prevLang === l, C.ink.hex)}>
                   {l}
                 </button>
@@ -1423,6 +1521,12 @@ export default function App() {
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
               {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{ui.translating}</span>}
+              {translationError && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>
+                  {translationError.message}
+                  <button type="button" onClick={() => retryTranslation(translationError)} style={{ border: hair, background: C.white.hex, color: C.ink.hex, cursor: "pointer", fontSize: type.size.xs }}>{ui.retry}</button>
+                </span>
+              )}
               {documentPlanning && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{documentPlanStatus || ui.designingDocument}</span>}
               {!documentPlanning && documentReady && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.priority.fill, fontWeight: 700 }}>
@@ -1469,11 +1573,15 @@ export default function App() {
                   <Icon name="download" size={16} color={C.ink.hex} /> {ui.downloadGarmentFile}
                 </button>
               )}
-              {langs.map((l) => (
-                <button key={l} onClick={() => handleGenerate(l)} disabled={documentPlanning} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning ? C.canvas.hex : role.priority.fill, color: documentPlanning ? "#9AA0AB" : role.priority.on, border: hair, borderColor: documentPlanning ? "#C6CAD2" : role.priority.fill, fontSize: type.size.xs, cursor: documentPlanning ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {outputMode === "separate" ? factoryLanguages.map((l) => (
+                <button key={l} onClick={() => handleGenerate(l)} disabled={documentPlanning || translating} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning || translating ? C.canvas.hex : role.priority.fill, color: documentPlanning || translating ? "#9AA0AB" : role.priority.on, border: hair, borderColor: documentPlanning || translating ? "#C6CAD2" : role.priority.fill, fontSize: type.size.xs, cursor: documentPlanning || translating ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                   <Icon name="bolt" size={16} color={C.white.hex} /> {tl.gen} SVG [{l}]
                 </button>
-              ))}
+              )) : (
+                <button onClick={handleGenerateMultilingual} disabled={documentPlanning || translating} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning || translating ? C.canvas.hex : role.priority.fill, color: documentPlanning || translating ? "#9AA0AB" : role.priority.on, border: hair, fontSize: type.size.xs, cursor: documentPlanning || translating ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase" }}>
+                  <Icon name="translate" size={16} color={C.white.hex} /> {tl.gen} SVG [{factoryLanguages.join("+")}]
+                </button>
+              )}
             </div>
           </div>
           {viewAllPages ? (

@@ -60,8 +60,9 @@ describe("measureRegion", () => {
   it("embSpecs: section head + 14 fixed fields + sequence header + sequence rows", () => {
     const m = measureRegion({ type: "embSpecs" }, page, ctx, 400)
     expect(m.canAbsorb).toBe(false)
-    // head = 32; the sequence adds its separator row, heading row and stop row.
-    expect(m.natural).toBe(32 + (14 + 2 + 1) * ROW.emb)
+    // head = 32; the sequence adds its separator, heading, screen-reference
+    // notice and one stop row.
+    expect(m.natural).toBe(32 + (14 + 3 + 1) * ROW.emb)
   })
 
   it("embSpecs with no emb data measures to zero (nothing will render)", () => {

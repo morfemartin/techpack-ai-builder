@@ -2,6 +2,7 @@ import { useState } from "react"
 import { palette, role, type, space } from "../design/tokens.js"
 import { Icon } from "./Icon.jsx"
 import { buildIllustratorPackageBlob } from "../core/illustratorPackage.js"
+import { buildMultiArtboardSvg } from "../core/illustratorSvg.js"
 import { UI, uiExportHint, uiExportSteps } from "../core/i18n.js"
 import illustratorImporter from "../../docs/illustrator-comparison/Techpack-Import-Illustrator.jsx?raw"
 
@@ -31,16 +32,10 @@ export function SvgModal({ pages, onClose, uiLang = "ES" }) {
     URL.revokeObjectURL(uri)
   }
 
-  // Confirmed live, twice: Illustrator discards a plain SVG's group ids on
-  // import, so a single self-contained file - however it lays the pages out -
-  // always collapses to one flat layer. The importer script is not an
-  // optional extra; it is the only path to real native layers, because it
-  // works by opening each page as its OWN document and fusing them from
-  // inside Illustrator, which is where the seven groups get promoted to real
-  // layers. So the one download is this ZIP: `pages/*.svg` (self-contained,
-  // no external assets folder to lose) plus the script - nothing else, since
-  // nothing else is read by it. Running the script is the last step; its
-  // output is the single final .ai file with real layers and named artboards.
+  // The master SVG is the primary portable document. Illustrator's native
+  // artboards and layers still require the advanced package: its JSX opens
+  // each self-contained page and fuses them inside Illustrator, the point at
+  // which SVG groups can become native .ai layers and named artboards.
   async function downloadPackage() {
     if (packaging) return
     setPackaging(true)
@@ -54,6 +49,16 @@ export function SvgModal({ pages, onClose, uiLang = "ES" }) {
       setFailed((error && error.message) || ui.packageFailed)
     } finally {
       setPackaging(false)
+    }
+  }
+
+  function downloadMasterSvg() {
+    setFailed("")
+    try {
+      const master = buildMultiArtboardSvg(pages, { title: pages[0]?.title || "Tech pack" })
+      download(master, "image/svg+xml;charset=utf-8", "techpack-maestro-" + pages.length + "-paginas.svg")
+    } catch (error) {
+      setFailed((error && error.message) || ui.masterSvgFailed)
     }
   }
 
@@ -135,8 +140,11 @@ export function SvgModal({ pages, onClose, uiLang = "ES" }) {
         <div style={{ padding: `${space(3)}px ${space(4)}px`, borderTop: hair, display: "flex", gap: space(2), justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.ink.hex, opacity: 0.6, marginRight: "auto" }}>{(cur.svg.length / 1024).toFixed(1)} KB</span>
           {failed && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{failed}</span>}
-          <button disabled={packaging} onClick={downloadPackage} style={{ ...btn(role.index.fill, role.index.on), opacity: packaging ? 0.55 : 1 }} title={ui.downloadCompletePackTitle}>
-            <Icon name="folder_zip" size={16} color={role.index.on} /> {packaging ? ui.preparing : ui.downloadCompletePack}
+          <button disabled={packaging} onClick={downloadPackage} style={{ ...btn(C.white.hex, C.ink.hex), opacity: packaging ? 0.55 : 1 }} title={ui.downloadCompletePackTitle}>
+            <Icon name="folder_zip" size={16} color={C.ink.hex} /> {packaging ? ui.preparing : ui.downloadAdvancedPack}
+          </button>
+          <button onClick={downloadMasterSvg} style={btn(role.index.fill, role.index.on)} title={ui.downloadMasterSvgTitle}>
+            <Icon name="download" size={16} color={role.index.on} /> {ui.downloadMasterSvg}
           </button>
         </div>
       </div>

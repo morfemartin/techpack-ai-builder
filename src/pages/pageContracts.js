@@ -23,6 +23,7 @@
 
 import { pageColors, selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
+import { hasColorData } from "../core/colorSpecs.js"
 import { balancedChunks, partitionPartsBySystem } from "../core/semanticOutline.js"
 
 export const CONTRACTS = {
@@ -161,7 +162,7 @@ export function flattenRegions(regions) {
 }
 
 function designHasColors(design) {
-  return !!(design && Array.isArray(design.colors) && design.colors.some((c) => c && typeof c.hex === "string" && c.hex.trim()))
+  return !!(design && Array.isArray(design.colors) && design.colors.some(hasColorData))
 }
 function designHasEmb(design) {
   return !!(design && hasEmbSpecs(design.emb))
@@ -203,7 +204,7 @@ export function validatePage(page, ctx) {
   // page (selectedDesign incl. its designs[0] fallback), so contract and
   // pixels agree.
   const renderDesign = selectedDesign(page, ctx)
-  if (present("colorSpecs") && !pageColors(page, ctx).some((color) => color && color.hex)) errors.push({ code: "empty-data-region", type: "colorSpecs" })
+  if (present("colorSpecs") && !pageColors(page, ctx).some(hasColorData)) errors.push({ code: "empty-data-region", type: "colorSpecs" })
   if (present("embSpecs") && !designHasEmb(renderDesign)) errors.push({ code: "empty-data-region", type: "embSpecs" })
 
   for (const [type, count] of typeCounts) {
@@ -252,7 +253,7 @@ export function repairPage(page, ctx) {
 
   regions = filterTree(
     regions,
-    (r) => !((r.type === "colorSpecs" && !pageColors(page, ctx).some((color) => color && color.hex)) || (r.type === "embSpecs" && !designHasEmb(renderDesign))),
+    (r) => !((r.type === "colorSpecs" && !pageColors(page, ctx).some(hasColorData)) || (r.type === "embSpecs" && !designHasEmb(renderDesign))),
     (r) => "dropped empty " + r.type
   )
 

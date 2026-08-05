@@ -102,7 +102,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
     "construcciones y avios que se usan REALMENTE en una '" + garmentType + "'. Ejemplo de lo que NO sirve: ofrecer " +
     "'Algodon pique / Jersey' como tela de una campera impermeable, o 'Cuello polo' en un pantalon. Si una pregunta no " +
     "admite opciones especificas de esta prenda, es señal de que no vale la pena preguntarla.\n" +
-    "Cubri la construccion GENERAL de la prenda (tela, cuello, manga, cierre, bajo, forro, etc.), NO disenos/" +
+    "Cubri la construccion GENERAL de la prenda (tela, color de la tela, cuello, manga, cierre, bajo, forro, etc.), NO disenos/" +
     "estampados/bordados todavia - eso se define despues. Incluí TAMBIEN, con opciones propias de esta prenda, el uso " +
     "principal, el calce/silueta y el rango de talles: para una campera de montana el uso son opciones como " +
     "'Montanismo tecnico' o 'Trekking', no 'Casual / Uniforme'. Si dejas esas tres genericas, la ficha se siente de " +
@@ -187,7 +187,7 @@ export async function analyzeRequirements({ garmentType, seed, tecs, lang = "ES"
   // answerFromSeed marks as KNOWN whatever the photo already answered; then
   // dropIncoherentFields removes the parts the identified garment cannot have
   // (a franela does not come back asking about a hood, a lining or a closure).
-  return dropIncoherentFields(answerFromSeed(normalizeRequirements(parsed, garmentType), seed))
+  return ensureFabricColorQuestion(dropIncoherentFields(answerFromSeed(normalizeRequirements(parsed, garmentType), seed)))
 }
 
 // Stopwords in a field label that carry no subject - so "Tipo de cuello" and
@@ -299,6 +299,30 @@ export function normalizeRequirements(parsed, garmentType) {
       return base
     })
   return { garmentType: (parsed && parsed.garmentType) || garmentType, fields: dedupeFields(fields) }
+}
+
+export function ensureFabricColorQuestion(reqs) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  const hasColor = fields.some((field) => {
+    if (!field || field.category === "design") return false
+    const identity = (String(field.key || "") + " " + String(field.label || "")).toLowerCase()
+    return /(?:color|colour|colorway|tono).*(?:tela|tejido|fabric)|(?:tela|tejido|fabric).*(?:color|colour|colorway|tono)|^color(?:es)?\b/.test(identity)
+  })
+  if (hasColor) return reqs
+  return {
+    ...reqs,
+    fields: [...fields, {
+      key: "fabric_color",
+      label: "Color de la tela",
+      category: "general",
+      layer: "Materiales",
+      example: "Ej.: azul marino #1B2A41; agrega Pantone si ya lo conoces.",
+      status: FIELD_STATUS.ASK,
+      value: "",
+      options: ["Negro", "Blanco", "Color de referencia", "Otro / indicar"],
+      why: "crea la muestra y referencia de color",
+    }],
+  }
 }
 
 // A weaker model asks the same thing twice under different wording ("Cuello" +
@@ -669,6 +693,29 @@ export function reqsToParts(reqs) {
   return fields
     .filter((f) => f.category === "general" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim())
     .map((f) => ({ label: f.label, val: f.value }))
+}
+
+export function reqsToFabricColors(reqs) {
+  const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
+  return fields.flatMap((field) => {
+    if (!field || field.status === FIELD_STATUS.ASK || field.category === "design") return []
+    const identity = (String(field.key || "") + " " + String(field.label || "")).toLowerCase()
+    if (!/(?:color|colour|colorway|tono).*(?:tela|tejido|fabric)|(?:tela|tejido|fabric).*(?:color|colour|colorway|tono)|^color(?:es)?$/.test(identity)) return []
+    const value = String(field.value || "").trim()
+    if (!value) return []
+    return value.split(/\s*[;|]\s*/).filter(Boolean).map((entry) => {
+      const hex = entry.match(/#[0-9a-f]{6}\b/i)
+      const pantone = entry.match(/(?:PANTONE\s*)?(?:[0-9]{2}-[0-9]{4}\s*(?:TCX|TPG|TPX)|[0-9]{2,4}\s*[CU])\b/i)
+      const cleanName = entry.replace(/#[0-9a-f]{6}\b/ig, "").replace(/PANTONE\s*/ig, "").trim()
+      return {
+        name: cleanName || entry,
+        hex: hex ? hex[0].toUpperCase() : "#FFFFFF",
+        pantoneApprox: pantone ? pantone[0].toUpperCase() : "",
+        pantoneStatus: pantone ? "approximate" : "pending",
+        source: field.fromSeed ? "vision-or-document" : "chat",
+      }
+    })
+  })
 }
 
 // Deterministic safety net for the design pass. The AI can discover nuanced

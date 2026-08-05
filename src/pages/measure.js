@@ -22,6 +22,7 @@
 import { CHROME, GRID, PRINT, ROW, snapBaseline } from "../design/metrics.js"
 import { headerHeight, wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
+import { hasColorData } from "../core/colorSpecs.js"
 import { effectiveParts, partsTableMetrics } from "./tableMetrics.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
@@ -62,9 +63,18 @@ export function selectedDesign(page, ctx) {
 
 export function pageColors(page, ctx) {
   if (page && page.purpose === "data:colorways") {
+    if (ctx && ctx.txData && Array.isArray(ctx.txData.fabricColors)) {
+      const original = Array.isArray(ctx.fabricColors) ? ctx.fabricColors : []
+      return ctx.txData.fabricColors.map((color, index) => ({ ...original[index], ...color, name: color.name }))
+    }
     return ctx && Array.isArray(ctx.fabricColors) ? ctx.fabricColors : []
   }
   const design = selectedDesign(page, ctx)
+  const designIndex = design && ctx && Array.isArray(ctx.designs) ? ctx.designs.indexOf(design) : -1
+  if (designIndex >= 0 && ctx && ctx.txData && Array.isArray(ctx.txData.designs)) {
+    const translated = ctx.txData.designs[designIndex]
+    if (translated && Array.isArray(translated.colors)) return translated.colors.map((color, index) => ({ ...design.colors[index], ...color, name: color.name }))
+  }
   return design && Array.isArray(design.colors) ? design.colors : []
 }
 
@@ -114,7 +124,7 @@ export function measureRegion(region, page, ctx, width) {
   }
 
   if (type === "colorSpecs") {
-    const n = pageColors(page, ctx).filter((c) => c && c.hex).length
+    const n = pageColors(page, ctx).filter(hasColorData).length
     if (n === 0) return { natural: 0, min: 0, canAbsorb: false }
     return {
       natural: 32 + n * ROW.color,
@@ -128,7 +138,7 @@ export function measureRegion(region, page, ctx, width) {
     const emb = design && hasEmbSpecs(design.emb) ? design.emb : null
     if (!emb) return { natural: 0, min: 0, canAbsorb: false }
     const stopSeq = Array.isArray(emb.stopSeq) ? emb.stopSeq : []
-    const totalRows = 14 + (stopSeq.length > 0 ? 2 + stopSeq.length : 0)
+    const totalRows = 14 + (stopSeq.length > 0 ? 3 + stopSeq.length : 0)
     return {
       natural: 32 + totalRows * ROW.emb,
       min: 32 + totalRows * ROW.emb,

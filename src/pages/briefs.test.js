@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { normalizeSlotBriefs, briefLines } from "./briefs.js"
+import { normalizeSlotBriefs, briefLines, factoryBriefLines } from "./briefs.js"
 
 // Contract for structured illustrator briefs in Layout Engine v3.
 //
@@ -86,6 +86,18 @@ describe("normalizeSlotBriefs", () => {
     expect(briefs[0].measurements.some((m) => /70/.test(m.label) || /ancho/i.test(m.label))).toBe(true)
   })
 
+  it("uses designer translation only for removable prose and factory translation for production facts", () => {
+    const translatedCtx = {
+      ...ctx,
+      designerTx: { designs: [{ pos: "Left chest", posDetail: "80mm below shoulder seam", technique: "Embroidery" }] },
+      txData: { designs: [{ technique: "Bordado de espuma 3D" }] },
+    }
+    const brief = normalizeSlotBriefs({ type: "illustration", slots: 1, refs: ["Front"] }, page, translatedCtx)[0]
+    expect(brief.garmentPart).toBe("Left chest")
+    expect(brief.placementLandmark).toBe("80mm below shoulder seam")
+    expect(brief.factoryNote).toBe("Bordado de espuma 3D")
+  })
+
   it("returns exactly `slots` briefs even when the AI sent more", () => {
     const region = { type: "illustration", slots: 1, refs: ["Frente"], briefs: [{ view: "a" }, { view: "b" }, { view: "c" }] }
     expect(normalizeSlotBriefs(region, page, ctx)).toHaveLength(1)
@@ -109,7 +121,7 @@ describe("briefLines (the illustrator-rail template)", () => {
     factoryNote: "Bordado 3D foam, direccion de puntada vertical",
   }
 
-  it("renders the full template: title, placement, must-mark checklist, measurement legend, factory note", () => {
+  it("keeps the removable illustrator template free of factory-only notes", () => {
     const lines = briefLines(full, "full")
     const text = lines.join("\n")
     // The garment part is the one fact the block heading does not already
@@ -121,7 +133,8 @@ describe("briefLines (the illustrator-rail template)", () => {
     expect(text).toContain("logo bordado")
     expect(text).toMatch(/cota|medida/i) // measurement convention line
     expect(text).toMatch(/por talla/i) // per-size flag surfaces
-    expect(text).toMatch(/F[aá]brica/i)
+    expect(text).not.toMatch(/F[aá]brica/i)
+    expect(factoryBriefLines(full).join("\n")).toMatch(/F[aá]brica/i)
   })
 
   it("degrades to checklist-only, then to title-only", () => {

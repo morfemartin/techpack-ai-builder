@@ -478,9 +478,8 @@ describe("buildPlannedPages design-table pagination", () => {
       expect(page.svg).toContain("id='ARTWORK'")
     })
     colors.forEach((color) => {
-      const compact = allSvg.split(">" + color.name + "  " + color.hex + "<").length - 1
-      const expanded = allSvg.split(">" + color.name + "<").length - 1
-      expect(compact + expanded).toBe(1)
+      const escaped = color.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      expect((allSvg.match(new RegExp(">" + escaped + "(?:<| ·)", "g")) || []).length).toBe(1)
     })
     stopSeq.forEach((stop) => expect(allSvg.split(": " + stop.name + " (").length - 1).toBe(1))
   })

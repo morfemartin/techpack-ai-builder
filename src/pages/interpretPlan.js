@@ -15,6 +15,7 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { neutral, palette } from "../design/tokens.js"
 import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
+import { hasColorData } from "../core/colorSpecs.js"
 import { documentIndexRows, measureRegion, pageColors, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
@@ -321,7 +322,7 @@ function semanticGroup(type, markup) {
 }
 
 function leafForRegion(region, page, ctx) {
-  const t = T[(ctx && ctx.lang) || "ES"] || T.ES
+  const t = (ctx && ctx.txData && ctx.txData.lexicon) || T[(ctx && ctx.lang) || "ES"] || T.ES
   const design = selectedDesign(page, ctx)
   const garment = ctx && ctx.garment ? ctx.garment : null
   const partLabels = garment && garment.partLabels ? garment.partLabels[(ctx && ctx.lang) || "ES"] || garment.partLabels.ES || {} : {}
@@ -380,6 +381,8 @@ function leafForRegion(region, page, ctx) {
           // shows THAT at full size instead of empty "draw here" boards.
           design: isDesignPage ? design : null,
           dimensionUnit: ctx && ctx.dimensionUnit,
+          designerLabels: (ctx && ctx.designerTx && ctx.designerTx.lexicon) || t,
+          factoryLabels: t,
         })
         return region._mosaicSlot
           ? "<g id='ARTWORK__V" + (Number(region._slotOffset) + 1) + "'>" + artworkMarkup + "</g>"
@@ -725,7 +728,7 @@ export function buildPlannedPages(plan, ctx, opts) {
     // technical data across pages while retaining the page's illustration and
     // chrome. No row is clipped and no font is reduced below its contract.
     const design = selectedDesign(page, ctx)
-    const colors = pageColors(page, ctx).filter((color) => color && color.hex)
+    const colors = pageColors(page, ctx).filter(hasColorData)
     const stopSeq = design && design.emb && Array.isArray(design.emb.stopSeq) ? design.emb.stopSeq : []
     const colorLeaf = findRegionLeaf(firstPass, "colorSpecs")
     const embLeaf = findRegionLeaf(firstPass, "embSpecs")

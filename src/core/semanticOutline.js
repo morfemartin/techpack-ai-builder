@@ -1,3 +1,5 @@
+import { hasColorData } from "./colorSpecs.js"
+
 // Each system is a family of related parts. Its title used to be a fixed
 // string sized for a technical parka - so a plain t-shirt whose only neck part
 // is a crew collar still got a page headed "Capucha y cuello", and its sleeve
@@ -431,7 +433,7 @@ export function deterministicPageLayout(page, context = {}) {
     const design = designForPage(page, context)
     const views = Array.isArray(page.views) && page.views.length ? page.views : ["Colocacion"]
     const data = []
-    if (design && Array.isArray(design.colors) && design.colors.some((color) => color && color.hex)) data.push({ type: "colorSpecs" })
+    if (design && Array.isArray(design.colors) && design.colors.some(hasColorData)) data.push({ type: "colorSpecs" })
     if (design && design.emb && Object.values(design.emb).some((value) => Array.isArray(value) ? value.length : clean(value))) data.push({ type: "embSpecs" })
     return {
       ...page,

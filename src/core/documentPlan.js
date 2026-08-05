@@ -5,6 +5,8 @@ import { repairOutline, repairPage } from "../pages/pageContracts.js"
 import { buildSemanticOutline, classifyPartBucket, deterministicPageLayout, partitionPartsBySystem } from "./semanticOutline.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { hasEmbSpecs } from "./helpers.js"
+import { LANGUAGE_NAMES } from "./languageConfig.js"
+import { hasColorData } from "./colorSpecs.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
 const REMOTE_PLANNING_TIMEOUT_MS = 45000
@@ -33,7 +35,7 @@ function slug(value, fallback) {
 }
 
 function fabricColorPage(context) {
-  const hasColors = Array.isArray(context && context.fabricColors) && context.fabricColors.some((color) => color && color.hex)
+  const hasColors = Array.isArray(context && context.fabricColors) && context.fabricColors.some(hasColorData)
   return hasColors ? {
     id: "data-colorways",
     title: "Colores de tela",
@@ -280,7 +282,7 @@ export async function planDocumentSections(context, { onStatus, signal, provider
     "La lista es vocabulario abierto: crea una seccion especifica si la prenda lo exige. No inventes datos ni agrupes todo como cuerpo exterior.\n\n" +
     "Prenda: " + safeString(context && context.garmentType, "custom") + "\n" +
     "Campos disponibles (solo nombres, sin valores): " + JSON.stringify(labelsOnly) + "\n" +
-    "Idioma: " + safeString(context && context.lang, "ES") + "\n\n" +
+    "Idioma de fabrica: " + (LANGUAGE_NAMES[(context && context.lang) || "ES"] || "Spanish") + ". Redacta titulos, objetivos y criterios en ese idioma.\n\n" +
     'Devolve SOLO JSON: {"sections":[{"id":"materiales","title":"Materiales y consumos","purpose":"data:materials","objective":"...","criteria":"...","views":[]}]}'
 
   let aiResult = null
@@ -392,7 +394,9 @@ export async function planPageLayout(pageOutline, context, { onProgress, onStatu
       designs: promptSafeDesigns(context && context.designs),
       brief: context && context.brief,
       lang: context && context.lang,
+      designerLanguage: context && context.designerLanguage,
     }) + "\n\n" +
+    "IDIOMAS: redacta refs, garmentPart, view, mustMark, measurements y placementLandmark en " + (LANGUAGE_NAMES[(context && context.designerLanguage) || (context && context.lang) || "ES"] || "Spanish") + "; redacta factoryNote en " + (LANGUAGE_NAMES[(context && context.lang) || "ES"] || "Spanish") + ". Conserva codigos, numeros y unidades sin traducir.\n\n" +
     "Esta pagina existe para: " + safeString(page.objective, "comunicar su contenido tecnico sin ambiguedad") + ". " +
     "Su criterio de inclusion es: " + safeString(page.criteria, "solo datos que sirven a ese objetivo") + ". " +
     "Todo bloque y toda vista que propongas debe servir directamente a esa mision.\n\n" +

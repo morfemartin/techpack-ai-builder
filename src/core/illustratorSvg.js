@@ -277,6 +277,34 @@ function pageViewBox(root) {
   return { width, height }
 }
 
+function prefixPageIds(root, prefix) {
+  const nodes = [root, ...collectElements(root, "*")]
+  const replacements = new Map()
+
+  nodes.forEach((node) => {
+    const id = node.getAttribute && node.getAttribute("id")
+    if (!id || /^LAYER_\d{2}_/.test(id)) return
+    const next = prefix + "_" + id
+    replacements.set(id, next)
+    node.setAttribute("id", next)
+  })
+
+  const referenceAttributes = ["href", "xlink:href", "fill", "stroke", "filter", "clip-path", "mask", "marker-start", "marker-mid", "marker-end", "style"]
+  nodes.forEach((node) => {
+    if (!node.getAttribute) return
+    referenceAttributes.forEach((attribute) => {
+      const value = node.getAttribute(attribute)
+      if (!value) return
+      let next = value
+      replacements.forEach((replacement, original) => {
+        next = next.replace(new RegExp("url\\(\\s*#" + original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\)", "g"), "url(#" + replacement + ")")
+        if (next === "#" + original) next = "#" + replacement
+      })
+      if (next !== value) node.setAttribute(attribute, next)
+    })
+  })
+}
+
 export function buildMultiArtboardSvg(pages, options = {}) {
   const list = (Array.isArray(pages) ? pages : []).filter((page) => page && typeof page.svg === "string" && page.svg.trim())
   if (list.length === 0) throw new Error("Single-file export requires at least one page")
@@ -285,6 +313,7 @@ export function buildMultiArtboardSvg(pages, options = {}) {
   const prepared = list.map((page, index) => {
     const svg = prepareIllustratorSvg(page.svg, { ...page, pageNumber: index + 1, totalPages: list.length })
     const doc = parseSvg(svg)
+    prefixPageIds(doc.documentElement, "P" + String(index + 1).padStart(2, "0"))
     return { doc, root: doc.documentElement, page, index, size: pageViewBox(doc.documentElement) }
   })
 
@@ -344,8 +373,6 @@ export function buildMultiArtboardSvg(pages, options = {}) {
       Array.from(node.childNodes).forEach((child) => {
         if (child.nodeType !== 1) return
         const imported = out.importNode(child, true)
-        const id = imported.getAttribute && imported.getAttribute("id")
-        if (id) imported.setAttribute("id", "P" + String(item.index + 1).padStart(2, "0") + "_" + id)
         defs.appendChild(imported)
       })
     })

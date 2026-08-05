@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, answerFromSeed, ensureMinimumGeneralQuestions, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, answerFromSeed, ensureMinimumGeneralQuestions, ensureFabricColorQuestion, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, reqsToFabricColors, extractLastCompletedLabel } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -261,6 +261,28 @@ describe("ensureMinimumGeneralQuestions", () => {
   })
 })
 
+describe("fabric color contract", () => {
+  it("adds a recoverable fabric color question when a weak model omits it", () => {
+    const result = ensureFabricColorQuestion({ garmentType: "hoodie", fields: [] })
+    expect(result.fields).toContainEqual(expect.objectContaining({ key: "fabric_color", status: "ask" }))
+  })
+
+  it("turns answered fabric colors into printable Pantone-aware records", () => {
+    const colors = reqsToFabricColors({ fields: [{
+      key: "fabric_color",
+      label: "Color de la tela",
+      category: "general",
+      status: "known",
+      value: "Azul marino #1B2A41 | Rojo PANTONE 186 C #C8102E",
+    }] })
+
+    expect(colors).toEqual([
+      expect.objectContaining({ name: "Azul marino", hex: "#1B2A41", pantoneStatus: "pending" }),
+      expect.objectContaining({ name: "Rojo 186 C", hex: "#C8102E", pantoneStatus: "approximate" }),
+    ])
+  })
+})
+
 describe("pendingFields", () => {
   const reqs = {
     garmentType: "vestido",
@@ -485,7 +507,7 @@ describe("analyzeRequirements onProgress wiring", () => {
     deepseekChat.mockResolvedValue(socks)
     const result = await analyzeRequirements({ garmentType: "Medias", seed: {}, tecs: [] })
     const labels = result.fields.map((f) => f.label)
-    expect(labels).toEqual(["Puno", "Talon", "Soporte de arco", "Puntera", "Hilado", "Altura"])
+    expect(labels).toEqual(["Puno", "Talon", "Soporte de arco", "Puntera", "Hilado", "Altura", "Color de la tela"])
     expect(labels.some((l) => /cuello|manga|bolsillo/i.test(l))).toBe(false)
   })
 
@@ -596,7 +618,7 @@ describe("analyzeRequirements onProgress wiring", () => {
     expect(seen[0].lastLabel).toBe("Tela")
     expect(seen[1].completedLabels).toEqual(["Tela"])
     expect(result.garmentType).toBe("Camisa")
-    expect(result.fields.map((f) => f.label)).toEqual(["Tela"])
+    expect(result.fields.map((f) => f.label)).toEqual(["Tela", "Color de la tela"])
   })
 
   it("salvages a usable field list when the stream hit the token cap mid-JSON", async () => {
@@ -609,7 +631,7 @@ describe("analyzeRequirements onProgress wiring", () => {
     const result = await analyzeRequirements({ garmentType: "Camisa", seed: {}, tecs: [], onProgress: () => {} })
     expect(result.garmentType).toBe("Camisa")
     // the 8 complete fields survive the cutoff; the truncated 9th is dropped
-    expect(result.fields.map((f) => f.key)).toEqual(["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7"])
+    expect(result.fields.map((f) => f.key)).toEqual(["f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "fabric_color"])
   })
 })
 
