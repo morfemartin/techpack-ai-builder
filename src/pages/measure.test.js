@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { measureRegion, selectedDesign } from "./measure.js"
+import { measureRegion, pageColors, selectedDesign } from "./measure.js"
 import { ROW } from "../design/metrics.js"
 
 // Contract for the measure registry used by Layout Engine v3:
@@ -48,6 +48,13 @@ describe("measureRegion", () => {
     expect(m.canAbsorb).toBe(false)
     // section head = 16-unit bar + 16-unit breathing row.
     expect(m.natural).toBe(32 + 2 * ROW.color)
+  })
+
+  it("measures fabric colorways independently from design artwork colors", () => {
+    const fabricCtx = { ...ctx, fabricColors: [{ name: "Pantone 19-4052 TCX", hex: "#123456" }] }
+    const fabricPage = { purpose: "data:colorways" }
+    expect(pageColors(fabricPage, fabricCtx)).toEqual(fabricCtx.fabricColors)
+    expect(measureRegion({ type: "colorSpecs" }, fabricPage, fabricCtx, 400).natural).toBe(32 + ROW.color)
   })
 
   it("embSpecs: section head + 14 fixed fields + sequence header + sequence rows", () => {

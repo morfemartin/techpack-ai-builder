@@ -170,6 +170,7 @@ export default function App() {
   // null (garmentId === "custom" before the chat finishes), that throws on
   // every re-render instead of just once safely at mount.
   const [parts, setParts] = useState(() => GARMENTS.cap.defaultParts.map((p) => Object.assign({}, p)))
+  const [fabricColors, setFabricColors] = useState([])
   const [designs, setDesigns] = useState(() => [
     Object.assign(newDesign(), { name: "Logo Frontal", pos: GARMENTS.cap.positions.ES[3] || GARMENTS.cap.positions.ES[0], posDetail: "Centrado", colors: [{ name: "PANTONE 286 C", hex: "#003DA5" }, { name: "PANTONE White", hex: "#FFFFFF" }] }),
   ])
@@ -326,6 +327,7 @@ export default function App() {
       setParts(g.defaultParts.map((p) => Object.assign({}, p)))
       setDesigns([Object.assign(newDesign(), { pos: g.positions.ES[0] })])
     }
+    setFabricColors([])
     setTxCache({})
     setPrevPage(0)
     setPlannedPreviewPages(null)
@@ -563,7 +565,7 @@ export default function App() {
   }
 
   function fallbackPageLayout(page) {
-    return deterministicPageLayout(page, { parts, designs })
+    return deterministicPageLayout(page, { parts, designs, fabricColors })
   }
 
   async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan } = {}) {
@@ -581,10 +583,10 @@ export default function App() {
       // ("180-220 GSM" instead of "Gramaje") - garment.partLabels holds the
       // name for a chat-built custom garment, but baseContext never carried
       // `garment` before, so nothing downstream could resolve it.
-      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, lang }
+      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, lang }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
-      var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment, dimensionUnit }
+      var ctx = { lang, hdr, parts, designs, fabricColors, logo, txData: tx, garment, dimensionUnit }
       // Deliberately NOT publishing the rendered provisional plan here. It
       // looks exactly like a finished document, so the preview showed a
       // complete-looking tech pack while the AI had not started - the user
@@ -729,10 +731,10 @@ export default function App() {
       try {
         pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p) })
       } catch {
-        pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+        pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment, fabricColors)
       }
     } else {
-      pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment)
+      pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment, fabricColors)
     }
 
     // Pre-download review round: hold behind the review chat whenever the
@@ -770,6 +772,7 @@ export default function App() {
       garmentType: pending.garmentType,
       parts: applied.parts,
       designs: applied.designs,
+      fabricColors,
       lang: pending.lang,
     }
     const affected = new Set(applied.affectedPageIds)
@@ -800,6 +803,7 @@ export default function App() {
         hdr: applied.hdr,
         parts: applied.parts,
         designs: applied.designs,
+        fabricColors,
         logo,
         txData: pending.tx,
         garment,
@@ -828,6 +832,7 @@ export default function App() {
         lang: prevLang,
         hdr,
         parts,
+        fabricColors,
         designs: designs.map((d) => ({
           name: d.name,
           pos: d.pos,
@@ -874,7 +879,7 @@ export default function App() {
         if (!active) return
         const tx = txCache[prevLang] || null
         setPlannedPreviewError("No se pudo diseñar el documento con IA; mostrando fallback clásico.")
-        setPlannedPreviewPages(buildAllPages(prevLang, hdr, parts, designs, logo, tx, garment))
+        setPlannedPreviewPages(buildAllPages(prevLang, hdr, parts, designs, logo, tx, garment, fabricColors))
       })
 
     return () => {
@@ -1215,6 +1220,12 @@ export default function App() {
       return (
         <div>
           <div style={{ marginBottom: space(4), border: hair, background: C.white.hex, padding: space(3) }}>
+            <div style={{ marginBottom: space(2), fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase" }}>
+              {uiLang === "EN" ? "Fabric colorways / Pantone" : "Colores de tela / Pantone"}
+            </div>
+            <ColorsEditor colors={fabricColors} onChange={setFabricColors} />
+          </div>
+          <div style={{ marginBottom: space(4), border: hair, background: C.white.hex, padding: space(3) }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space(2), marginBottom: space(2) }}>
               <span style={{ fontSize: type.size.xs, fontFamily: type.fonts.ui, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: C.ink.hex }}>
                 {uiLang === "EN" ? "Document palette" : "Paleta del documento"}
@@ -1360,9 +1371,15 @@ export default function App() {
     if (step === 5) {
       var plannedMode = garmentId === "custom" && customGarment
       var activePlannedPages = plannedMode && plannedPreviewPages ? plannedPreviewPages : []
+      var hasFabricColorPage = fabricColors.some((color) => color && color.hex)
+      var designPageOffset = hasFabricColorPage ? 2 : 1
       var allPgs = plannedMode
         ? activePlannedPages.map((p, i) => ({ l: p.name || "pagina_" + (i + 1), i }))
-        : [{ l: ui.mainPage, i: 0 }, ...designs.map((d, i) => ({ l: tl.pageDesign + " " + (i + 1), i: i + 1 }))]
+        : [
+            { l: ui.mainPage, i: 0 },
+            ...(hasFabricColorPage ? [{ l: "Colores de tela", i: 1 }] : []),
+            ...designs.map((d, i) => ({ l: tl.pageDesign + " " + (i + 1), i: i + designPageOffset })),
+          ]
       var activePlannedIndex = activePlannedPages.length > 0 ? Math.min(prevPage, activePlannedPages.length - 1) : 0
       var activePlannedPage = activePlannedPages[activePlannedIndex]
       const miniBtn = (active, activeColor) => ({
@@ -1481,7 +1498,7 @@ export default function App() {
                     <div key={p.i}>
                       <div style={{ fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, fontFamily: type.fonts.data, marginBottom: space(1) }}>{p.l}</div>
                       <div style={{ filter: monoMode ? "grayscale(1)" : "none" }}>
-                        <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={p.i} txCache={txCache} garment={garment} />
+                        <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} fabricColors={fabricColors} logo={logo} page={p.i} txCache={txCache} garment={garment} />
                       </div>
                     </div>
                   ))}
@@ -1511,7 +1528,7 @@ export default function App() {
             </div>
           ) : (
             <div style={{ filter: monoMode ? "grayscale(1)" : "none" }}>
-              <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} logo={logo} page={prevPage} txCache={txCache} garment={garment} />
+              <Preview lang={prevLang} hdr={hdr} parts={parts} designs={designs} fabricColors={fabricColors} logo={logo} page={prevPage} txCache={txCache} garment={garment} />
             </div>
           )}
         </div>

@@ -439,6 +439,9 @@ export function deterministicPageLayout(page, context = {}) {
     }
   }
   if (purpose.startsWith("data:")) {
+    if (purpose === "data:colorways") {
+      return { ...page, regions: [...chrome, { type: "colorSpecs" }, { type: "disclaimer" }] }
+    }
     // The table is the protagonist here (size chart, QC checklist, factory
     // notes) - an illustration is included only when the section actually
     // asked for one (page.illustration, set by dataSectionPages above) AND

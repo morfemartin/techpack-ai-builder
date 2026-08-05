@@ -217,6 +217,19 @@ describe("interpretPagePlan", () => {
     expect(pages[0].svg).toContain("Tajima")
     expect(pages[0].svg).toContain("12000")
   })
+
+  it("renders fabric Pantones on a dedicated page without requiring a design", () => {
+    const pages = buildPlannedPages({ pages: [{
+      id: "fabric-colors",
+      title: "Colores de tela",
+      purpose: "data:colorways",
+      regions: [{ type: "header" }, { type: "titleBar" }, { type: "colorSpecs" }, { type: "disclaimer" }],
+    }] }, { ...ctx, designs: [], fabricColors: [{ name: "PANTONE 19-4052 TCX", hex: "#123456" }] })
+
+    expect(pages).toHaveLength(1)
+    expect(pages[0].svg).toContain("PANTONE 19-4052 TCX")
+    expect(pages[0].svg).toContain("#123456")
+  })
 })
 
 describe("split composition (2D layout)", () => {

@@ -32,8 +32,26 @@ function slug(value, fallback) {
   return safeString(value, fallback).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || fallback
 }
 
-function fallbackOutline({ garmentType, parts, designs }) {
-  return buildSemanticOutline({ garmentType, parts, designs })
+function fabricColorPage(context) {
+  const hasColors = Array.isArray(context && context.fabricColors) && context.fabricColors.some((color) => color && color.hex)
+  return hasColors ? {
+    id: "data-colorways",
+    title: "Colores de tela",
+    purpose: "data:colorways",
+    objective: "Definir los colorways de las telas con referencias Pantone/CMYK visibles para produccion.",
+    criteria: "Cada color debe conservar nombre, muestra, conversion CMYK y referencia hexadecimal.",
+    pieces: [],
+  } : null
+}
+
+function fallbackOutline({ garmentType, parts, designs, fabricColors }) {
+  const outline = buildSemanticOutline({ garmentType, parts, designs })
+  const page = fabricColorPage({ fabricColors })
+  if (page) {
+    const designIndex = outline.pages.findIndex((item) => String(item.purpose || "").startsWith("design:"))
+    outline.pages.splice(designIndex < 0 ? outline.pages.length : designIndex, 0, page)
+  }
+  return outline
 }
 
 export function fallbackDocumentOutline(context = {}) {
@@ -181,6 +199,8 @@ export function composeOutlineFromSections(sectionsInput, assignmentsInput, cont
   }
   const designOnly = buildSemanticOutline({ garmentType: context.garmentType, parts: [], designs: context.designs }).pages
     .filter((page) => typeof page.purpose === "string" && page.purpose.startsWith("design:"))
+  const colorPage = fabricColorPage(context)
+  if (colorPage) pages.push(colorPage)
   pages.push(...designOnly)
   return { outline: { pages }, changes }
 }

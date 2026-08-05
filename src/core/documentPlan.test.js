@@ -30,6 +30,18 @@ describe("document plan AI wrappers", () => {
     deepseekChatStream.mockReset()
   })
 
+  it("adds a dedicated fabric colorway page before artwork pages", () => {
+    const result = fallbackDocumentOutline({
+      garmentType: "Hoodie",
+      parts: [{ id: "body", label: "Cuerpo", val: "French terry", on: true }],
+      designs: [{ name: "Chest Logo", colors: [{ name: "White", hex: "#FFFFFF" }] }],
+      fabricColors: [{ name: "Pantone 19-4052 TCX", hex: "#123456" }],
+    })
+    const purposes = result.pages.map((page) => page.purpose)
+    expect(purposes).toContain("data:colorways")
+    expect(purposes.indexOf("data:colorways")).toBeLessThan(purposes.indexOf("design:Chest Logo"))
+  })
+
   it("bounds stalled planning calls so the caller can use its fallback", async () => {
     vi.useFakeTimers()
     try {

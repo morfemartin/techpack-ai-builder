@@ -182,6 +182,16 @@ describe("repairPage", () => {
     expect(validatePage(fixed, ctx)).toEqual([])
   })
 
+  it("gives fabric colorways their own data contract instead of turning them into a BOM", () => {
+    const page = { id: "colors", purpose: "data:colorways", regions: [...chrome, { type: "partsList" }, disclaimer] }
+    const colorCtx = { ...ctx, fabricColors: [{ name: "Pantone 286 C", hex: "#003DA5" }] }
+    const { page: fixed } = repairPage(page, colorCtx)
+    const types = fixed.regions.map((region) => region.type)
+    expect(types).toContain("colorSpecs")
+    expect(types).not.toContain("partsList")
+    expect(validatePage(fixed, colorCtx)).toEqual([])
+  })
+
   it("enforces canonical chrome order: header first, titleBar second, disclaimer last", () => {
     const page = { id: "p", purpose: "overview", regions: [disclaimer, { type: "partsList", weight: 20 }, { type: "illustration", weight: 40, slots: 1 }, ...chrome] }
     const { page: fixed } = repairPage(page, ctx)

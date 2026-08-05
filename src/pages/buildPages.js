@@ -133,6 +133,13 @@ function colorSpecsHeight(colors) {
   return headH + safe.length * rowH
 }
 
+export function formatEmbroideryStop(stop) {
+  var st = stop || {}
+  var thread = [st.code ? "Madeira " + st.code : "", st.name || "", st.color || ""].filter(Boolean).join(" · ") || NA
+  var stitches = st.stitches !== undefined && st.stitches !== null && st.stitches !== "" ? " (" + st.stitches + " pt.)" : ""
+  return "Stop " + (st.stop || "-") + ": " + thread + stitches
+}
+
 export function renderEmbSpecs(box, { emb, title } = {}) {
   if (!emb) return ""
   var s = ""
@@ -167,7 +174,7 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
     s += TX(box.x + INSET, ty, "Secuencia:", fontSize, true, "start")
     ty += rowH
     seq.forEach(function (st) {
-      s += TX(box.x + INSET + TEXT_PAD, ty, "Stop " + st.stop + ": " + st.name + " (" + st.stitches + " pt.)", fontSize, false, "start", undefined, type.svgFonts.data)
+      s += TX(box.x + INSET + TEXT_PAD, ty, formatEmbroideryStop(st), fontSize, false, "start", undefined, type.svgFonts.data)
       ty += rowH
     })
   }
@@ -544,10 +551,29 @@ export function buildDesignPage(lang, d, hdr, logo, idx, txName, txPosDetail) {
   return s
 }
 
-export function buildAllPages(lang, hdr, parts, designs, logo, txData, garment) {
+export function buildFabricColorPage(lang, hdr, logo, fabricColors) {
+  var t = T[lang] || T.ES
+  var W = PAGE.width, H = PAGE.height, hH = headerHeight(hdr, W), discH = CHROME.footer
+  var barY = hH, barH = CHROME.titleBar
+  var bodyY = barY + barH + GRID.baseline
+  var bodyH = H - bodyY - discH - GRID.baseline
+  var s = sv(W, H)
+  s += svgHeader(hdr, logo, W, hH)
+  s += R(0, barY, W, barH, palette.blue.hex, palette.ink.hex, "0.8")
+  s += TX(GRID.margin, barY + barH / 2, "COLORES DE TELA / PANTONE", PRINT.minFont, true, "start", palette.white.hex)
+  s += renderColorSpecs({ x: GRID.margin, y: bodyY, width: W - GRID.margin * 2, height: bodyH }, { colors: fabricColors })
+  s += svgDisc(t, hdr, W, H - discH, discH)
+  s += "</svg>"
+  return s
+}
+
+export function buildAllPages(lang, hdr, parts, designs, logo, txData, garment, fabricColors) {
   var pages = []
   var txP = txData || null
   pages.push({ name: "pagina_principal", svg: buildPage1(lang, hdr, parts, logo, txP, garment) })
+  if (Array.isArray(fabricColors) && fabricColors.some(function (color) { return color && color.hex })) {
+    pages.push({ name: "colores_de_tela", svg: buildFabricColorPage(lang, hdr, logo, fabricColors) })
+  }
   designs.forEach(function (d, i) {
     var txName = txP && txP.designs && txP.designs[i] ? txP.designs[i].name : null
     var txPos = txP && txP.designs && txP.designs[i] ? txP.designs[i].posDetail : null

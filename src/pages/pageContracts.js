@@ -21,7 +21,7 @@
 // fallback design). Outline functions written directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { selectedDesign } from "./measure.js"
+import { pageColors, selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { balancedChunks, partitionPartsBySystem } from "../core/semanticOutline.js"
 
@@ -110,6 +110,20 @@ export function purposeFamily(purpose) {
 }
 
 export function layoutPolicyFor(page) {
+  return contractForPage(page)
+}
+
+function contractForPage(page) {
+  if (page && page.purpose === "data:colorways") {
+    return {
+      mandatory: ["header", "titleBar", "colorSpecs", "disclaimer"],
+      forbidden: ["illustration", "partsList", "embSpecs"],
+      priorityRank: { colorSpecs: 3 },
+      illustrationShare: { min: 0, max: 0 },
+      minIllustrationHeight: 0,
+      dataSide: "left",
+    }
+  }
   return CONTRACTS[purposeFamily(page && page.purpose)]
 }
 
@@ -167,7 +181,7 @@ function conditionalMandatory(page, ctx, family) {
 export function validatePage(page, ctx) {
   const errors = []
   const family = purposeFamily(page && page.purpose)
-  const contract = CONTRACTS[family]
+  const contract = contractForPage(page)
 
   const leaves = flattenRegions(page && page.regions)
   const typeCounts = new Map()
@@ -189,7 +203,7 @@ export function validatePage(page, ctx) {
   // page (selectedDesign incl. its designs[0] fallback), so contract and
   // pixels agree.
   const renderDesign = selectedDesign(page, ctx)
-  if (present("colorSpecs") && !designHasColors(renderDesign)) errors.push({ code: "empty-data-region", type: "colorSpecs" })
+  if (present("colorSpecs") && !pageColors(page, ctx).some((color) => color && color.hex)) errors.push({ code: "empty-data-region", type: "colorSpecs" })
   if (present("embSpecs") && !designHasEmb(renderDesign)) errors.push({ code: "empty-data-region", type: "embSpecs" })
 
   for (const [type, count] of typeCounts) {
@@ -208,7 +222,7 @@ export function validatePage(page, ctx) {
 export function repairPage(page, ctx) {
   const repairs = []
   const family = purposeFamily(page && page.purpose)
-  const contract = CONTRACTS[family]
+  const contract = contractForPage(page)
   const renderDesign = selectedDesign(page, ctx)
   const condDesign = pageDesign(page, ctx)
 
@@ -238,7 +252,7 @@ export function repairPage(page, ctx) {
 
   regions = filterTree(
     regions,
-    (r) => !((r.type === "colorSpecs" && !designHasColors(renderDesign)) || (r.type === "embSpecs" && !designHasEmb(renderDesign))),
+    (r) => !((r.type === "colorSpecs" && !pageColors(page, ctx).some((color) => color && color.hex)) || (r.type === "embSpecs" && !designHasEmb(renderDesign))),
     (r) => "dropped empty " + r.type
   )
 
@@ -322,6 +336,7 @@ function isFullBomPage(p) {
 }
 
 function isBomFamilyPage(page) {
+  if (page && page.purpose === "data:colorways") return false
   const family = purposeFamily(page && page.purpose)
   // "data" included: a data:measurements or data:quality page carries real
   // BOM coverage too (see semanticOutline.js's DATA_SECTIONS). Without this,
