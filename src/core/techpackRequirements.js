@@ -854,10 +854,13 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "campos generales no mencionan hebillas) - no es evitar un elemento que SI esta mencionado. Si un campo general " +
     "describe algo con detalle propio (ej: 'Botones: poliester perlado CON GRABADO DE LOGO personalizado', un cierre " +
     "con marca y color especificos, una cinta con texto), eso ESTA mencionado y es un elemento de diseno genuino con " +
-    "su propia pagina - no lo descartes solo porque es un herraje/avio en vez de un logo textil. Si ya identificaste " +
-    "UN elemento genuino y no hay evidencia de ningun otro, devolve SOLO ese uno; NO sigas buscando un segundo o " +
-    "tercer elemento para completar una cuota. La mayoria de prendas tienen 0 a 2 elementos de diseno reales, no 1 " +
-    "a 4 - una cifra mas alta es la excepcion, nunca el objetivo. Si realmente no hay nada que necesite pagina de " +
+    "su propia pagina - no lo descartes solo porque es un herraje/avio en vez de un logo textil, Y NO dejes de " +
+    "incluirlo solo porque YA encontraste otro elemento genuino antes: cada campo general con detalle propio que " +
+    "justifique su propia pagina va, sin importar cuantos ya identificaste. La cuota a evitar es la de INVENTAR " +
+    "elementos para llegar a un numero (eso SI esta prohibido); no existe una cuota de cuantos elementos reales " +
+    "reportar - reporta TODOS los que los campos generales genuinamente justifican, sean uno, dos o mas. La mayoria " +
+    "de prendas terminan con 0 a 2 elementos de diseno reales porque la mayoria de prendas no tiene mas que eso " +
+    "mencionado en detalle - no porque haya un limite a respetar. Si realmente no hay nada que necesite pagina de " +
     "diseno, devolve un array de fields vacio.\n\n" +
     "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
     '{"garmentType": "' + garmentType + '", "fields": [' +
