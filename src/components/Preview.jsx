@@ -5,6 +5,7 @@ import { isEmbTec, isWholePosF } from "../core/helpers.js"
 import { palette, role, type } from "../design/tokens.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 import { CHROME, GRID, PAGE } from "../design/metrics.js"
+import { buildFabricColorPage } from "../pages/buildPages.js"
 
 // This is the live on-screen mockup shown in the "Vista Previa" wizard step -
 // the thing a user actually looks at before clicking "Generar SVG". It has to
@@ -15,7 +16,7 @@ const C = palette
 const hairThin = "0.5px solid " + C.ink.hex
 const hair = "1px solid " + C.ink.hex
 
-export function Preview({ lang, hdr, parts, designs, logo, page, txCache, garment }) {
+export function Preview({ lang, hdr, parts, designs, fabricColors, logo, page, txCache, garment }) {
   var t = T[lang] || T.ES
   var pn = garment.partLabels[lang] || garment.partLabels.ES
   var ap = parts.filter((p) => p.on)
@@ -122,11 +123,23 @@ export function Preview({ lang, hdr, parts, designs, logo, page, txCache, garmen
     )
   }
 
-  var d = designs[page - 1]
+  var hasFabricColorPage = Array.isArray(fabricColors) && fabricColors.some((color) => color && color.hex)
+  if (hasFabricColorPage && page === 1) {
+    return (
+      <div style={{ overflow: "auto", background: C.canvas.hex, padding: 10 }}>
+        <div style={{ width: W * SCALE, height: H * SCALE, position: "relative" }}>
+          <div style={{ width: W, height: H, transformOrigin: "top left", transform: "scale(" + SCALE + ")" }} dangerouslySetInnerHTML={{ __html: buildFabricColorPage(lang, hdr, logo, fabricColors) }} />
+        </div>
+      </div>
+    )
+  }
+
+  var designIndex = page - 1 - (hasFabricColorPage ? 1 : 0)
+  var d = designs[designIndex]
   var isEmb2 = isEmbTec(d.tec), isWhole2 = isWholePosF(d.pos)
   var LW2 = isEmb2 ? 420 : 360
-  var txName2 = txData && txData.designs && txData.designs[page - 1] ? txData.designs[page - 1].name : null
-  var txPos2 = txData && txData.designs && txData.designs[page - 1] ? txData.designs[page - 1].posDetail : null
+  var txName2 = txData && txData.designs && txData.designs[designIndex] ? txData.designs[designIndex].name : null
+  var txPos2 = txData && txData.designs && txData.designs[designIndex] ? txData.designs[designIndex].posDetail : null
   // Third element flags a row's value as DATA (mono face) vs descriptive text -
   // same split used in buildPages.js's buildDesignPage.
   var infoRows = [
@@ -147,7 +160,7 @@ export function Preview({ lang, hdr, parts, designs, logo, page, txCache, garmen
           <HdrUI />
           {/* role.priority: this page's title bar */}
           <div style={{ height: 22, background: role.priority.fill, color: role.priority.on, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: "bold" }}>
-            {t.pageDesign} {page} - {txName2 || d.name}
+            {t.pageDesign} {designIndex + 1} - {txName2 || d.name}
           </div>
           <div style={{ display: "flex", height: bodyH - 22 }}>
             <div style={{ width: LW2, borderRight: hair, padding: "10px 12px", boxSizing: "border-box", overflowY: "auto" }}>

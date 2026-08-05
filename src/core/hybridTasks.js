@@ -7,6 +7,15 @@ export const HYBRID_TASKS = {
   REVIEW: "review",
   OUTLINE: "outline",
   PAGE_LAYOUT: "page-layout",
+  // planDocumentOutline's single "place every piece in one shot" call was
+  // measured live against Mistral to fail 3/3 at both 24 and 70 pieces -
+  // never duplicating, just omitting a growing fraction as piece count grows.
+  // Split into two smaller, independently-retryable calls: OUTLINE_INDEX
+  // decides the section list ONLY (output size independent of piece count),
+  // OUTLINE_ASSIGN classifies one small batch of pieces into that list at a
+  // time (see documentPlan.js's planDocumentSections/assignPartsToSections).
+  OUTLINE_INDEX: "outline-index",
+  OUTLINE_ASSIGN: "outline-assign",
 }
 
 // budgetMs is BOTH the total race deadline AND the per-provider fetch timeout,
@@ -54,4 +63,14 @@ export const TASK_POLICIES = {
   // fallback in one bounded pass.
   outline: { qwenDelayMs: 32000, budgetMs: 50000, maxTokens: 4000, thinking: true },
   "page-layout": { qwenDelayMs: 32000, budgetMs: 50000, maxTokens: 2500 },
+  // Deciding the section list is real reasoning (what does THIS document
+  // need) but its output is small and bounded regardless of piece count -
+  // same shape as outline above, smaller token cap.
+  "outline-index": { qwenDelayMs: 32000, budgetMs: 50000, maxTokens: 2000, thinking: true },
+  // Classifying one batch of ~12 pieces against an already-decided section
+  // list is cheap pattern-matching, not reasoning - a short qwenDelayMs
+  // matters here specifically because a document can need up to ~6 of these
+  // calls in sequence; under the `outline` policy's 32s delay that alone
+  // would be 3-5 minutes just for reparto.
+  "outline-assign": { qwenDelayMs: 10000, budgetMs: 35000, maxTokens: 1200 },
 }

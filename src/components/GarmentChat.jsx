@@ -210,12 +210,10 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
   // never rewritten underneath the user, the whole intake ended up generic:
   // the deterministic template was, in effect, the only thing anyone saw.
   //
-  // There is no template underneath any more. The fixed layer floor assumed a
-  // torso garment, so it asked a pair of socks about its collar, sleeve and
-  // chest pocket - incoherent questions presented as if the analysis had gone
-  // fine. Coherence is now the model's job at every layer, and when the model
-  // cannot deliver we SAY SO (see the catch) instead of quietly substituting a
-  // questionnaire that does not belong to this garment.
+  // Model reasoning remains the preferred path. If every provider misses the
+  // quality contract, analyzeRequirements falls back to its deterministic,
+  // anatomy-filtered layer set; this catch is now reserved for a real
+  // transport or implementation failure, never an ordinary weak generation.
   async function runAnalysis(garmentType) {
     const runId = ++analysisRun.current
     setSending(true)

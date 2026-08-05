@@ -387,6 +387,14 @@ export function uiDevelopingPage(uiLang, index, total) {
   return uiLang === "EN" ? `Developing page ${index} of ${total}` : `Desarrollando pagina ${index} de ${total}`
 }
 
+export function uiDocumentSectionsReady(uiLang, count) {
+  return uiLang === "EN" ? `${count} productive sections defined` : `${count} secciones productivas definidas`
+}
+
+export function uiAssigningDocumentBatch(uiLang, index, total) {
+  return uiLang === "EN" ? `Organizing data: batch ${index} of ${total}` : `Ubicando datos: lote ${index} de ${total}`
+}
+
 export function uiResolvingBlock(uiLang, label) {
   return uiLang === "EN" ? `Resolving block: ${label}` : `Resolviendo bloque: ${label}`
 }

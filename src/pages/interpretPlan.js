@@ -15,11 +15,12 @@ import { row, col, leaf, solveLayout, renderLayoutToSVG } from "../layout/index.
 import { neutral, palette } from "../design/tokens.js"
 import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
-import { documentIndexRows, measureRegion, selectedDesign } from "./measure.js"
+import { documentIndexRows, measureRegion, pageColors, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
 import { partsCapacityForHeight } from "./tableMetrics.js"
+import { purposeFamily } from "./pageContracts.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
@@ -397,7 +398,7 @@ function leafForRegion(region, page, ctx) {
           startIndex: (ctx && ctx.partsStartIndex) || 0,
         }))
       }
-      if (region.type === "colorSpecs") return semanticGroup(region.type, renderColorSpecs(box, { colors: design && design.colors }))
+      if (region.type === "colorSpecs") return semanticGroup(region.type, renderColorSpecs(box, { colors: pageColors(page, ctx) }))
       if (region.type === "embSpecs") return semanticGroup(region.type, renderEmbSpecs(box, { emb: design && design.emb, title: t.embTitle }))
       if (region.type === "references") return semanticGroup(region.type, renderReferenceAsset(box, { design }))
       if (region.type === "documentIndex") return semanticGroup(region.type, renderDocumentIndex(box, ctx && ctx.documentIndex))
@@ -608,6 +609,9 @@ function embroideryStopCapacity(height) {
 }
 
 function withDesignSlice(page, pageCtx, colors, stopSeq) {
+  if (page && page.purpose === "data:colorways") {
+    return colors === undefined ? pageCtx : { ...pageCtx, fabricColors: colors }
+  }
   const designs = pageCtx && Array.isArray(pageCtx.designs) ? pageCtx.designs : []
   const selected = selectedDesign(page, pageCtx)
   const index = designs.indexOf(selected)
@@ -700,7 +704,11 @@ export function buildPlannedPages(plan, ctx, opts) {
     // A BOM without a visual target is not a useful production page. Plans
     // from fixtures, fallbacks or a weak model are repaired here as a final
     // document-level invariant before measurement and pagination.
-    if (pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
+    // EXCEPT a "data" family page (size chart, QC checklist, factory notes -
+    // see semanticOutline.js's DATA_SECTIONS): its contract legitimately
+    // omits illustration, and forcing one on here would silently override
+    // that after repairPage already agreed the page was complete.
+    if (purposeFamily(page.purpose) !== "data" && pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
       const regions = page.regions.slice()
       const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
       regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, {
@@ -717,7 +725,7 @@ export function buildPlannedPages(plan, ctx, opts) {
     // technical data across pages while retaining the page's illustration and
     // chrome. No row is clipped and no font is reduced below its contract.
     const design = selectedDesign(page, ctx)
-    const colors = design && Array.isArray(design.colors) ? design.colors.filter((color) => color && color.hex) : []
+    const colors = pageColors(page, ctx).filter((color) => color && color.hex)
     const stopSeq = design && design.emb && Array.isArray(design.emb.stopSeq) ? design.emb.stopSeq : []
     const colorLeaf = findRegionLeaf(firstPass, "colorSpecs")
     const embLeaf = findRegionLeaf(firstPass, "embSpecs")

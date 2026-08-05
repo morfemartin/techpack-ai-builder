@@ -118,30 +118,35 @@ export function EmbForm({ emb, onChange }) {
         {(emb.stopSeq || []).map((st, i) => (
           <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "flex-end" }}>
             <span style={{ fontSize: 11, color: "#888", minWidth: 18, paddingBottom: 4 }}>#{i + 1}</span>
-            {[["color", "Color"], ["stitches", "Punt."], ["code", "Cod. Madeira"], ["name", "Nombre"]].map((kl) => (
+            {[["color", "Color"], ["stitches", "Punt."], ["name", "Nombre"]].map((kl) => (
               <div key={kl[0]} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
                 <label style={{ fontSize: 9, color: "#aaa" }}>{kl[1]}</label>
                 <input
                   value={st[kl[0]] || ""}
                   onChange={(e) => updSeq(i, kl[0], e.target.value)}
-                  list={kl[0] === "code" ? "madeira-thread-codes" : undefined}
                   style={{ padding: "3px 6px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 11, outline: "none" }}
                 />
               </div>
             ))}
+            <div style={{ display: "flex", flexDirection: "column", flex: 1.35 }}>
+              <label style={{ fontSize: 9, color: "#777" }}>Hilo Madeira Classic Rayon</label>
+              <select
+                value={st.code || ""}
+                onChange={(e) => updSeq(i, "code", e.target.value)}
+                style={{ padding: "3px 6px", border: "1px solid #c8c8c8", borderRadius: 4, fontSize: 11, outline: "none", background: palette.white.hex }}
+              >
+                <option value="">Seleccionar codigo</option>
+                {MADEIRA_CLASSIC_RAYON.map((thread) => (
+                  <option key={thread.code} value={thread.code}>{thread.code} · {thread.name}</option>
+                ))}
+              </select>
+            </div>
             <button onClick={() => delStop(i)} style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: 14, paddingBottom: 4 }}>
               x
             </button>
           </div>
         ))}
       </div>
-      <datalist id="madeira-thread-codes">
-        {MADEIRA_CLASSIC_RAYON.map((t) => (
-          <option key={t.code} value={t.code}>
-            {t.name}
-          </option>
-        ))}
-      </datalist>
     </div>
   )
 }

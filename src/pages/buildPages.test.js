@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildPage1, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
+import { buildPage1, formatEmbroideryStop, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
 import { capGarment } from "../garments/cap.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
@@ -234,6 +234,11 @@ describe("reusable page block helpers", () => {
     expect(svg).toContain("Tajima")
     expect(svg).toContain("12000")
     expect(svg).toContain("Stop 1: Rojo (5000 pt.)")
+  })
+
+  it("prints the Madeira code, official name and descriptive color in each stop", () => {
+    expect(formatEmbroideryStop({ stop: 2, code: "1055", name: "Latte", color: "Beige", stitches: 1800 }))
+      .toBe("Stop 2: Madeira 1055 · Latte · Beige (1800 pt.)")
   })
 
   it("renders illustration placeholders without drawing garment vectors", () => {

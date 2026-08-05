@@ -183,4 +183,27 @@ describe("dropContradictedDesignFields", () => {
     expect(dropContradictedDesignFields(labelSlot, undefined).fields).toHaveLength(2)
     expect(dropContradictedDesignFields(undefined, [{ label: "Cierre", val: "Sin cierre" }]).fields).toEqual([])
   })
+
+  // The real bug: a polo/camisa that closes with buttons, not a zipper, has
+  // "Cierre frontal: Sin cierre" as a totally normal, correct general fact -
+  // but cierre and boton used to be ONE topic, so that fact deleted the
+  // button design slot too, even though the garment genuinely has buttons.
+  it("does not drop the button design slot when only the ZIPPER is denied", () => {
+    const buttonSlot = [{ key: "btn_name", label: "Botones personalizados", category: "design", designSlot: "buttons", designField: "name" }]
+    const facts = [{ label: "Cierre frontal", val: "Sin cierre" }]
+    const out = dropContradictedDesignFields(buttonSlot, facts)
+    expect(out.fields).toHaveLength(1)
+    expect(out.droppedSlots).toEqual([])
+  })
+
+  // "sin" mid-sentence (a real, affirmative button description that happens
+  // to contain the word "sin") must not read as a denial - NONE_VALUE now
+  // only matches the value's OWN leading clause.
+  it("keeps the button slot when the fact affirmatively describes buttons, even if 'sin' appears mid-value", () => {
+    const buttonSlot = [{ key: "btn_name", label: "Botones personalizados", category: "design", designSlot: "buttons", designField: "name" }]
+    const facts = [{ label: "Botones", val: "Poliester perlado con grabado de logo, sin teñir" }]
+    const out = dropContradictedDesignFields(buttonSlot, facts)
+    expect(out.fields).toHaveLength(1)
+    expect(out.droppedSlots).toEqual([])
+  })
 })

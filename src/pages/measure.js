@@ -60,6 +60,14 @@ export function selectedDesign(page, ctx) {
   return designs.find((d) => d && typeof d.name === "string" && d.name.toLowerCase() === needle) || designs[0]
 }
 
+export function pageColors(page, ctx) {
+  if (page && page.purpose === "data:colorways") {
+    return ctx && Array.isArray(ctx.fabricColors) ? ctx.fabricColors : []
+  }
+  const design = selectedDesign(page, ctx)
+  return design && Array.isArray(design.colors) ? design.colors : []
+}
+
 export function documentIndexRows(entries, width) {
   const safeWidth = Math.max(320, Number(width || 0))
   const titleWidth = safeWidth * 0.24
@@ -106,8 +114,7 @@ export function measureRegion(region, page, ctx, width) {
   }
 
   if (type === "colorSpecs") {
-    const design = selectedDesign(page, ctx)
-    const n = design && Array.isArray(design.colors) ? design.colors.filter((c) => c && c.hex).length : 0
+    const n = pageColors(page, ctx).filter((c) => c && c.hex).length
     if (n === 0) return { natural: 0, min: 0, canAbsorb: false }
     return {
       natural: 32 + n * ROW.color,

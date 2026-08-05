@@ -21,7 +21,7 @@
 // fallback design). Outline functions written directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { selectedDesign } from "./measure.js"
+import { pageColors, selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { balancedChunks, partitionPartsBySystem } from "../core/semanticOutline.js"
 
@@ -82,6 +82,18 @@ export const CONTRACTS = {
     minIllustrationHeight: 360,
     dataSide: "right",
   },
+  // A DATA_SECTIONS page (semanticOutline.js) - a size chart, a QC checklist,
+  // factory notes. The table IS the page; unlike structure/lining it does NOT
+  // mandate an illustration (interpretPlan.js used to force one onto any
+  // partsList page regardless of family - see the purposeFamily gate there).
+  data: {
+    mandatory: ["header", "titleBar", "partsList", "disclaimer"],
+    forbidden: ["colorSpecs", "embSpecs"],
+    priorityRank: { partsList: 3, illustration: 2, note: 1 },
+    illustrationShare: { min: 0, max: 0.45 },
+    minIllustrationHeight: 0,
+    dataSide: "left",
+  },
 }
 
 const SINGLETONS = new Set(["header", "titleBar", "disclaimer", "partsList", "colorSpecs", "embSpecs", "documentIndex"])
@@ -90,10 +102,28 @@ export function purposeFamily(purpose) {
   if (!purpose || typeof purpose !== "string") return "structure"
   const p = purpose.trim()
   if (p.startsWith("design:")) return "design"
-  return CONTRACTS[p] && p !== "design" ? p : "structure"
+  // "data:" stays OPEN on purpose - data:measurements, data:quality, or a
+  // purpose the model invented on its own (data:seam-taping) all share the
+  // same contract shape. DATA_SECTIONS is a suggested menu, not a closed enum.
+  if (p.startsWith("data:")) return "data"
+  return CONTRACTS[p] && p !== "design" && p !== "data" ? p : "structure"
 }
 
 export function layoutPolicyFor(page) {
+  return contractForPage(page)
+}
+
+function contractForPage(page) {
+  if (page && page.purpose === "data:colorways") {
+    return {
+      mandatory: ["header", "titleBar", "colorSpecs", "disclaimer"],
+      forbidden: ["illustration", "partsList", "embSpecs"],
+      priorityRank: { colorSpecs: 3 },
+      illustrationShare: { min: 0, max: 0 },
+      minIllustrationHeight: 0,
+      dataSide: "left",
+    }
+  }
   return CONTRACTS[purposeFamily(page && page.purpose)]
 }
 
@@ -151,7 +181,7 @@ function conditionalMandatory(page, ctx, family) {
 export function validatePage(page, ctx) {
   const errors = []
   const family = purposeFamily(page && page.purpose)
-  const contract = CONTRACTS[family]
+  const contract = contractForPage(page)
 
   const leaves = flattenRegions(page && page.regions)
   const typeCounts = new Map()
@@ -173,7 +203,7 @@ export function validatePage(page, ctx) {
   // page (selectedDesign incl. its designs[0] fallback), so contract and
   // pixels agree.
   const renderDesign = selectedDesign(page, ctx)
-  if (present("colorSpecs") && !designHasColors(renderDesign)) errors.push({ code: "empty-data-region", type: "colorSpecs" })
+  if (present("colorSpecs") && !pageColors(page, ctx).some((color) => color && color.hex)) errors.push({ code: "empty-data-region", type: "colorSpecs" })
   if (present("embSpecs") && !designHasEmb(renderDesign)) errors.push({ code: "empty-data-region", type: "embSpecs" })
 
   for (const [type, count] of typeCounts) {
@@ -192,7 +222,7 @@ export function validatePage(page, ctx) {
 export function repairPage(page, ctx) {
   const repairs = []
   const family = purposeFamily(page && page.purpose)
-  const contract = CONTRACTS[family]
+  const contract = contractForPage(page)
   const renderDesign = selectedDesign(page, ctx)
   const condDesign = pageDesign(page, ctx)
 
@@ -222,7 +252,7 @@ export function repairPage(page, ctx) {
 
   regions = filterTree(
     regions,
-    (r) => !((r.type === "colorSpecs" && !designHasColors(renderDesign)) || (r.type === "embSpecs" && !designHasEmb(renderDesign))),
+    (r) => !((r.type === "colorSpecs" && !pageColors(page, ctx).some((color) => color && color.hex)) || (r.type === "embSpecs" && !designHasEmb(renderDesign))),
     (r) => "dropped empty " + r.type
   )
 
@@ -306,8 +336,14 @@ function isFullBomPage(p) {
 }
 
 function isBomFamilyPage(page) {
+  if (page && page.purpose === "data:colorways") return false
   const family = purposeFamily(page && page.purpose)
-  return family === "overview" || family === "structure" || family === "lining"
+  // "data" included: a data:measurements or data:quality page carries real
+  // BOM coverage too (see semanticOutline.js's DATA_SECTIONS). Without this,
+  // an outline made only of data:* pages leaves structuralPages.length === 0
+  // in repairOutline below, which then splices a FULL partitionPartsBySystem
+  // set on top - every part duplicated.
+  return family === "overview" || family === "structure" || family === "lining" || family === "data"
 }
 
 function activePartIds(ctx) {

@@ -2,8 +2,7 @@ import { deepseekChat, deepseekChatStream, getTextAIProvider } from "./deepseekC
 import { parseJSONOrRepair } from "./techpackRequirements.js"
 import { normalizePlan } from "../pages/interpretPlan.js"
 import { repairOutline, repairPage } from "../pages/pageContracts.js"
-import { buildSemanticOutline } from "./semanticOutline.js"
-import { deterministicPageLayout } from "./semanticOutline.js"
+import { buildSemanticOutline, classifyPartBucket, deterministicPageLayout, partitionPartsBySystem } from "./semanticOutline.js"
 import { HYBRID_TASKS } from "./hybridTasks.js"
 import { hasEmbSpecs } from "./helpers.js"
 
@@ -33,152 +32,177 @@ function slug(value, fallback) {
   return safeString(value, fallback).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || fallback
 }
 
-function fallbackOutline({ garmentType, parts, designs }) {
-  return buildSemanticOutline({ garmentType, parts, designs })
+function fabricColorPage(context) {
+  const hasColors = Array.isArray(context && context.fabricColors) && context.fabricColors.some((color) => color && color.hex)
+  return hasColors ? {
+    id: "data-colorways",
+    title: "Colores de tela",
+    purpose: "data:colorways",
+    objective: "Definir los colorways de las telas con referencias Pantone/CMYK visibles para produccion.",
+    criteria: "Cada color debe conservar nombre, muestra, conversion CMYK y referencia hexadecimal.",
+    pieces: [],
+  } : null
+}
+
+function fallbackOutline({ garmentType, parts, designs, fabricColors }) {
+  const outline = buildSemanticOutline({ garmentType, parts, designs })
+  const page = fabricColorPage({ fabricColors })
+  if (page) {
+    const designIndex = outline.pages.findIndex((item) => String(item.purpose || "").startsWith("design:"))
+    outline.pages.splice(designIndex < 0 ? outline.pages.length : designIndex, 0, page)
+  }
+  return outline
 }
 
 export function fallbackDocumentOutline(context = {}) {
   return repairOutline(fallbackOutline(context), context).outline
 }
 
-function normalizeOutline(raw, context) {
-  const fallback = fallbackOutline(context || {})
-  if (!raw || typeof raw !== "object" || !Array.isArray(raw.pages) || raw.pages.length === 0) return fallback
-  const pages = raw.pages
-    .filter((page) => page && typeof page === "object")
-    .map((page, i) => {
-      const title = safeString(page.title, "Page " + (i + 1))
-      const purpose = safeString(page.purpose, i === 0 ? "overview" : "structure")
-      return {
-        id: slug(page.id || title, "page-" + (i + 1)),
-        title,
-        purpose,
-        covers: Array.isArray(page.covers) ? page.covers.filter((c) => typeof c === "string" && c.trim()) : undefined,
-        // Which known part ids this page is actually about (e.g. the hood
-        // page shows hood pieces, not the whole BOM) - consumed by
-        // interpretPlan.js's effectivePartsForPage. Omitted/empty means "all".
-        // Every real part.id in this app is a NUMBER (uid()/i+1 - see
-        // App.jsx/garments/*.js), but this array is the single source of
-        // truth for "pieces are strings" from here on (the validator below,
-        // restoreMissingPartsToTheirSystems, refineOverloadedStructuralPages
-        // all compare against it) - so a model that correctly echoes back a
-        // numeric id must not be silently dropped for not being a string.
-        pieces: Array.isArray(page.pieces)
-          ? page.pieces.filter((p) => typeof p === "string" || typeof p === "number").map((p) => String(p).trim()).filter(Boolean)
-          : undefined,
-        system: safeString(page.system, "") || undefined,
-        objective: safeString(page.objective, "") || undefined,
-        views: Array.isArray(page.views) ? page.views.filter((view) => typeof view === "string" && view.trim()) : undefined,
-        briefs: Array.isArray(page.briefs) ? page.briefs.filter((brief) => brief && typeof brief === "object") : undefined,
+function activeParts(parts) {
+  return (Array.isArray(parts) ? parts : []).filter((part) => part && part.on !== false && part.id != null)
+}
+
+function validSectionPurpose(purpose) {
+  return purpose === "overview" || purpose === "lining" || purpose === "label" ||
+    (typeof purpose === "string" && (purpose.startsWith("structure:") || purpose.startsWith("data:")))
+}
+
+function normalizeSections(raw) {
+  const source = raw && Array.isArray(raw.sections) ? raw.sections : raw && Array.isArray(raw.pages) ? raw.pages : []
+  const seen = new Set()
+  return source.flatMap((section, index) => {
+    if (!section || typeof section !== "object") return []
+    const purpose = safeString(section.purpose, "")
+    if (!validSectionPurpose(purpose)) return []
+    const id = slug(section.id || purpose, "section-" + (index + 1))
+    if (seen.has(id)) return []
+    seen.add(id)
+    return [{
+      id,
+      title: safeString(section.title, "Seccion " + (index + 1)),
+      purpose,
+      objective: safeString(section.objective, "Organizar datos tecnicos relacionados."),
+      criteria: safeString(section.criteria, "Datos que sirven al objetivo de esta seccion."),
+      views: Array.isArray(section.views) ? section.views.filter((view) => typeof view === "string" && view.trim()) : [],
+      illustration: safeString(section.illustration, "") || undefined,
+    }]
+  })
+}
+
+function deterministicSections(context) {
+  return fallbackOutline(context).pages
+    .filter((page) => validSectionPurpose(page.purpose))
+    .map((page) => ({
+      id: page.id,
+      title: page.title,
+      purpose: page.purpose,
+      objective: page.objective || "Organizar datos tecnicos relacionados.",
+      criteria: page.criteria || "Datos que sirven al objetivo de esta seccion.",
+      views: page.views || [],
+      illustration: page.illustration,
+    }))
+}
+
+function assignmentPieceId(item) {
+  if (!item || typeof item !== "object") return ""
+  return safeString(item.pieza != null ? String(item.pieza) : item.piece != null ? String(item.piece) : item.partId != null ? String(item.partId) : item.id != null ? String(item.id) : "", "")
+}
+
+function assignmentSectionId(item) {
+  return safeString(item && (item.seccion != null ? item.seccion : item.section), "")
+}
+
+function normalizeAssignments(raw) {
+  const source = raw && Array.isArray(raw.asignaciones) ? raw.asignaciones : raw && Array.isArray(raw.assignments) ? raw.assignments : []
+  return source.map((item) => ({ piece: assignmentPieceId(item), section: assignmentSectionId(item) }))
+}
+
+function exactAssignmentCoverage(assignments, parts, sectionIds) {
+  const expected = activeParts(parts).map((part) => String(part.id))
+  if (assignments.length !== expected.length) return false
+  const received = assignments.map((item) => item.piece)
+  if (new Set(received).size !== received.length || received.some((id) => !expected.includes(id))) return false
+  if (!expected.every((id) => received.includes(id))) return false
+  return assignments.every((item) => !item.section || sectionIds.has(item.section))
+}
+
+function deterministicAssignment(part, sections) {
+  const classification = classifyPartBucket(part)
+  const direct = sections.find((section) => section.id === classification.bucket || section.purpose === classification.purpose)
+  return { piece: String(part.id), section: direct ? direct.id : "" }
+}
+
+export function composeOutlineFromSections(sectionsInput, assignmentsInput, context = {}) {
+  const sections = normalizeSections({ sections: sectionsInput })
+  const parts = activeParts(context.parts)
+  const partById = new Map(parts.map((part) => [String(part.id), part]))
+  const sectionById = new Map(sections.map((section) => [section.id, section]))
+  const groups = new Map(sections.map((section) => [section.id, []]))
+  const changes = []
+
+  function deterministicTarget(part) {
+    const fallbackPage = partitionPartsBySystem([part], { maxPartsPerPage: 8 })[0]
+    const fallbackId = fallbackPage ? fallbackPage.id.replace(/-(?:\d+)$/, "") : "data-general"
+    let target = sections.find((section) => section.purpose === (fallbackPage && fallbackPage.purpose))
+    if (!target) {
+      target = {
+        id: fallbackId,
+        title: fallbackPage ? fallbackPage.title : "Datos generales",
+        purpose: fallbackPage ? fallbackPage.purpose : "data:general",
+        objective: fallbackPage && fallbackPage.objective || "Reunir datos sin una seccion especifica.",
+        criteria: fallbackPage && fallbackPage.criteria || "Datos no cubiertos por otra seccion.",
+        views: fallbackPage && fallbackPage.views || [],
+        illustration: fallbackPage && fallbackPage.illustration,
       }
-    })
-  return pages.length > 0 ? { pages } : fallback
-}
-
-function isStructuralPurpose(purpose) {
-  return purpose === "overview" || purpose === "lining" || (typeof purpose === "string" && purpose.startsWith("structure:"))
-}
-
-function validStructuralRefinement(sourcePage, pages) {
-  if (!Array.isArray(pages) || pages.length < 2) return false
-  const expected = Array.isArray(sourcePage.pieces) ? sourcePage.pieces : []
-  const received = pages.flatMap((page) => Array.isArray(page.pieces) ? page.pieces : [])
-  if (pages.some((page) => !isStructuralPurpose(page.purpose) || page.pieces.length < 2 || page.pieces.length > 8)) return false
-  if (received.length !== expected.length || new Set(received).size !== received.length) return false
-  const expectedSet = new Set(expected)
-  return received.every((id) => expectedSet.has(id)) && expected.every((id) => received.includes(id))
-}
-
-function restoreMissingPartsToTheirSystems(outline, parts) {
-  const pages = JSON.parse(JSON.stringify((outline && outline.pages) || []))
-  const structural = pages.filter((page) => isStructuralPurpose(page.purpose))
-  // `page.pieces` is always STRING (see normalizeOutline); `part.id` is
-  // always NUMBER - normalize here too, or `covered.has(item.id)` silently
-  // treats every part as missing regardless of what the outline covered.
-  const covered = new Set(structural.flatMap((page) => Array.isArray(page.pieces) ? page.pieces : []))
-  const repairs = []
-
-  for (const part of (parts || []).filter((item) => item && item.on !== false && item.id != null && !covered.has(String(item.id)))) {
-    const system = safeString(part.system, "").toLowerCase()
-    if (!system) continue
-    const target = structural.find((page) => {
-      const pageSystem = safeString(page.system, "").toLowerCase()
-      const purpose = safeString(page.purpose, "").toLowerCase()
-      return pageSystem === system || purpose === "structure:" + system
-    })
-    if (!target) continue
-    target.pieces = [...(target.pieces || []), String(part.id)]
-    covered.add(String(part.id))
-    repairs.push("restored " + part.id + " to " + target.id + " before semantic refinement")
+      sections.push(target)
+      sectionById.set(target.id, target)
+      groups.set(target.id, [])
+      changes.push("created " + target.purpose + " for piece " + part.id)
+    }
+    return target
   }
 
-  return { outline: { pages }, repairs }
-}
+  for (const assignment of normalizeAssignments({ asignaciones: assignmentsInput })) {
+    const part = partById.get(assignment.piece)
+    if (!part) continue
+    let target = sectionById.get(assignment.section)
+    if (!target) {
+      target = deterministicTarget(part)
+      changes.push("assigned " + assignment.piece + " by deterministic contract")
+    }
+    groups.get(target.id).push(part)
+    partById.delete(assignment.piece)
+  }
 
-async function refineOverloadedStructuralPages(outline, context) {
-  const refinements = []
-  const pages = []
-  // Keyed by String(id) to match page.pieces (always string - see
-  // normalizeOutline) against part.id (always number).
-  const partById = new Map((context.parts || []).map((part) => [part && part.id != null ? String(part.id) : null, part]))
+  for (const part of partById.values()) {
+    const preferred = deterministicAssignment(part, sections)
+    const target = sectionById.get(preferred.section) || deterministicTarget(part)
+    groups.get(target.id).push(part)
+    changes.push("restored missing piece " + part.id + " by deterministic contract")
+  }
 
-  for (const page of outline.pages || []) {
-    if (!isStructuralPurpose(page.purpose) || !Array.isArray(page.pieces) || page.pieces.length <= 8) {
-      pages.push(page)
+  const pages = [{ id: "cover", title: safeString(context.garmentType, "Illustration Handoff"), purpose: "cover" }]
+  for (const section of sections) {
+    const members = groups.get(section.id) || []
+    if (!members.length) {
+      if (parts.length === 0 && section.purpose === "overview") pages.push({ ...section, pieces: undefined })
       continue
     }
-
-    const sourceParts = page.pieces.map((id) => partById.get(id)).filter(Boolean)
-    const prompt =
-      "Sos ingeniero textil. Subdividi UN sistema constructivo grande en paginas tecnicas con objetivos fabricables distintos. " +
-      "No dividas por cantidad ni por orden de la lista: conserva juntos pares espejo y componentes que se montan como una unidad. " +
-      "Reglas de ensamblaje: la apertura o vista de cada bolsillo va con SU bolsa; un cargo conserva juntos cuerpo, fuelle y capas exterior/interior de tapa; " +
-      "un refuerzo va con su panel anfitrion; los componentes izquierda/derecha equivalentes permanecen en la misma pagina. Cada pagina debe contener de 2 a 8 ids. " +
-      "Usa cada id exactamente una vez, no inventes ids y devuelve al menos 2 paginas. Titulos, objetivos y vistas deben ser especificos.\n\n" +
-      "Sistema original: " + JSON.stringify({ id: page.id, purpose: page.purpose, pieces: page.pieces }) + "\n" +
-      "Piezas confirmadas: " + JSON.stringify(sourceParts) + "\n\n" +
-      "Devolve SOLO JSON valido: " +
-      '{"pages":[{"id":"...","title":"...","purpose":"structure:...","objective":"...","pieces":["P01","P02"],"views":["..."]}]}'
-
-    const attempts = []
-    let acceptedPages = null
-    let previousRaw = ""
-    for (let attempt = 0; attempt < 1 && !acceptedPages; attempt++) {
-      try {
-        const messages = [{ role: "user", content: prompt }]
-        if (attempt > 0) messages.push(
-          { role: "assistant", content: previousRaw },
-          { role: "user", content: "Esa respuesta incumplio cobertura exacta o el limite de 2 a 8 piezas. Corrigela y verifica cada id antes de responder." }
-        )
-        const raw = await deepseekChat({
-          messages,
-          maxTokens: 1800,
-          temperature: 0,
-          task: HYBRID_TASKS.OUTLINE,
-          validator: (content) => {
-            const parsed = parseJSONOrRepair(content, "invalid structural refinement")
-            return validStructuralRefinement(page, normalizeOutline(parsed, context).pages)
-          },
-          fallback: JSON.stringify({ pages: [] }),
-          providers: context.providers,
-        })
-        previousRaw = raw
-        const parsed = parseJSONOrRepair(raw, "El modelo no devolvio una subdivision estructural valida.")
-        const candidate = normalizeOutline(parsed, context).pages
-          .filter((item) => Array.isArray(item.pieces) && item.pieces.length > 0)
-          .map((item) => ({ ...item, purpose: isStructuralPurpose(item.purpose) ? item.purpose : page.purpose }))
-        const accepted = validStructuralRefinement(page, candidate)
-        attempts.push({ accepted, raw })
-        if (accepted) acceptedPages = candidate
-      } catch (error) {
-        attempts.push({ accepted: false, error: error instanceof Error ? error.message : String(error) })
-      }
-    }
-    refinements.push({ pageId: page.id, accepted: !!acceptedPages, pages: acceptedPages || [], attempts })
-    pages.push(...(acceptedPages || [page]))
+    const chunks = []
+    for (let index = 0; index < members.length; index += 8) chunks.push(members.slice(index, index + 8))
+    chunks.forEach((chunk, index) => pages.push({
+      ...section,
+      id: section.id + (chunks.length > 1 ? "-" + (index + 1) : ""),
+      title: section.title + (chunks.length > 1 ? " · " + (index + 1) + "/" + chunks.length : ""),
+      pieces: chunk.map((part) => String(part.id)),
+    }))
   }
-
-  return { outline: { pages }, refinements }
+  const designOnly = buildSemanticOutline({ garmentType: context.garmentType, parts: [], designs: context.designs }).pages
+    .filter((page) => typeof page.purpose === "string" && page.purpose.startsWith("design:"))
+  const colorPage = fabricColorPage(context)
+  if (colorPage) pages.push(colorPage)
+  pages.push(...designOnly)
+  return { outline: { pages }, changes }
 }
 
 export function extractLastCompletedRegionType(text) {
@@ -219,70 +243,137 @@ function promptSafeDesigns(designs) {
 }
 
 // Same discipline for parts: only the fields the planner groups/paginates by.
+// `label` (see semanticOutline.js's withPartLabels) is what lets the model
+// tell "Gramaje" from "Rango de tallas" instead of guessing from a bare
+// value like "180-220 GSM" - without it the planner is reasoning half-blind.
 function promptSafeParts(parts) {
   return (Array.isArray(parts) ? parts : [])
     .filter((part) => part && part.on !== false)
-    .map((part) => ({ id: part.id, val: part.val, ...(part.system ? { system: part.system } : {}) }))
+    .map((part) => ({ id: part.id, val: part.val, ...(part.label ? { label: part.label } : {}), ...(part.system ? { system: part.system } : {}) }))
 }
 
-export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal, onStatus, signal, providers } = {}) {
-  const context = { garmentType, parts, designs, brief, lang, providers }
+export async function planDocumentSections(context, { onStatus, signal, providers } = {}) {
+  const parts = activeParts(context && context.parts)
+  const minimumSections = Math.min(6, Math.max(1, parts.length))
+  const labelsOnly = parts.map((part) => ({ id: String(part.id), label: safeString(part.label || part.customName, "Pieza " + part.id) }))
+  const fallback = deterministicSections(context)
+  const fallbackPurposes = new Set(fallback.map((section) => section.purpose))
+  const padding = [
+    ["materials", "Materiales y consumos", "data:materials"],
+    ["measurements", "Medidas y tolerancias", "data:measurements"],
+    ["stitching", "Costuras y puntadas", "data:stitching"],
+    ["quality", "Control de calidad", "data:quality"],
+    ["labels-packaging", "Etiquetas y empaque", "data:labels-packaging"],
+    ["general", "Datos generales", "data:general"],
+  ]
+  for (const [id, title, purpose] of padding) {
+    if (fallback.length >= minimumSections) break
+    if (fallbackPurposes.has(purpose)) continue
+    fallback.push({ id, title, purpose, objective: "Organizar " + title.toLowerCase() + ".", criteria: "Datos confirmados que pertenecen a " + title.toLowerCase() + ".", views: [] })
+    fallbackPurposes.add(purpose)
+  }
   const instructions =
-    "Sos director de arte de fichas tecnicas textiles, pensando como un disenador tecnico real. Decidi que paginas necesita este documento respondiendo, en orden, las preguntas que un disenador se hace:\n" +
-    "1. ¿Que merece pagina propia? La portada identifica el estilo; las piezas se dividen por sistemas constructivos con objetivos distintos; cada diseno discreto tiene SU pagina.\n" +
-    "2. ¿Que no se repite nunca? Cada id de pieza activa debe aparecer exactamente una vez entre las paginas estructurales. NO concentres un BOM grande en una pagina general si puede dividirse con sentido. Los datos de un diseno viven solo en su pagina.\n" +
-    "3. ¿Que agrupo? Piezas que la fabrica monta juntas y que el ilustrador necesita ver juntas (cuerpo, capucha/cuello, mangas/punos, cierres/bolsillos, interior, accesorios). Maximo 8 ids por pagina; si un sistema excede el limite, dividilo en subobjetivos coherentes.\n\n" +
-    "Prenda: " + safeString(garmentType, "custom") + "\n" +
-    "Piezas conocidas (cada una con su id): " + JSON.stringify(promptSafeParts(parts)) + "\n" +
-    "Disenos conocidos: " + JSON.stringify(promptSafeDesigns(designs)) + "\n" +
-    "Brief textil confirmado (no inventes ni contradigas estos datos): " + JSON.stringify(brief || {}) + "\n" +
-    "Idioma: " + lang + "\n\n" +
-    "Para cada pagina estructural indica \"pieces\": los ids que cubre, \"objective\": la mision tecnica y \"views\": las vistas necesarias. Cada id debe aparecer exactamente una vez.\n" +
-    "Devolve SOLO JSON valido con esta forma exacta, sin markdown:\n" +
-    '{"pages":[{"id":"shell-body","title":"Cuerpo exterior","purpose":"structure:shell-body","objective":"Documentar paneles y uniones","pieces":["id1","id2"],"views":["Frente","Espalda"],"covers":["opcional"]}]}\n' +
-    "Usa purpose como cover, structure:<sistema>, lining, label, o design:<nombre exacto del diseno>. La primera pagina debe ser la cover."
+    "Sos arquitecto de informacion de fichas tecnicas textiles. Decidi el INDICE PRODUCTIVO de este documento, no distribuyas piezas todavia. " +
+    "Cada seccion debe tener una mision diferente para fabrica y un criterio que otro ingeniero pueda aplicar sin adivinar. " +
+    "Usa entre " + minimumSections + " y 14 secciones cuando el volumen lo permita. No incluyas portada, indice ni paginas de diseno: el contrato las agrega. " +
+    "Usa purpose structure:<slug> para sistemas que necesitan ilustracion, o data:<slug> para tablas/notas sin ilustracion obligatoria. " +
+    "La lista es vocabulario abierto: crea una seccion especifica si la prenda lo exige. No inventes datos ni agrupes todo como cuerpo exterior.\n\n" +
+    "Prenda: " + safeString(context && context.garmentType, "custom") + "\n" +
+    "Campos disponibles (solo nombres, sin valores): " + JSON.stringify(labelsOnly) + "\n" +
+    "Idioma: " + safeString(context && context.lang, "ES") + "\n\n" +
+    'Devolve SOLO JSON: {"sections":[{"id":"materiales","title":"Materiales y consumos","purpose":"data:materials","objective":"...","criteria":"...","views":[]}]}'
 
   let aiResult = null
   const raw = await deepseekChat({
     messages: [{ role: "user", content: instructions }],
-    maxTokens: 4000,
-    temperature: 0.2,
-    task: HYBRID_TASKS.OUTLINE,
+    task: HYBRID_TASKS.OUTLINE_INDEX,
+    maxTokens: 2000,
+    temperature: 0.1,
     validator: (content) => {
-      const candidate = normalizeOutline(parseJSONOrRepair(content, "invalid outline"), context)
-      // part.id is always a NUMBER; candidate.pages[].pieces is always a
-      // STRING (see normalizeOutline above) - comparing them raw meant
-      // `covered.every(id => activeIds.has(id))` could never be true for a
-      // garment with real parts, so the model's outline was rejected on
-      // every single call regardless of what it actually proposed. That
-      // fallback then failed this SAME validator too (see hybridAI.js's
-      // fallback revalidation), turning a coverage mismatch into a hard
-      // throw instead of a normal accept/reject.
-      const activeIds = new Set((parts || []).filter((part) => part && part.on !== false && part.id != null).map((part) => String(part.id)))
-      const covered = candidate.pages.filter((page) => isStructuralPurpose(page.purpose)).flatMap((page) => page.pieces || [])
-      const requiredDesigns = (designs || []).filter((design) => design && design.name).map((design) => "design:" + design.name)
-      const purposes = new Set(candidate.pages.map((page) => page.purpose))
-      return candidate.pages[0] && candidate.pages[0].purpose === "cover" &&
-        covered.length === activeIds.size && covered.every((id) => activeIds.has(id)) &&
-        new Set(covered).size === covered.length &&
-        candidate.pages.every((page) => !page.pieces || page.pieces.length <= 8) &&
-        requiredDesigns.every((purpose) => purposes.has(purpose))
+      const sections = normalizeSections(parseJSONOrRepair(content, "invalid section index"))
+      return sections.length >= minimumSections && sections.length <= 14 &&
+        sections.every((section) => section.title && section.objective && section.criteria && validSectionPurpose(section.purpose))
     },
-    fallback: () => JSON.stringify(fallbackDocumentOutline(context)),
+    fallback: JSON.stringify({ sections: fallback }),
     onStatus,
     signal,
     providers,
     onResult: (result) => { aiResult = result },
   })
-  const parsed = parseJSONOrRepair(raw, "El asistente de IA no devolvio un esquema de documento valido.")
-  const proposed = normalizeOutline(parsed, context)
-  const restored = restoreMissingPartsToTheirSystems(proposed, parts)
-  const refined = await refineOverloadedStructuralPages(restored.outline, context)
-  // The model proposes; the document contract disposes: a missing cover or
-  // BOM page is inserted, uncovered designs get their page, duplicates drop.
-  const repaired = repairOutline(refined.outline, context)
-  const repairs = [...restored.repairs, ...repaired.repairs]
-  if (typeof onProposal === "function") onProposal({ raw, parsed, proposed, refinements: refined.refinements, outline: repaired.outline, repairs, aiResult })
+  return { raw, sections: normalizeSections(parseJSONOrRepair(raw, "El modelo no devolvio un indice valido.")), aiResult }
+}
+
+export async function assignPartsToSections(sections, context, { onStatus, onBatch, signal, providers, batchSize = 12 } = {}) {
+  const ordered = activeParts(context && context.parts).slice().sort((a, b) => {
+    const left = classifyPartBucket(a).purpose
+    const right = classifyPartBucket(b).purpose
+    return left.localeCompare(right) || String(a.id).localeCompare(String(b.id))
+  })
+  const batches = []
+  for (let index = 0; index < ordered.length; index += batchSize) batches.push(ordered.slice(index, index + batchSize))
+  const sectionIds = new Set(sections.map((section) => section.id))
+  const assignments = []
+  const results = []
+
+  if (ordered.length === 0) return { assignments, results }
+
+  for (let index = 0; index < batches.length; index++) {
+    const batch = batches[index]
+    if (typeof onBatch === "function") onBatch({ index: index + 1, total: batches.length, size: batch.length })
+    const prompt =
+      "Sos ingeniero textil. Asigna CADA dato del lote a la seccion cuyo criterio realmente cumple. No omitas, dupliques ni inventes ids. " +
+      "Si ninguna seccion aplica honestamente, usa seccion vacia; el contrato lo ubicara despues.\n\n" +
+      "Secciones: " + JSON.stringify(sections.map(({ id, title, purpose, objective, criteria }) => ({ id, title, purpose, objective, criteria }))) + "\n" +
+      "Lote: " + JSON.stringify(promptSafeParts(batch)) + "\n\n" +
+      'Devolve SOLO JSON: {"asignaciones":[{"pieza":"12","seccion":"materiales"}]}'
+    const deterministic = batch.map((part) => deterministicAssignment(part, sections))
+      .map((item) => ({ pieza: item.piece, seccion: item.section }))
+    let aiResult = null
+    const raw = await deepseekChat({
+      messages: [{ role: "user", content: prompt }],
+      task: HYBRID_TASKS.OUTLINE_ASSIGN,
+      maxTokens: 1200,
+      temperature: 0,
+      validator: (content) => exactAssignmentCoverage(normalizeAssignments(parseJSONOrRepair(content, "invalid assignments")), batch, sectionIds),
+      fallback: JSON.stringify({ asignaciones: deterministic }),
+      onStatus,
+      signal,
+      providers,
+      operationId: "outline-assign-" + (index + 1),
+      onResult: (result) => { aiResult = result },
+    })
+    const accepted = normalizeAssignments(parseJSONOrRepair(raw, "El modelo no devolvio asignaciones validas."))
+    assignments.push(...accepted)
+    results.push({ batch: index + 1, raw, aiResult })
+  }
+  return { assignments, results }
+}
+
+export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal, onStatus, onSections, onBatch, signal, providers } = {}) {
+  const context = { garmentType, parts, designs, brief, lang, providers }
+  const sectionResult = await planDocumentSections(context, { onStatus, signal, providers })
+  if (typeof onSections === "function") onSections(sectionResult.sections)
+  const assignmentResult = await assignPartsToSections(sectionResult.sections, context, { onStatus, onBatch, signal, providers })
+  const composed = composeOutlineFromSections(sectionResult.sections, assignmentResult.assignments, context)
+  const repaired = repairOutline(composed.outline, context)
+  const repairs = [...composed.changes, ...repaired.repairs]
+  const degraded = sectionResult.aiResult && sectionResult.aiResult.provider === "contract" ||
+    assignmentResult.results.some((result) => result.aiResult && result.aiResult.provider === "contract")
+  const aiResult = degraded
+    ? { provider: "contract", model: "deterministic", degraded: true, fallbackReason: "one_or_more_planning_stages_used_contract" }
+    : sectionResult.aiResult
+  if (typeof onProposal === "function") onProposal({
+    raw: sectionResult.raw,
+    parsed: { sections: sectionResult.sections },
+    proposed: composed.outline,
+    sections: sectionResult.sections,
+    assignments: assignmentResult.assignments,
+    batches: assignmentResult.results,
+    refinements: [],
+    outline: repaired.outline,
+    repairs,
+    aiResult,
+  })
   return repaired.outline
 }
 
@@ -302,6 +393,9 @@ export async function planPageLayout(pageOutline, context, { onProgress, onStatu
       brief: context && context.brief,
       lang: context && context.lang,
     }) + "\n\n" +
+    "Esta pagina existe para: " + safeString(page.objective, "comunicar su contenido tecnico sin ambiguedad") + ". " +
+    "Su criterio de inclusion es: " + safeString(page.criteria, "solo datos que sirven a ese objetivo") + ". " +
+    "Todo bloque y toda vista que propongas debe servir directamente a esa mision.\n\n" +
     "Pensá como un disenador de fichas tecnicas REAL. Antes de componer, respondé mentalmente: ¿como represento ESTA pagina de la manera mas ordenada? ¿que elementos tienen que estar si o si presentes visualmente? ¿que NO repito porque ya vive en otra pagina? Reglas de oro:\n" +
     "1) La ILUSTRACION es la heroina de casi toda pagina y el UNICO bloque que se estira: dale weight alto (su weight es su prioridad de espacio). Los bloques de datos (partsList/colorSpecs/embSpecs/note) miden su altura por su contenido real - su weight no los agranda, asi que no intentes inflarlos. En illustration: 'slots' = cuantas vistas/detalles hacen falta (frente, espalda, interior, close-up), 'refs' = el nombre de cada vista, y 'briefs' = UN brief estructurado POR SLOT que guia al ilustrador humano. Cada brief: {\"garmentPart\": que parte de la prenda va en este slot, \"view\": la vista, \"mustMark\": [elementos que el dibujo DEBE senalar con callouts], \"measurements\": [{\"label\": medida a acotar con lineas de cota en mm, \"perSize\": true si varia por talla}], \"placementLandmark\": desde que referencia se mide la ubicacion (ej. '80mm bajo costura de hombro, centrado'), \"factoryNote\": lo critico para que la fabrica no falle}. Pensá cada brief con DOS cabezas: (a) ¿que tiene que estar dibujado/acotado para que la FABRICA produzca sin errores y fiel a lo que pidio el cliente? (b) ¿que necesita saber un ILUSTRADOR habil que NO sabe de textil para completar los esquemas perfectamente? 'note' queda como resumen narrativo opcional; va DENTRO de la ilustracion - nunca un bloque 'note' suelto para eso.\n" +
     "2) Elegí solo los bloques que ESTA pagina necesita segun su proposito: una cover identifica (ilustracion grande, sin tablas); overview/structure llevan el BOM; una pagina design:<nombre> lleva SOLO los datos de ese diseno (colorSpecs si tiene colores, embSpecs si tiene bordado, nunca el BOM). El sistema valida esto y repara lo que falte o sobre.\n" +
