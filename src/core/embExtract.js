@@ -22,9 +22,15 @@
 // that could only fail.
 import { getLocalOcrText, extractStructured, getTextAIProvider } from "./deepseekClient.js"
 import { EMB_FIELDS_PROMPT } from "./helpers.js"
+import { canonicalizeStopSeq } from "./madeiraThreads.js"
 
 export class EmbExtractError extends Error {}
 
+// Returns { emb, corrections }: emb is the EMPTY_EMB-shaped object EmbForm.jsx
+// expects (unchanged shape, so existing callers/data don't need to know this
+// happened); corrections lists every stop whose code/name got reconciled
+// against the official Madeira chart, for the UI to surface instead of
+// silently rewriting what the Wilcom sheet said - see canonicalizeStopSeq.
 export async function extractEmbFromPDF(base64) {
   if (getTextAIProvider() !== "local") {
     throw new EmbExtractError("La extraccion de PDF Wilcom solo esta disponible en la version estudio (studio.html) con Mistral.")
@@ -38,5 +44,8 @@ export async function extractEmbFromPDF(base64) {
     "Extrae los datos de bordado y devolve SOLO un objeto JSON con estas claves exactas (string vacio o array vacio si no encontras el dato): " +
     EMB_FIELDS_PROMPT + "."
   const result = await extractStructured({ instructions, content: text, maxTokens: 1200 })
-  return result && typeof result === "object" ? result : {}
+  const emb = result && typeof result === "object" ? result : {}
+  if (!Array.isArray(emb.stopSeq) || emb.stopSeq.length === 0) return { emb, corrections: [] }
+  const { stopSeq, corrections } = canonicalizeStopSeq(emb.stopSeq)
+  return { emb: { ...emb, stopSeq }, corrections }
 }

@@ -1,18 +1,28 @@
 import { useState, useRef } from "react"
 import { extractEmbFromPDF } from "../core/embExtract.js"
+import { MADEIRA_CLASSIC_RAYON, findMadeiraThreadByCode } from "../core/madeiraThreads.js"
 import { palette, role } from "../design/tokens.js"
 
 export function EmbForm({ emb, onChange }) {
   const [extracting, setExtracting] = useState(false)
   const [extracted, setExtracted] = useState(false)
   const [extractError, setExtractError] = useState("")
+  const [corrections, setCorrections] = useState([])
   const fileRef = useRef()
   function upd(k, v) {
     onChange(Object.assign({}, emb, { [k]: v }))
   }
   function updSeq(i, k, v) {
     var ss = emb.stopSeq ? emb.stopSeq.slice() : []
-    ss[i] = Object.assign({}, ss[i], { [k]: v })
+    var next = Object.assign({}, ss[i], { [k]: v })
+    // Typing/picking a recognized Madeira code fills the official name in
+    // the same keystroke - the code is authoritative, so this never leaves
+    // the pair inconsistent with itself.
+    if (k === "code") {
+      var match = findMadeiraThreadByCode(v)
+      if (match) next.name = match.name
+    }
+    ss[i] = next
     onChange(Object.assign({}, emb, { stopSeq: ss }))
   }
   function addStop() {
@@ -31,12 +41,14 @@ export function EmbForm({ emb, onChange }) {
     setExtracting(true)
     setExtracted(false)
     setExtractError("")
+    setCorrections([])
     var reader = new FileReader()
     reader.onload = async function (ev) {
       try {
         var b64 = ev.target.result.split(",")[1]
-        var data = await extractEmbFromPDF(b64)
-        onChange(Object.assign({}, emb, data))
+        var result = await extractEmbFromPDF(b64)
+        onChange(Object.assign({}, emb, result.emb))
+        setCorrections(result.corrections)
         setExtracted(true)
       } catch (err) {
         // Previously this just returned null and the UI still said "PDF
@@ -78,6 +90,16 @@ export function EmbForm({ emb, onChange }) {
           {extractError}
         </div>
       )}
+      {corrections.length > 0 && (
+        <div style={{ marginBottom: 12, padding: "6px 10px", background: role.highlight.fill, border: "1px solid " + role.highlight.keyline, borderRadius: 5, fontSize: 11, color: palette.ink.hex }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Corregido segun el catalogo oficial Madeira:</div>
+          {corrections.map((c, i) => (
+            <div key={i}>
+              Stop {c.stop}: {c.extractedCode || c.extractedName || "(sin dato)"} → {c.officialCode} {c.officialName}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         {fields.map((f) => (
           <div key={f.k} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -96,10 +118,15 @@ export function EmbForm({ emb, onChange }) {
         {(emb.stopSeq || []).map((st, i) => (
           <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "flex-end" }}>
             <span style={{ fontSize: 11, color: "#888", minWidth: 18, paddingBottom: 4 }}>#{i + 1}</span>
-            {[["color", "Color"], ["stitches", "Punt."], ["code", "Cod."], ["name", "Nombre"]].map((kl) => (
+            {[["color", "Color"], ["stitches", "Punt."], ["code", "Cod. Madeira"], ["name", "Nombre"]].map((kl) => (
               <div key={kl[0]} style={{ display: "flex", flexDirection: "column", flex: 1 }}>
                 <label style={{ fontSize: 9, color: "#aaa" }}>{kl[1]}</label>
-                <input value={st[kl[0]] || ""} onChange={(e) => updSeq(i, kl[0], e.target.value)} style={{ padding: "3px 6px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 11, outline: "none" }} />
+                <input
+                  value={st[kl[0]] || ""}
+                  onChange={(e) => updSeq(i, kl[0], e.target.value)}
+                  list={kl[0] === "code" ? "madeira-thread-codes" : undefined}
+                  style={{ padding: "3px 6px", border: "1px solid #e0e0e0", borderRadius: 4, fontSize: 11, outline: "none" }}
+                />
               </div>
             ))}
             <button onClick={() => delStop(i)} style={{ background: "none", border: "none", color: role.index.fill, cursor: "pointer", fontSize: 14, paddingBottom: 4 }}>
@@ -108,6 +135,13 @@ export function EmbForm({ emb, onChange }) {
           </div>
         ))}
       </div>
+      <datalist id="madeira-thread-codes">
+        {MADEIRA_CLASSIC_RAYON.map((t) => (
+          <option key={t.code} value={t.code}>
+            {t.name}
+          </option>
+        ))}
+      </datalist>
     </div>
   )
 }
