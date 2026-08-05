@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { measureRegion, pageColors, selectedDesign } from "./measure.js"
+import { measureRegion, pageColors, paginateDocumentIndexEntries, selectedDesign } from "./measure.js"
 import { ROW } from "../design/metrics.js"
 
 // Contract for the measure registry used by Layout Engine v3:
@@ -101,6 +101,18 @@ describe("measureRegion", () => {
     const m = measureRegion({ type: "bogus" }, page, ctx, 400)
     expect(m.natural).toBe(0)
     expect(m.canAbsorb).toBe(false)
+  })
+})
+
+describe("paginateDocumentIndexEntries", () => {
+  it("starts a continuation before rows exceed the measured index body", () => {
+    const entries = Array.from({ length: 20 }, (_, index) => ({
+      title: "Seccion " + (index + 1),
+      description: "Contenido tecnico confirmado para fabrica.",
+    }))
+    const pages = paginateDocumentIndexEntries(entries, 1124, 608)
+    expect(pages.map((page) => page.length)).toEqual([17, 3])
+    expect(pages.flat()).toEqual(entries)
   })
 })
 

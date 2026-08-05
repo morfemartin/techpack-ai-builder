@@ -556,4 +556,26 @@ describe("Layout Engine v3 document assembly", () => {
     expect(pages[2].pageNumber).toBe(3)
     expect(pages[2].totalPages).toBe(3)
   })
+
+  it("paginates a long production index and recalculates physical page numbers", () => {
+    const contentPages = Array.from({ length: 20 }, (_, index) => ({
+      id: "section-" + (index + 1),
+      title: "Seccion productiva " + String(index + 1).padStart(2, "0"),
+      purpose: "data:section-" + (index + 1),
+      regions: [{ type: "header" }, { type: "titleBar" }, { type: "note", note: "Dato tecnico" }, { type: "disclaimer" }],
+    }))
+    const pages = buildPlannedPages({ pages: contentPages }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+    const indexPages = pages.filter((page) => page.purpose === "index")
+
+    expect(indexPages).toHaveLength(2)
+    expect(pages).toHaveLength(23)
+    expect(indexPages[0].title).toContain("1/2")
+    expect(indexPages[1].title).toContain("2/2")
+    expect(indexPages[0].svg).toContain("Seccion productiva 01")
+    expect(indexPages[0].svg).not.toContain("Seccion productiva 18")
+    expect(indexPages[1].svg).toContain("Seccion productiva 18")
+    expect(indexPages[0].svg).toContain(">04</text>")
+    expect(indexPages[1].svg).toContain(">23</text>")
+    expect(pages[22].svg).toContain("P. 23 / 23")
+  })
 })

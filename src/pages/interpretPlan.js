@@ -16,7 +16,7 @@ import { neutral, palette } from "../design/tokens.js"
 import { CHROME, GRID, INSET, PAGE, PAGE_BODY, PRINT } from "../design/metrics.js"
 import { toGrayscale } from "../core/colorUtils.js"
 import { hasColorData } from "../core/colorSpecs.js"
-import { documentIndexRows, measureRegion, pageColors, selectedDesign } from "./measure.js"
+import { documentIndexRows, measureRegion, pageColors, paginateDocumentIndexEntries, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
@@ -863,19 +863,32 @@ export function buildPlannedPages(plan, ctx, opts) {
   if (includeIndex) {
     const coverIndex = descriptors.findIndex((descriptor) => descriptor.page.purpose === "cover")
     const insertAt = coverIndex >= 0 ? coverIndex + 1 : 0
-    const indexPage = {
-      id: "document-index",
-      title: "Indice de produccion",
-      purpose: "index",
-      objective: "Mapa de navegacion y control de recepcion para fabrica.",
-      regions: [
-        { type: "header", weight: 1 },
-        { type: "titleBar", weight: 1 },
-        { type: "documentIndex", weight: 1 },
-        { type: "disclaimer", weight: 1 },
-      ],
-    }
-    descriptors.splice(insertAt, 0, { page: indexPage, pageCtx: baseCtx, sourceIndex: -1, name: "document_index" })
+    const productionEntries = descriptors
+      .filter((descriptor) => descriptor.page.purpose !== "cover" && descriptor.page.purpose !== "index")
+      .map((descriptor) => ({
+        title: descriptor.page.title,
+        purpose: descriptor.page.purpose,
+        description: pageDescription(descriptor.page),
+      }))
+    const indexChunks = paginateDocumentIndexEntries(productionEntries, CONTENT_W, workingHeight(baseCtx))
+    const indexDescriptors = indexChunks.map((_, index) => {
+      const count = indexChunks.length
+      const suffix = count > 1 ? " · " + (index + 1) + "/" + count : ""
+      const indexPage = {
+        id: "document-index" + (count > 1 ? "-" + (index + 1) : ""),
+        title: "Indice de produccion" + suffix,
+        purpose: "index",
+        objective: "Mapa de navegacion y control de recepcion para fabrica.",
+        regions: [
+          { type: "header", weight: 1 },
+          { type: "titleBar", weight: 1 },
+          { type: "documentIndex", weight: 1 },
+          { type: "disclaimer", weight: 1 },
+        ],
+      }
+      return { page: indexPage, pageCtx: baseCtx, sourceIndex: -1, name: "document_index" + (count > 1 ? "_" + (index + 1) : "") }
+    })
+    descriptors.splice(insertAt, 0, ...indexDescriptors)
   }
 
   const totalPages = descriptors.length
@@ -889,11 +902,11 @@ export function buildPlannedPages(plan, ctx, opts) {
   }))
 
   if (includeIndex) {
-    const descriptor = descriptors.find((item) => item.page.purpose === "index")
-    descriptor.pageCtx = {
-      ...descriptor.pageCtx,
-      documentIndex: indexEntries.filter((entry) => entry.purpose !== "cover" && entry.purpose !== "index"),
-    }
+    const productionEntries = indexEntries.filter((entry) => entry.purpose !== "cover" && entry.purpose !== "index")
+    const indexChunks = paginateDocumentIndexEntries(productionEntries, CONTENT_W, workingHeight(baseCtx))
+    descriptors.filter((item) => item.page.purpose === "index").forEach((descriptor, index) => {
+      descriptor.pageCtx = { ...descriptor.pageCtx, documentIndex: indexChunks[index] || [] }
+    })
   }
 
   return descriptors.map((descriptor, index) => {

@@ -91,6 +91,26 @@ export function documentIndexRows(entries, width) {
   })
 }
 
+export function paginateDocumentIndexEntries(entries, width, availableHeight) {
+  const rows = documentIndexRows(entries, width)
+  const rowBudget = Math.max(GRID.baseline * 2, Number(availableHeight || 0) - GRID.baseline * 3)
+  const pages = []
+  let current = []
+  let used = 0
+
+  rows.forEach((row) => {
+    if (current.length > 0 && used + row.height > rowBudget) {
+      pages.push(current)
+      current = []
+      used = 0
+    }
+    current.push(row.entry)
+    used += row.height
+  })
+  if (current.length > 0) pages.push(current)
+  return pages.length > 0 ? pages : [[]]
+}
+
 export function measureRegion(region, page, ctx, width) {
   const fallback = { natural: 0, min: 0, canAbsorb: false }
   if (!region || typeof region.type !== "string") return fallback
