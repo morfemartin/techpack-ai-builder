@@ -776,7 +776,9 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "derivado del elemento REAL de esta prenda (por ejemplo 'main_logo', 'woven_label', 'buttons').\n" +
     "Cada campo del grupo debe incluir 'designField', que es uno de exactamente: 'name' (nombre humano del elemento, nombrando la " +
     "ubicacion real en ESTA prenda), " +
-    "'position' (donde va en la prenda), 'technique' (tecnica de aplicacion, DEBE ser una de esta lista exacta si aplica: " + (tecs || []).join(", ") + "), " +
+    "'position' (donde va en la prenda), 'technique' (tecnica de aplicacion - preferi esta lista si describe honestamente lo que hay: " + (tecs || []).join(", ") + "; " +
+    "pero si el elemento es real y ninguna de esas lo describe (ej: un grabado laser en un boton, un relieve en una hebilla), NOMBRA VOS la tecnica real en texto libre - " +
+    "nunca fuerces una tecnica de la lista que no es lo que hay, y nunca omitas el elemento solo porque la lista no lo cubre), " +
     "'driveLink' (URL de Drive si el usuario menciona una - normalmente solo si es plausible que exista, la mayoria de elementos no necesitan este campo), " +
     "'width'/'height' (ancho y alto FISICOS del elemento en centimetros - SOLO para elementos con arte/dimension real como logos, parches, bordados, etiquetas; " +
     "el 'value' debe ser UN NUMERO simple en cm, ej '10', nunca texto ni '10cm x 8cm' junto - ancho y alto van en dos campos separados), " +
@@ -798,12 +800,15 @@ export async function analyzeDesignExpression({ garmentType, generalFields, tecs
     "REGLA DURA - NO agregues elementos de relleno: devolve SOLO los elementos de diseno que los campos generales, " +
     "el tipo de prenda o el usuario YA establecieron o implicaron claramente. Un elemento de diseno real tiene una " +
     "razon concreta para existir en ESTA prenda - si no podes justificar por que existe con lo que ya sabes, no lo " +
-    "inventes. Errores observados en produccion, NUNCA los repitas: proponer 'hebillas' o un 'logo bordado en el " +
-    "pecho' para una prenda cuyos campos generales no mencionan hebillas ni un logo de pecho - eso es ruido, no un " +
-    "elemento real. Si ya identificaste UN elemento genuino (ej. una etiqueta tejida) y no hay evidencia de ningun " +
-    "otro, devolve SOLO ese uno; NO sigas buscando un segundo o tercer elemento para completar una cuota. " +
-    "La mayoria de prendas tienen 0 a 2 elementos de diseno reales, no 1 a 4 - una cifra mas alta es la excepcion, " +
-    "nunca el objetivo. Si realmente no hay nada que necesite pagina de diseno, devolve un array de fields vacio.\n\n" +
+    "inventes. El error a evitar es inventar lo que los campos NO dicen (ej: proponer hebillas para una prenda cuyos " +
+    "campos generales no mencionan hebillas) - no es evitar un elemento que SI esta mencionado. Si un campo general " +
+    "describe algo con detalle propio (ej: 'Botones: poliester perlado CON GRABADO DE LOGO personalizado', un cierre " +
+    "con marca y color especificos, una cinta con texto), eso ESTA mencionado y es un elemento de diseno genuino con " +
+    "su propia pagina - no lo descartes solo porque es un herraje/avio en vez de un logo textil. Si ya identificaste " +
+    "UN elemento genuino y no hay evidencia de ningun otro, devolve SOLO ese uno; NO sigas buscando un segundo o " +
+    "tercer elemento para completar una cuota. La mayoria de prendas tienen 0 a 2 elementos de diseno reales, no 1 " +
+    "a 4 - una cifra mas alta es la excepcion, nunca el objetivo. Si realmente no hay nada que necesite pagina de " +
+    "diseno, devolve un array de fields vacio.\n\n" +
     "Devolve SOLO un objeto JSON con esta forma exacta, sin markdown:\n" +
     '{"garmentType": "' + garmentType + '", "fields": [' +
     '{"key": "identificadorUnico", "label": "Etiqueta en espanol", "category": "design", "designSlot": "slot_id", "designField": "name|position|technique|driveLink|width|height|detail", ' +

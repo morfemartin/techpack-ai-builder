@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { alpineParkaBenchmark } from "../layoutLab/benchmarkProject.js"
-import { auditSemanticCoverage, balancedChunks, buildSemanticDocumentPlan, buildSemanticOutline, classifyPartSystem, partitionPartsBySystem } from "./semanticOutline.js"
+import { auditSemanticCoverage, auditSinkOverflow, balancedChunks, buildSemanticDocumentPlan, buildSemanticOutline, classifyPartBucket, classifyPartSystem, partDisplayLabel, partitionPartsBySystem, withPartLabels } from "./semanticOutline.js"
 
 const context = { ...alpineParkaBenchmark, garmentType: alpineParkaBenchmark.label }
 
@@ -82,6 +82,131 @@ describe("semantic document architecture", () => {
     })
     const designPage = outline.pages.find((page) => page.purpose.startsWith("design:"))
     expect(designPage.views).toEqual(["Frente", "Detalle bordado"])
+  })
+})
+
+describe("DATA_SECTIONS - real production fields no longer sink into shell-body", () => {
+  // Field names transcribed from a real Arrive Aruba polo tech-pack doc.
+  // Measured before this fix: 21 of 36 of these landed in shell-body because
+  // classifyPartSystem's SYSTEMS[0] default silently absorbed anything with
+  // no construction token - 9 near-identical "Cuerpo exterior" pages.
+  const fields = [
+    ["Tipo de prenda", "Polo manga corta"],
+    ["Composicion", "91% Poliester / 9% Spandex"],
+    ["Estructura de tejido", "Performance Pique Knit"],
+    ["Gramaje", "180-220 GSM"],
+    ["Fit", "Regular Classic"],
+    ["Rango de tallas", "XS-XXL"],
+    ["Talla base de muestra", "M"],
+    ["Nombre de color", "Fair Green"],
+    ["Pantone TCX", "15-6316 TCX"],
+    ["HEX", "#92af88"],
+    ["Tela principal", "91% Poliester / 9% Spandex Pique"],
+    ["Cuello", "Acrilico 1mm"],
+    ["Botones", "Poliester perlado con grabado de logo"],
+    ["Cantidad de botones", "3 en placket + 1 de repuesto"],
+    ["Hilo de costura", "Poliester tono sobre tono"],
+    ["Hilo de bordado", "Madeira Classic Rayon 40 Color 1055"],
+    ["Estabilizador", "Cutaway no-show mesh"],
+    ["Etiqueta tejida", "Pendiente de definir"],
+    ["Etiqueta de composicion", "Pendiente"],
+    ["Altura del cuello", "3.5 cm"],
+    ["Placket", "3 botones 14 cm de largo"],
+    ["Medio pecho M", "54 cm"],
+    ["Largo de cuerpo M", "72 cm"],
+    ["Ancho de hombros M", "47 cm"],
+    ["Largo de manga M", "24 cm"],
+    ["Apertura de cuello M", "18 cm"],
+    ["Costura de hombro SPI", "12"],
+    ["Costuras laterales SPI", "12"],
+    ["Placket SPI", "14"],
+    ["Placement pecho izquierdo", "5.1-6.35 cm"],
+    ["Pre-lavado", "No requerido"],
+    ["Tolerancia de encogimiento", "maximo 3%"],
+    ["Nombre de la fabrica", "A definir"],
+    ["Fecha limite de entrega de ficha", "A confirmar"],
+    ["Hangtag", "Pendiente"],
+    ["Cantidad total de unidades", "A confirmar por Patrick"],
+  ]
+  const parts = fields.map(([label, val], i) => ({ id: i + 1, label, val, on: true }))
+
+  it("spreads real production fields across at least 5 purposes, none holding more than a third", () => {
+    const buckets = new Map()
+    for (const part of parts) {
+      const { purpose } = classifyPartBucket(part)
+      buckets.set(purpose, (buckets.get(purpose) || 0) + 1)
+    }
+    expect(buckets.size).toBeGreaterThanOrEqual(5)
+    for (const count of buckets.values()) expect(count).toBeLessThanOrEqual(Math.ceil(parts.length / 3))
+  })
+
+  it("routes non-construction fields to a data: page, not structure:shell-body", () => {
+    const pages = partitionPartsBySystem(parts)
+    const shellBody = pages.find((page) => page.purpose === "structure:shell-body")
+    // Only genuinely construction-worded fields (Cuello, Botones, Placket...)
+    // may land here - not gramaje, SPI, measurements, factory/QC/label data.
+    const shellBodyCount = shellBody ? shellBody.pieces.length : 0
+    expect(shellBodyCount).toBeLessThan(parts.length / 2)
+    expect(pages.some((page) => page.purpose === "data:measurements")).toBe(true)
+    expect(pages.some((page) => page.purpose === "data:stitching")).toBe(true)
+    expect(pages.some((page) => page.purpose === "data:materials")).toBe(true)
+  })
+
+  it("keeps the general sink small enough not to trip the overflow audit", () => {
+    const pages = partitionPartsBySystem(parts)
+    expect(auditSinkOverflow(pages).overflowing).toBe(false)
+  })
+})
+
+describe("auditSinkOverflow", () => {
+  it("flags when data:general is absorbing more than the threshold", () => {
+    const pages = [{ purpose: "data:general", pieces: ["1", "2", "3", "4", "5", "6", "7", "8", "9"] }]
+    expect(auditSinkOverflow(pages)).toEqual({ count: 9, overflowing: true })
+  })
+
+  it("does not flag a small or absent sink", () => {
+    expect(auditSinkOverflow([{ purpose: "data:general", pieces: ["1"] }])).toEqual({ count: 1, overflowing: false })
+    expect(auditSinkOverflow([])).toEqual({ count: 0, overflowing: false })
+  })
+})
+
+describe("classifyPartBucket", () => {
+  it("trusts an explicit part.system over any token match", () => {
+    expect(classifyPartBucket({ id: "x", system: "hood-neck", val: "medida de tela" })).toEqual({ bucket: "hood-neck", purpose: "structure:hood-neck", score: Infinity })
+  })
+
+  it("returns the data:general sink, never a construction guess, when nothing matches", () => {
+    expect(classifyPartBucket({ id: "x", label: "Referencia interna", val: "N/A" })).toEqual({ bucket: "general", purpose: "data:general", score: 0 })
+  })
+
+  it("classifies real data-section labels correctly", () => {
+    expect(classifyPartBucket({ label: "Rango de tallas", val: "XS-XXL" }).purpose).toBe("data:measurements")
+    expect(classifyPartBucket({ label: "Puntadas por pulgada", val: "12 SPI" }).purpose).toBe("data:stitching")
+    expect(classifyPartBucket({ label: "Nombre de la fabrica", val: "A definir" }).purpose).toBe("data:factory-notes")
+  })
+})
+
+describe("partDisplayLabel / withPartLabels", () => {
+  // A chat-built custom garment's part is {id, val, on} - the human name
+  // lives separately in garment.partLabels[lang][id], and the planner never
+  // saw it (see documentPlan.js promptSafeParts) - it reasoned over bare
+  // values like "180-220 GSM" with no idea that field is called "Gramaje".
+  it("prefers customName, then partLabels[id], then part.label, then a numbered fallback", () => {
+    expect(partDisplayLabel({ id: 4, customName: "Gramaje" }, { 4: "Otro nombre" })).toBe("Gramaje")
+    expect(partDisplayLabel({ id: 4 }, { 4: "Gramaje" })).toBe("Gramaje")
+    expect(partDisplayLabel({ id: 4, label: "Ya tenia label" }, undefined)).toBe("Ya tenia label")
+    expect(partDisplayLabel({ id: 4 }, undefined)).toBe("Pieza 4")
+  })
+
+  it("resolves every part's label from the garment's partLabels for the given language", () => {
+    const garment = { partLabels: { ES: { 1: "Tela principal", 2: "Rango de tallas" } } }
+    const parts = [{ id: 1, val: "91% Poliester" }, { id: 2, val: "XS-XXL" }]
+    expect(withPartLabels(parts, garment, "ES").map((p) => p.label)).toEqual(["Tela principal", "Rango de tallas"])
+  })
+
+  it("does not overwrite a part that already carries its own label", () => {
+    const parts = [{ id: 1, val: "Nylon 40D 3L", label: "Frente izquierdo shell" }]
+    expect(withPartLabels(parts, undefined, "ES")[0].label).toBe("Frente izquierdo shell")
   })
 })
 

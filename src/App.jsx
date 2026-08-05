@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { uid } from "./core/idGen.js"
-import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
+import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { translateContent } from "./core/translate.js"
@@ -31,7 +31,7 @@ import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { getPaletteNames, palette, role, setPalette, setCustomColor, CUSTOM_EDITABLE_KEYS, type, space } from "./design/tokens.js"
 import { GRID, PAGE } from "./design/metrics.js"
-import { deterministicPageLayout } from "./core/semanticOutline.js"
+import { deterministicPageLayout, withPartLabels } from "./core/semanticOutline.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
 const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
@@ -577,7 +577,11 @@ export default function App() {
     setDocumentPlanStatus(ui.structuringDocument)
     setDocumentPlanWarnings([])
     try {
-      var baseContext = { garmentType, parts, designs, lang }
+      // The planner never saw what a field is CALLED, only its raw value
+      // ("180-220 GSM" instead of "Gramaje") - garment.partLabels holds the
+      // name for a chat-built custom garment, but baseContext never carried
+      // `garment` before, so nothing downstream could resolve it.
+      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, lang }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
       var ctx = { lang, hdr, parts, designs, logo, txData: tx, garment, dimensionUnit }
@@ -603,6 +607,20 @@ export default function App() {
           onStatus: (status) => {
             setDocumentPlanStatus(status)
             drawWaiting(provisionalOutline.pages, { label: ui.structuringDocument, detail: status, done: 0 })
+          },
+          onSections: (sections) => {
+            var detail = uiDocumentSectionsReady(uiLang, sections.length)
+            setDocumentPlanStatus(detail)
+            var sectionPreview = [
+              { id: "cover", title: garmentType, purpose: "cover" },
+              ...sections,
+              ...provisionalOutline.pages.filter((page) => page.purpose && page.purpose.indexOf("design:") === 0),
+            ]
+            drawWaiting(sectionPreview, { label: ui.structuringDocument, detail: detail, done: 0 })
+          },
+          onBatch: (batch) => {
+            var detail = uiAssigningDocumentBatch(uiLang, batch.index, batch.total)
+            setDocumentPlanStatus(detail)
           },
           // Mirrors planPageLayout's onResult below - the outline call can
           // resolve NORMALLY with the deterministic fallback's content (every
@@ -1319,7 +1337,7 @@ export default function App() {
                   </div>
                   <div style={{ marginTop: space(3) }}>
                     <Fld lbl={ui.colorsFieldLabel}>
-                      <ColorsEditor colors={d.colors || []} onChange={(c) => updDesign(d.id, "colors", c)} />
+                      <ColorsEditor colors={d.colors || []} onChange={(c) => updDesign(d.id, "colors", c)} madeira={isEmb} />
                     </Fld>
                   </div>
                   <div style={{ marginTop: space(3) }}>

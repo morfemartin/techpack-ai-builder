@@ -34,6 +34,15 @@ describe("purposeFamily", () => {
     expect(purposeFamily("index")).toBe("index")
     expect(purposeFamily("whatever")).toBe("structure")
   })
+
+  // data: stays an OPEN prefix on purpose (see semanticOutline.js's
+  // DATA_SECTIONS) - a size chart, a QC checklist, or a purpose the model
+  // invented on its own (data:seam-taping) all share the same "data" family.
+  it("maps any data:<id> purpose to the data family, catalogued or not", () => {
+    expect(purposeFamily("data:measurements")).toBe("data")
+    expect(purposeFamily("data:general")).toBe("data")
+    expect(purposeFamily("data:seam-taping")).toBe("data")
+  })
 })
 
 describe("layout policy", () => {
@@ -152,6 +161,27 @@ describe("repairPage", () => {
     expect(lists[0].marker).toBe("first")
   })
 
+  // Without the "data" contract family, an unknown purpose fell back to
+  // "structure", whose mandatory list forces illustration onto every
+  // partsList page - exactly what a size-chart or QC-checklist page must NOT
+  // get (interpretPlan.js:703 used to force one in regardless).
+  it("on a data: page, inserts partsList but never forces an illustration, and drops colorSpecs/embSpecs", () => {
+    const page = { id: "p", purpose: "data:measurements", regions: [...chrome, { type: "colorSpecs" }, disclaimer] }
+    const { page: fixed } = repairPage(page, ctx)
+    const types = fixed.regions.map((r) => r.type)
+    expect(types).toContain("partsList")
+    expect(types).not.toContain("illustration")
+    expect(types).not.toContain("colorSpecs")
+    expect(validatePage(fixed, ctx)).toEqual([])
+  })
+
+  it("still allows an illustration on a data: page if the plan explicitly included one", () => {
+    const page = { id: "p", purpose: "data:measurements", regions: [...chrome, { type: "partsList" }, { type: "illustration", slots: 1 }, disclaimer] }
+    const { page: fixed } = repairPage(page, ctx)
+    expect(fixed.regions.map((r) => r.type)).toContain("illustration")
+    expect(validatePage(fixed, ctx)).toEqual([])
+  })
+
   it("enforces canonical chrome order: header first, titleBar second, disclaimer last", () => {
     const page = { id: "p", purpose: "overview", regions: [disclaimer, { type: "partsList", weight: 20 }, { type: "illustration", weight: 40, slots: 1 }, ...chrome] }
     const { page: fixed } = repairPage(page, ctx)
@@ -243,6 +273,26 @@ describe("outline contract", () => {
     const structure = repaired.pages.filter((page) => page.purpose === "structure:body")
     expect(structure.map((page) => page.pieces.length)).toEqual([6, 6, 5])
     expect(validateOutline(repaired, { parts: manyParts })).toEqual([])
+  })
+
+  // The critical regression for isBomFamilyPage: without "data" included in
+  // that check, an outline made only of data:* pages left structuralPages
+  // empty, so repairOutline spliced a FULL partitionPartsBySystem set on top
+  // of it - every part duplicated, the exact fight this edit prevents.
+  it("accepts an outline made only of data: pages that covers every part, adding nothing", () => {
+    const dataOnly = {
+      pages: [
+        { id: "cover", purpose: "cover" },
+        { id: "data-measurements", purpose: "data:measurements", pieces: ["body"] },
+        { id: "data-materials", purpose: "data:materials", pieces: ["hood"] },
+        { id: "d1", purpose: "design:Chest Logo" },
+        { id: "d2", purpose: "design:Woven Label" },
+      ],
+    }
+    expect(validateOutline(dataOnly, ctx)).toEqual([])
+    const { outline: fixed, repairs } = repairOutline(dataOnly, ctx)
+    expect(repairs).toEqual([])
+    expect(fixed.pages).toHaveLength(dataOnly.pages.length)
   })
 })
 

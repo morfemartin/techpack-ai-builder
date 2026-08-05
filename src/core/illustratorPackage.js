@@ -1,4 +1,5 @@
 import { prepareIllustratorSvg } from "./illustratorSvg.js"
+import { loadLazyModule } from "./lazyModule.js"
 
 function slug(value) {
   return String(value || "page")
@@ -48,7 +49,7 @@ function buildReadme(pageCount) {
 
 export async function createIllustratorArchive(pages, importerScript) {
   if (!Array.isArray(pages) || pages.length === 0) throw new Error("Illustrator package requires at least one page")
-  const { default: JSZip } = await import("jszip")
+  const { default: JSZip } = await loadLazyModule(() => import("jszip"), { moduleName: "el exportador ZIP" })
   const zip = new JSZip()
   const folder = zip.folder("pages")
   pages.forEach((page, index) => {

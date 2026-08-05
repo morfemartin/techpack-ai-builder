@@ -32,12 +32,20 @@ export function Inp({ v, ch, ph, mono }) {
 }
 
 export function Sel({ v, ch, opts }) {
+  // A value outside `opts` (e.g. a design technique the AI named in free
+  // text because none of the catalog options honestly described it - see
+  // techpackRequirements.js's analyzeDesignExpression) used to render as a
+  // blank select with no visible value, silently hiding what the model
+  // named. Synthesizing an extra option keeps it visible and selected;
+  // picking a real catalog option afterward still works normally.
+  const hasValue = v != null && v !== "" && opts.includes(v)
   return (
     <select
       value={v}
       onChange={(e) => ch(e.target.value)}
       style={{ ...inputBase, cursor: "pointer" }}
     >
+      {!hasValue && v ? <option key={v}>{v}</option> : null}
       {opts.map((o) => (
         <option key={o}>{o}</option>
       ))}

@@ -8,7 +8,21 @@ vi.mock("./deepseekClient.js", () => ({
 }))
 
 import { deepseekChat, deepseekChatStream } from "./deepseekClient.js"
-import { extractLastCompletedRegionType, fallbackDocumentOutline, planDocumentOutline, planPageLayout, withPlanningTimeout } from "./documentPlan.js"
+import {
+  assignPartsToSections,
+  composeOutlineFromSections,
+  extractLastCompletedRegionType,
+  fallbackDocumentOutline,
+  planDocumentOutline,
+  planDocumentSections,
+  planPageLayout,
+  withPlanningTimeout,
+} from "./documentPlan.js"
+
+const SECTIONS = [
+  { id: "construction", title: "Construccion", purpose: "structure:shell-body", objective: "Definir ensamble", criteria: "Paneles y uniones", views: ["Frente"] },
+  { id: "materials", title: "Materiales", purpose: "data:materials", objective: "Definir telas", criteria: "Tela, composicion y gramaje" },
+]
 
 describe("document plan AI wrappers", () => {
   beforeEach(() => {
@@ -28,269 +42,196 @@ describe("document plan AI wrappers", () => {
     }
   })
 
-  it("normalizes an outline response into page descriptors", async () => {
-    deepseekChat.mockResolvedValueOnce(
-      JSON.stringify({
-        pages: [
-          { id: "Overview Page", title: "Sueter Overview", purpose: "overview" },
-          { title: "Logo", purpose: "design:Chest Logo", covers: ["Chest Logo", ""] },
-        ],
-      })
-    )
-
-    const outline = await planDocumentOutline({
-      garmentType: "Sueter",
-      parts: [{ label: "Tela", val: "Fleece" }],
-      designs: [{ name: "Chest Logo" }],
+  it("asks for section purposes using labels but never field values", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ sections: SECTIONS }))
+    const result = await planDocumentSections({
+      garmentType: "Polo",
+      parts: [{ id: 1, label: "Gramaje", val: "220 GSM", on: true }],
       lang: "ES",
     })
-
-    // The document contract (repairOutline) inserts the missing cover page
-    // in front of whatever the model proposed.
-    expect(outline.pages).toEqual([
-      { id: "cover", title: "Sueter", purpose: "cover" },
-      { id: "overview-page", title: "Sueter Overview", purpose: "overview", covers: undefined },
-      { id: "logo", title: "Logo", purpose: "design:Chest Logo", covers: ["Chest Logo"] },
-    ])
-    expect(deepseekChat).toHaveBeenCalledOnce()
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).toContain("Gramaje")
+    expect(prompt).not.toContain("220 GSM")
+    expect(result.sections[0].criteria).toBe("Paneles y uniones")
+    expect(deepseekChat.mock.calls[0][0].task).toBe("outline-index")
   })
 
-  it("preserves semantic objectives and views proposed for distributed construction pages", async () => {
-    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{
-      id: "hood-system",
-      title: "Capucha",
-      purpose: "structure:hood-neck",
-      objective: "Documentar montaje de capucha",
-      pieces: ["hood"],
-      views: ["Exterior", "Interior"],
-    }] }))
-    const outline = await planDocumentOutline({ garmentType: "Hoodie", parts: [{ id: "hood", on: true }], designs: [] })
-    const page = outline.pages.find((item) => item.id === "hood-system")
-    expect(page.objective).toBe("Documentar montaje de capucha")
-    expect(page.views).toEqual(["Exterior", "Interior"])
-    expect(page.pieces).toEqual(["hood"])
+  it("provides a fallback that satisfies the section contract even when one bucket dominates", async () => {
+    const parts = Array.from({ length: 8 }, (_, index) => ({ id: index + 1, label: "Panel " + (index + 1), on: true }))
+    deepseekChat.mockImplementationOnce(async (options) => {
+      expect(options.validator(options.fallback)).toBe(true)
+      return options.fallback
+    })
+    const result = await planDocumentSections({ garmentType: "Parka", parts, designs: [] })
+    expect(result.sections.length).toBeGreaterThanOrEqual(6)
   })
 
-  it("asks the model to subdivide overloaded systems by construction objective", async () => {
-    const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + String(index + 1).padStart(2, "0"), label: "Piece " + (index + 1), on: true }))
-    deepseekChat
-      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "pockets", title: "Pocket system", purpose: "structure:pockets", pieces: parts.map((part) => part.id) }] }))
-      .mockResolvedValueOnce(JSON.stringify({ pages: [
-        { id: "pocket-openings", title: "Pocket openings", purpose: "structure:pockets-openings", objective: "Build openings", pieces: parts.slice(0, 6).map((part) => part.id), views: ["Exterior"] },
-        { id: "pocket-bags", title: "Pocket bags", purpose: "pockets-bags", objective: "Close pocket bags", pieces: parts.slice(6).map((part) => part.id), views: ["Interior"] },
-      ] }))
+  it("filters cover and design pages out of a model-authored section index", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ sections: [
+      { id: "cover", title: "Cover", purpose: "cover", objective: "X", criteria: "X" },
+      ...SECTIONS,
+      { id: "logo", title: "Logo", purpose: "design:Logo", objective: "X", criteria: "X" },
+    ] }))
+    const result = await planDocumentSections({ garmentType: "Polo", parts: [], designs: [] })
+    expect(result.sections.map((section) => section.id)).toEqual(["construction", "materials"])
+  })
 
-    let telemetry
-    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
-    const structural = outline.pages.filter((page) => page.purpose.startsWith("structure:"))
-
-    expect(structural.map((page) => page.pieces.length)).toEqual([6, 3])
-    expect(structural.map((page) => page.objective)).toEqual(["Build openings", "Close pocket bags"])
-    expect(structural[1].purpose).toBe("structure:pockets")
-    expect(telemetry.refinements).toMatchObject([{ pageId: "pockets", accepted: true }])
+  it("validates every assignment batch by exact id coverage", async () => {
+    const parts = Array.from({ length: 13 }, (_, index) => ({ id: index + 1, label: index ? "Panel" : "Tela", val: "Dato", on: true }))
+    const batches = []
+    deepseekChat.mockImplementation(async (options) => {
+      const match = options.messages[0].content.match(/Lote: (\[[\s\S]*?\])\n\n/)
+      const batch = JSON.parse(match[1])
+      return JSON.stringify({ asignaciones: batch.map((part) => ({ pieza: String(part.id), seccion: part.id === 1 ? "materials" : "construction" })) })
+    })
+    const result = await assignPartsToSections(SECTIONS, { parts }, { onBatch: (event) => batches.push(event) })
+    expect(result.assignments).toHaveLength(13)
+    expect(batches).toEqual([{ index: 1, total: 2, size: 12 }, { index: 2, total: 2, size: 1 }])
     expect(deepseekChat).toHaveBeenCalledTimes(2)
+    for (const call of deepseekChat.mock.calls) {
+      expect(call[0].task).toBe("outline-assign")
+      expect(call[0].validator(call[0].fallback)).toBe(true)
+    }
   })
 
-  it("uses the deterministic subdivision after one invalid model attempt", async () => {
-    const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + (index + 1), on: true }))
-    const overloaded = { pages: [{ id: "body", title: "Body", purpose: "structure:body", pieces: parts.map((part) => part.id) }] }
+  it("rejects omitted, duplicated, invented, and unknown-section assignments", async () => {
+    const parts = [{ id: 1, label: "Tela", on: true }, { id: 2, label: "Panel", on: true }]
+    deepseekChat.mockImplementationOnce(async (options) => {
+      expect(options.validator('{"asignaciones":[{"pieza":"1","seccion":"materials"}]}')).toBe(false)
+      expect(options.validator('{"asignaciones":[{"pieza":"1","seccion":"materials"},{"pieza":"1","seccion":"construction"}]}')).toBe(false)
+      expect(options.validator('{"asignaciones":[{"pieza":"1","seccion":"materials"},{"pieza":"3","seccion":"construction"}]}')).toBe(false)
+      expect(options.validator('{"asignaciones":[{"pieza":"1","seccion":"unknown"},{"pieza":"2","seccion":"construction"}]}')).toBe(false)
+      return options.fallback
+    })
+    const result = await assignPartsToSections(SECTIONS, { parts })
+    expect(result.assignments.map((item) => item.piece).sort()).toEqual(["1", "2"])
+  })
+
+  it("composes sections without losing, duplicating, or overloading pieces", () => {
+    const parts = Array.from({ length: 17 }, (_, index) => ({ id: index + 1, label: "Panel " + (index + 1), on: true }))
+    const assignments = parts.map((part) => ({ piece: String(part.id), section: "construction" }))
+    const { outline } = composeOutlineFromSections(SECTIONS, assignments, { garmentType: "Parka", parts, designs: [{ name: "Logo pecho" }] })
+    const construction = outline.pages.filter((page) => page.purpose === "structure:shell-body")
+    expect(construction.map((page) => page.pieces.length)).toEqual([8, 8, 1])
+    expect(construction.flatMap((page) => page.pieces)).toEqual(parts.map((part) => String(part.id)))
+    expect(outline.pages.map((page) => page.purpose)).toContain("design:Logo pecho")
+  })
+
+  it("preserves a section's objective, criteria, views, and illustration policy", () => {
+    const sections = [{ ...SECTIONS[0], illustration: "optional" }]
+    const result = composeOutlineFromSections(sections, [{ piece: "1", section: "construction" }], {
+      garmentType: "Parka",
+      parts: [{ id: 1, label: "Frente", on: true }],
+    })
+    expect(result.outline.pages[1]).toMatchObject({
+      objective: "Definir ensamble",
+      criteria: "Paneles y uniones",
+      views: ["Frente"],
+      illustration: "optional",
+    })
+  })
+
+  it("normalizes numeric piece ids to strings exactly once", () => {
+    const result = composeOutlineFromSections(SECTIONS, [{ piece: 7, section: "construction" }], {
+      garmentType: "Polo",
+      parts: [{ id: 7, label: "Frente", on: true }],
+    })
+    expect(result.outline.pages[1].pieces).toEqual(["7"])
+  })
+
+  it("repairs an empty or unknown assignment locally instead of failing the document", () => {
+    const parts = [{ id: 1, label: "Gramaje", val: "220 GSM", on: true }, { id: 2, label: "Dato raro", val: "Confirmar", on: true }]
+    const result = composeOutlineFromSections(SECTIONS, [
+      { piece: "1", section: "" },
+      { piece: "2", section: "missing-section" },
+    ], { garmentType: "Polo", parts, designs: [] })
+    const covered = result.outline.pages.flatMap((page) => page.pieces || [])
+    expect(covered.sort()).toEqual(["1", "2"])
+    expect(result.changes.filter((change) => change.includes("deterministic contract"))).toHaveLength(2)
+  })
+
+  it("runs index then assignments and exposes stage telemetry", async () => {
+    const parts = [{ id: 1, label: "Tela", val: "Pique", on: true }, { id: 2, label: "Frente", val: "Panel", on: true }]
     deepseekChat
-      .mockResolvedValueOnce(JSON.stringify(overloaded))
-      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "bad", title: "Bad", purpose: "structure:body", pieces: ["P1", "P1"] }] }))
-
-    let telemetry
-    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
-
-    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.id)).toEqual(["body-1", "body-2"])
-    expect(telemetry.refinements[0].attempts.map((attempt) => attempt.accepted)).toEqual([false])
-    expect(deepseekChat).toHaveBeenCalledTimes(2)
-  })
-
-  it("returns an omitted piece to its structural system before deciding pagination", async () => {
-    const parts = Array.from({ length: 9 }, (_, index) => ({ id: "P" + (index + 1), system: "upper-body", on: true }))
-    deepseekChat
-      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "upper", title: "Upper", purpose: "structure:upper-body", pieces: parts.slice(0, 8).map((part) => part.id) }] }))
-      .mockResolvedValueOnce(JSON.stringify({ pages: [
-        { id: "upper-shell", title: "Upper shell", purpose: "structure:upper-body", pieces: parts.slice(0, 6).map((part) => part.id) },
-        { id: "seat", title: "Seat", purpose: "structure:upper-body", pieces: parts.slice(6).map((part) => part.id) },
-      ] }))
-
-    let telemetry
-    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
-
-    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.pieces)).toEqual([
-      ["P1", "P2", "P3", "P4", "P5", "P6"],
-      ["P7", "P8", "P9"],
-    ])
-    expect(telemetry.repairs).toContain("restored P9 to upper before semantic refinement")
-    expect(telemetry.refinements[0].accepted).toBe(true)
-  })
-
-  // Every real part.id in the app is a NUMBER (App.jsx's uid()/i+1, and
-  // garments/*.js's hand-authored { id: 1, ... }) - every fixture above uses
-  // string ids like "P01" that never occur in production, so they never
-  // exercised the validator against a real id shape. The validator used to
-  // build `activeIds` from raw (numeric) part.id and compare it against
-  // `covered` (always string, from normalizeOutline) - `covered.every(id =>
-  // activeIds.has(id))` could then never be true for a garment with real
-  // parts, so a correct AI outline was rejected on every single call.
-  it("accepts an outline whose validator sees the same numeric part ids the app really produces", async () => {
-    const parts = [{ id: 1, val: "Tela", on: true }, { id: 2, val: "Cierre", on: true }]
-    let capturedValidator
-    deepseekChat.mockImplementationOnce(async (opts) => {
-      capturedValidator = opts.validator
-      return JSON.stringify({ pages: [
-        { id: "cover", title: "Cargo", purpose: "cover" },
-        { id: "body", title: "Body", purpose: "overview", pieces: [1, 2] },
-      ] })
-    })
-    await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] })
-
-    const candidate = JSON.stringify({ pages: [
-      { id: "cover", title: "Cargo", purpose: "cover" },
-      { id: "body", title: "Body", purpose: "overview", pieces: [1, 2] },
-    ] })
-    expect(capturedValidator(candidate)).toBe(true)
-  })
-
-  it("still rejects a numeric-id outline that genuinely omits or duplicates a piece", async () => {
-    const parts = [{ id: 1, val: "Tela", on: true }, { id: 2, val: "Cierre", on: true }]
-    let capturedValidator
-    deepseekChat.mockImplementationOnce(async (opts) => {
-      capturedValidator = opts.validator
-      return JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] })
-    })
-    await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] })
-
-    const missing = JSON.stringify({ pages: [
-      { id: "cover", title: "Cargo", purpose: "cover" },
-      { id: "body", title: "Body", purpose: "overview", pieces: [1] },
-    ] })
-    const duplicated = JSON.stringify({ pages: [
-      { id: "cover", title: "Cargo", purpose: "cover" },
-      { id: "body", title: "Body", purpose: "overview", pieces: [1, 1, 2] },
-    ] })
-    expect(capturedValidator(missing)).toBe(false)
-    expect(capturedValidator(duplicated)).toBe(false)
-  })
-
-  it("restores an omitted numeric-id piece to its system - the restoration path also compared numbers to strings", async () => {
-    const parts = Array.from({ length: 9 }, (_, index) => ({ id: index + 1, system: "upper-body", on: true }))
-    deepseekChat
-      .mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "upper", title: "Upper", purpose: "structure:upper-body", pieces: parts.slice(0, 8).map((part) => part.id) }] }))
-      .mockResolvedValueOnce(JSON.stringify({ pages: [
-        { id: "upper-shell", title: "Upper shell", purpose: "structure:upper-body", pieces: parts.slice(0, 6).map((part) => part.id) },
-        { id: "seat", title: "Seat", purpose: "structure:upper-body", pieces: parts.slice(6).map((part) => part.id) },
-      ] }))
-
-    let telemetry
-    const outline = await planDocumentOutline({ garmentType: "Cargo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
-
-    expect(outline.pages.filter((page) => page.purpose.startsWith("structure:")).map((page) => page.pieces)).toEqual([
-      ["1", "2", "3", "4", "5", "6"],
-      ["7", "8", "9"],
-    ])
-    expect(telemetry.repairs).toContain("restored 9 to upper before semantic refinement")
-  })
-
-  // Observed live as a 413 that failed the entire document plan: a design's
-  // base64 `imageData` (hundreds of KB) was JSON.stringify'd straight into
-  // the TEXT prompt, blowing the studio bridge's 120000-char per-message cap.
-  // Even when it fit, it buried the few facts the planner reasons about.
-  it("never ships a design's base64 artwork into the prompt, only its specs", async () => {
-    const bigBase64 = "A".repeat(200000)
-    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "X", purpose: "cover" }] }))
-    await planDocumentOutline({
-      garmentType: "Campera",
-      parts: [{ id: 1, val: "Tela", on: true }],
-      designs: [{
-        name: "Logo pecho", pos: "Pecho", tec: "Bordado Plano", w: 10, h: 8, unit: "cm",
-        colors: [{ name: "Negro", hex: "#000000" }],
-        imageData: bigBase64, imageType: "png", imgNatW: 1200, imgNatH: 900,
-      }],
-    })
-    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
-    expect(prompt).not.toContain(bigBase64)
-    expect(prompt.length).toBeLessThan(10000)
-    // the facts it DOES need survive
-    expect(prompt).toContain("Logo pecho")
-    expect(prompt).toContain("Bordado Plano")
-    expect(prompt).toContain("hasArtwork")
-    expect(prompt).toContain("colorCount")
-  })
-
-  it("strips the artwork blob on the per-page prompt too, where the cost is multiplied by page count", async () => {
-    const bigBase64 = "B".repeat(200000)
-    deepseekChat.mockResolvedValueOnce(JSON.stringify({ regions: [{ type: "header" }, { type: "illustration" }] }))
-    await planPageLayout(
-      { id: "d1", title: "Logo", purpose: "design:Logo pecho" },
-      { garmentType: "Campera", parts: [], designs: [{ name: "Logo pecho", tec: "Bordado Plano", imageData: bigBase64 }], lang: "ES" }
-    )
-    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
-    expect(prompt).not.toContain(bigBase64)
-    expect(prompt).toContain("Logo pecho")
-  })
-
-  it("gives the model the confirmed textile brief instead of only names and parts", async () => {
-    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "cover", title: "Cargo", purpose: "cover" }] }))
-    await planDocumentOutline({
-      garmentType: "Cargo",
-      parts: [{ id: "P01", on: true }],
-      designs: [],
-      brief: { construction: { seams: ["Safety stitch 516"] }, openPoints: ["Zipper lengths"] },
-    })
-    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
-    expect(prompt).toContain("Brief textil confirmado")
-    expect(prompt).toContain("Safety stitch 516")
-    expect(prompt).toContain("Zipper lengths")
-  })
-
-  it("exposes the model proposal separately from deterministic contract repairs", async () => {
-    deepseekChat.mockResolvedValueOnce(JSON.stringify({ pages: [{ id: "body", title: "Body", purpose: "overview", pieces: ["P01"] }] }))
-    let telemetry
+      .mockResolvedValueOnce(JSON.stringify({ sections: SECTIONS }))
+      .mockResolvedValueOnce(JSON.stringify({ asignaciones: [{ pieza: "1", seccion: "materials" }, { pieza: "2", seccion: "construction" }] }))
+    const events = { sections: null, batches: [], proposal: null }
     const outline = await planDocumentOutline(
-      { garmentType: "Cargo", parts: [{ id: "P01", on: true }], designs: [] },
-      { onProposal: (value) => { telemetry = value } }
+      { garmentType: "Polo", parts, designs: [], lang: "ES" },
+      {
+        onSections: (sections) => { events.sections = sections },
+        onBatch: (batch) => events.batches.push(batch),
+        onProposal: (proposal) => { events.proposal = proposal },
+      }
     )
-    expect(telemetry.raw).toContain('"body"')
-    expect(telemetry.proposed.pages[0].purpose).toBe("overview")
-    expect(telemetry.repairs).toContain("inserted cover page")
-    expect(outline.pages[0].purpose).toBe("cover")
+    expect(deepseekChat).toHaveBeenCalledTimes(2)
+    expect(events.sections).toHaveLength(2)
+    expect(events.batches).toEqual([{ index: 1, total: 1, size: 2 }])
+    expect(events.proposal.assignments).toHaveLength(2)
+    expect(outline.pages.filter((page) => page.pieces).flatMap((page) => page.pieces).sort()).toEqual(["1", "2"])
   })
 
-  it("falls back to cover + overview plus design pages when the outline is empty", async () => {
-    deepseekChat.mockResolvedValueOnce('{"pages":[]}')
-    const outline = await planDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
-
-    expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
+  it("reports a degraded document when any planning stage uses its contract", async () => {
+    const parts = [{ id: 1, label: "Tela", val: "Pique", on: true }]
+    deepseekChat
+      .mockImplementationOnce(async (options) => {
+        options.onResult({ provider: "nvidia", model: "deepseek" })
+        return JSON.stringify({ sections: SECTIONS })
+      })
+      .mockImplementationOnce(async (options) => {
+        options.onResult({ provider: "contract", model: "deterministic", fallbackReason: "invalid" })
+        return options.fallback
+      })
+    let telemetry
+    await planDocumentOutline({ garmentType: "Polo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
+    expect(telemetry.aiResult).toMatchObject({ provider: "contract", degraded: true })
   })
 
-  it("exposes the same contract-repaired fallback outline for non-blocking labs", () => {
+  it("never ships artwork blobs into section, assignment, or page prompts", async () => {
+    const blob = "A".repeat(200000)
+    const parts = [{ id: 1, label: "Tela", val: "Pique", on: true }]
+    deepseekChat
+      .mockResolvedValueOnce(JSON.stringify({ sections: SECTIONS }))
+      .mockResolvedValueOnce(JSON.stringify({ asignaciones: [{ pieza: "1", seccion: "materials" }] }))
+    await planDocumentOutline({ garmentType: "Polo", parts, designs: [{ name: "Logo", imageData: blob }] })
+    expect(deepseekChat.mock.calls.every((call) => !call[0].messages[0].content.includes(blob))).toBe(true)
+
+    deepseekChat.mockReset()
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ regions: [{ type: "header" }, { type: "illustration" }] }))
+    await planPageLayout({ id: "d1", title: "Logo", purpose: "design:Logo" }, { designs: [{ name: "Logo", imageData: blob }] })
+    expect(deepseekChat.mock.calls[0][0].messages[0].content).not.toContain(blob)
+  })
+
+  it("makes the page objective and inclusion criteria binding in the layout prompt", async () => {
+    deepseekChat.mockResolvedValueOnce(JSON.stringify({ regions: [{ type: "header" }, { type: "partsList" }] }))
+    await planPageLayout(
+      { id: "quality", title: "QC", purpose: "data:quality", objective: "Evitar defectos", criteria: "Solo controles verificables" },
+      { parts: [] }
+    )
+    const prompt = deepseekChat.mock.calls[0][0].messages[0].content
+    expect(prompt).toContain("Esta pagina existe para: Evitar defectos")
+    expect(prompt).toContain("Su criterio de inclusion es: Solo controles verificables")
+  })
+
+  it("keeps the deterministic outline available to non-blocking previews", () => {
     const outline = fallbackDocumentOutline({ garmentType: "Hoodie", designs: [{ name: "Back Print" }] })
-
-    expect(outline.pages.map((p) => p.purpose)).toEqual(["cover", "overview", "design:Back Print"])
+    expect(outline.pages.map((page) => page.purpose)).toEqual(["cover", "overview", "design:Back Print"])
   })
 
-  it("streams progress, drops unknown region types, and repairs the page to its purpose contract", async () => {
+  it("streams progress, drops unknown regions, and repairs the page contract", async () => {
     const events = []
     deepseekChatStream.mockImplementationOnce(async ({ onEvent }) => {
       onEvent({ contentSoFar: '{"regions":[{"type":"header"', tokensSoFar: 1 })
       onEvent({ contentSoFar: '{"regions":[{"type":"header"},{"type":"bogus"}', tokensSoFar: 2 })
       return '{"regions":[{"type":"header","weight":10},{"type":"bogus","weight":90},{"type":"disclaimer","weight":10}]}'
     })
-
     const page = await planPageLayout(
       { id: "overview", title: "Overview", purpose: "overview" },
       { garmentType: "Hoodie", parts: [], designs: [], lang: "ES" },
       { onProgress: (event) => events.push(event) }
     )
-
-    // "bogus" dropped by normalizePlan; the overview contract then inserts
-    // the missing mandatory regions (titleBar, illustration, partsList) and
-    // enforces canonical chrome order.
-    expect(page.regions.map((r) => r.type)).toEqual(["header", "titleBar", "illustration", "partsList", "disclaimer"])
+    expect(page.regions.map((region) => region.type)).toEqual(["header", "titleBar", "illustration", "partsList", "disclaimer"])
     expect(events.at(-1)).toEqual({ percent: 5, lastLabel: "bogus" })
-    expect(deepseekChatStream).toHaveBeenCalledOnce()
   })
 
   it("extracts the latest region type from partial JSON", () => {

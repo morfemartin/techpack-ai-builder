@@ -83,15 +83,27 @@ export function incoherentPart(field, family) {
 // topic with a "none"-shaped value silences the rest of that same topic.
 // Deliberately narrow and offline: no AI call, no risk of over-pruning a
 // genuine follow-up question outside the topic.
+// Anchored at the START of the (normalized) value, not "anywhere in the
+// string" - that used to match "sin" inside an otherwise affirmative
+// sentence ("Botones de corozo SIN teñir", "Botones metalicos sin ojal
+// visible"), reading a real, existing part as denied. The negation this
+// guard cares about is always the value's OWN dominant clause ("Sin
+// cierre", "No aplica (No lleva botones)"), which is always leading.
 // "ningun" has no trailing \b - Spanish inflects it ("ninguno", "ninguna",
-// "ningunos"). The rest are fixed word-forms in this context, so they keep
-// both boundaries for precision (no false match inside a longer word).
-const NONE_VALUE = /\b(sin|no lleva|no tiene|no aplica|none|not applicable)\b|\bningun/
+// "ningunos").
+const NONE_VALUE = /^(sin|no lleva|no tiene|no aplica|none|not applicable)\b|^ningun/
 // No trailing \b on purpose - Spanish inflects ("boton" -> "botones",
 // "capuch" -> "capucha"), so anchoring only the START (matching this file's
 // existing IMPOSSIBLE_PARTS style) is what actually matches real labels.
+//
+// Cierres and botones USED to be one topic - a garment as common as "sin
+// cierre" (a polo/camisa that closes with buttons, not a zipper) negated the
+// whole topic and deleted the button design slot along with it. Split so
+// each negates only its own element; a shirt can have no zipper and still
+// have real, designable buttons.
 const MOOT_TOPICS = [
-  { subject: /\b(cierre|closure|zipper|cremallera|boton|button|ojal|buttonhole|tapeta|placket|broche|snap|velcro|bragueta|\bfly\b)/ },
+  { subject: /\b(cierre|closure|zipper|cremallera|tapeta|placket|bragueta|\bfly\b)/ },
+  { subject: /\b(boton|button|ojal|buttonhole|broche|snap|velcro)/ },
   { subject: /\b(bolsillo|pocket)/ },
   { subject: /\b(capuch|hood)/ },
   { subject: /\b(forro|lining|entretela)/ },

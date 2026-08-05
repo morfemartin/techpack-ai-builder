@@ -13,6 +13,8 @@
 // GitHub Pages is static, so its own `/api/*` path cannot execute the Vercel
 // function. Production Pages therefore uses the deployed, CORS-restricted
 // proxy while local/Vercel deployments keep their same-origin endpoint.
+import { loadLazyModule } from "./lazyModule.js"
+
 function defaultNvidiaProxyURL() {
   if (import.meta.env.VITE_DEEPSEEK_PROXY_URL) return import.meta.env.VITE_DEEPSEEK_PROXY_URL
   if (typeof window !== "undefined" && /(^|\.)github\.io$/i.test(window.location.hostname || "")) {
@@ -275,7 +277,7 @@ export async function requestAIOnce({
 // answer, not a reasoning trace competing for the token budget.
 export async function deepseekChat({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, task, validator, fallback, onStatus, signal, onResult, providers, operationId } = {}) {
   if (task) {
-    const { runHybridAI } = await import("./hybridAI.js")
+    const { runHybridAI } = await loadLazyModule(() => import("./hybridAI.js"), { moduleName: "el motor de IA" })
     const result = await runHybridAI({ task, messages, maxTokens, temperature, validator, fallback, onStatus, signal, providers, operationId })
     if (onResult) onResult(result)
     return result.content
@@ -463,7 +465,7 @@ export async function requestAIStreamOnce({
 // past the open phase).
 export async function deepseekChatStream({ messages, maxTokens = 1000, temperature = 0.2, model, thinking = false, onEvent, task, validator, fallback, onStatus, signal, onResult, providers, operationId, provider, timeoutMs, maxAttempts = RETRYABLE_MAX_ATTEMPTS, retryCapacityOnly = false } = {}) {
   if (task) {
-    const { runHybridAIStream } = await import("./hybridAI.js")
+    const { runHybridAIStream } = await loadLazyModule(() => import("./hybridAI.js"), { moduleName: "el motor de IA" })
     const result = await runHybridAIStream({ task, messages, maxTokens, temperature, validator, fallback, onStatus, signal, providers, operationId, onEvent })
     if (onResult) onResult(result)
     return result.content

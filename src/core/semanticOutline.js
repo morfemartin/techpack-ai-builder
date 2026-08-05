@@ -80,6 +80,99 @@ const SYSTEMS = [
 
 const SYSTEM_BY_ID = new Map(SYSTEMS.map((system) => [system.id, system]))
 
+// The 6 SYSTEMS above are all CONSTRUCTION systems - but a real tech pack
+// also carries data that isn't a piece of the garment at all: a size chart,
+// stitches-per-inch specs, a QC checklist, factory notes, quantities. None
+// of that has a token in SYSTEMS, so classifyPartSystem's old unconditional
+// `SYSTEMS[0]` default dumped all of it into "Cuerpo exterior" - measured
+// live on a real production document: 21 of 36 fields landed there. These
+// give that data a home instead. `general` is the explicit, visible sink
+// that replaces the silent SYSTEMS[0] fallback (see classifyPartBucket).
+export const DATA_SECTIONS = [
+  {
+    id: "measurements",
+    theme: "Medidas por talla",
+    tokens: ["medida", "talle", "talla", "size", "fit", "calce", "tolerancia", "pulgada", "pecho", "ancho de hombro", "largo de cuerpo", "largo de manga", "apertura de cuello", "apertura de manga", "hem inferior"],
+    objective: "Definir la tabla de medidas por talla y sus tolerancias.",
+    criteria: "Todo dato expresado en cm/pulgadas o que varie por talla.",
+    illustration: "optional",
+    views: ["Puntos de medicion"],
+  },
+  {
+    id: "materials",
+    theme: "Materiales y consumos",
+    // "fabric" deliberately excluded: it's a substring of the Spanish
+    // "fabrica" (factory), which collided with factory-notes labels like
+    // "Nombre de la fabrica" - caught by classifyPartBucket's own test.
+    tokens: ["tela", "material", "composicion", "gramaje", "hilo", "forro tejido", "tejido", "gsm", "proveedor", "consumo", "bom"],
+    objective: "Documentar telas, composicion y consumos de materiales.",
+    criteria: "Todo dato de tela, composicion, gramaje, hilo o proveedor de materiales.",
+    illustration: "optional",
+  },
+  {
+    id: "stitching",
+    theme: "Costuras y puntadas",
+    tokens: ["puntada", "spi", "costura", "stitch", "seam", "overlock", "recubridora", "coverstitch", "doble aguja", "lockstitch"],
+    objective: "Especificar tipo de costura, maquina y puntadas por pulgada.",
+    criteria: "Todo dato de tipo de costura, maquina o densidad de puntada (SPI).",
+    illustration: "optional",
+    views: ["Detalle de costura"],
+  },
+  {
+    id: "quality",
+    theme: "Control de calidad",
+    tokens: ["calidad", "control de calidad", "inspeccion", "defecto", "aql", "encogimiento", "checklist"],
+    objective: "Listar los puntos de control de calidad antes de produccion en volumen.",
+    criteria: "Todo checklist, tolerancia de encogimiento o requisito de inspeccion.",
+    illustration: "none",
+  },
+  {
+    id: "factory-notes",
+    theme: "Notas de fabrica",
+    tokens: ["fabrica", "produccion", "proceso", "operacion", "requisito", "fecha limite", "muestra fisica", "nota para la fabrica"],
+    objective: "Comunicar requisitos y notas de proceso a la fabrica.",
+    criteria: "Instrucciones de proceso, fechas o requisitos que no encajan en otra seccion tecnica.",
+    illustration: "none",
+  },
+  {
+    id: "labels-packaging",
+    theme: "Etiquetas y empaque",
+    tokens: ["etiqueta", "marquilla", "hangtag", "empaque", "packaging", "cuidado", "composicion y cuidado"],
+    objective: "Especificar etiquetas, hangtag y empaque final.",
+    criteria: "Todo dato de etiquetado, cuidado o empaque de la prenda terminada.",
+    illustration: "optional",
+    views: ["Ubicacion de etiquetas"],
+  },
+  {
+    id: "quantities",
+    theme: "Cantidades y curva",
+    tokens: ["cantidad", "curva de talles", "pedido", "unidades", "moq", "ratio", "produccion total"],
+    objective: "Definir cantidades por talla, color y pedido total.",
+    criteria: "Todo dato de cantidades, curva de talles o unidades de pedido.",
+    illustration: "none",
+  },
+  {
+    id: "general",
+    theme: "Datos generales",
+    tokens: [],
+    objective: "Reunir datos generales que no encajan en otra seccion.",
+    criteria: "Cualquier dato que no matchee ninguna otra seccion.",
+    illustration: "none",
+    isSink: true,
+  },
+].map((section) => ({ ...section, purpose: "data:" + section.id }))
+
+const DATA_SECTION_BY_ID = new Map(DATA_SECTIONS.map((section) => [section.id, section]))
+
+// What classifyPartSystem/classifyPartBucket actually score against: every
+// construction system plus every non-sink data section, same {id, tokens}
+// shape so a part is judged against BOTH families at once instead of
+// SYSTEMS always winning by not having any competition.
+const CLASSIFIABLE = [
+  ...SYSTEMS.map((system) => ({ id: system.id, purpose: "structure:" + system.id, tokens: system.tokens })),
+  ...DATA_SECTIONS.filter((section) => !section.isSink).map((section) => ({ id: section.id, purpose: section.purpose, tokens: section.tokens })),
+]
+
 // The aspects a specific set of parts actually triggers, in declaration order.
 // Falls back to the first aspect so a page is never left unlabelled.
 function presentAspects(system, parts) {
@@ -115,11 +208,41 @@ function slug(value, fallback) {
   return clean(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || fallback
 }
 
-export function classifyPartSystem(part) {
+// A chat-built custom garment's part is {id, val, on} - the human name lives
+// in a DIFFERENT object, garment.partLabels[lang][id] (buildCustomGarment.js),
+// while a CSV-imported part instead carries `customName`. Neither reaches
+// the planner or the classifier today, so both see raw values with no idea
+// what they mean ("180-220 GSM" instead of "Gramaje"). This resolves the
+// name once, at one boundary, the same discipline as documentPlan.js's
+// "pieces are strings from here on" rule.
+export function partDisplayLabel(part, partLabels) {
+  if (!part) return ""
+  if (clean(part.customName)) return clean(part.customName)
+  const known = partLabels && part.id != null ? partLabels[part.id] : undefined
+  if (clean(known)) return clean(known)
+  if (clean(part.label)) return clean(part.label)
+  return "Pieza " + clean(part.id)
+}
+
+// Returns `parts` with `.label` resolved via partDisplayLabel, so every
+// downstream reader (the outline prompt, classifyPartSystem, the deterministic
+// fallback) gets a real field name for free without each having to know about
+// garment.partLabels/customName itself.
+export function withPartLabels(parts, garment, lang = "ES") {
+  const partLabels = garment && garment.partLabels ? garment.partLabels[lang] || garment.partLabels.ES : undefined
+  return (Array.isArray(parts) ? parts : []).map((part) => ({ ...part, label: partDisplayLabel(part, partLabels) }))
+}
+
+// `fallback` used to be implicit - `let best = SYSTEMS[0]` meant "shell-body"
+// silently, however clearly wrong that was for the part (see DATA_SECTIONS'
+// comment for the measured impact). Keeping the default preserves every
+// existing caller/test; new callers that want an honest "nothing matched"
+// pass `{ fallback: null }`.
+export function classifyPartSystem(part, { fallback = "shell-body" } = {}) {
   const explicit = clean(part && part.system).toLowerCase()
   if (SYSTEM_BY_ID.has(explicit)) return explicit
-  const haystack = [part && part.id, part && part.label, part && part.val].map(clean).join(" ").toLowerCase()
-  let best = SYSTEMS[0]
+  const haystack = [part && part.id, part && part.label, part && part.customName, part && part.val].map(clean).join(" ").toLowerCase()
+  let best = null
   let bestScore = 0
   for (const system of SYSTEMS) {
     const score = system.tokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0)
@@ -128,7 +251,29 @@ export function classifyPartSystem(part) {
       bestScore = score
     }
   }
-  return best.id
+  return best ? best.id : fallback
+}
+
+// The real classifier: scores a part against BOTH construction systems and
+// data sections, and returns `data:general` (never a silent shell-body
+// guess) when nothing genuinely matches. This is what partitionPartsBySystem
+// uses now - classifyPartSystem above stays for callers that only know
+// about construction systems (explicit `part.system` values, mostly).
+export function classifyPartBucket(part) {
+  const explicit = clean(part && part.system).toLowerCase()
+  if (SYSTEM_BY_ID.has(explicit)) return { bucket: explicit, purpose: "structure:" + explicit, score: Infinity }
+  const haystack = [part && part.id, part && part.label, part && part.customName, part && part.val].map(clean).join(" ").toLowerCase()
+  let best = null
+  let bestScore = 0
+  for (const candidate of CLASSIFIABLE) {
+    const score = candidate.tokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0)
+    if (score > bestScore) {
+      best = candidate
+      bestScore = score
+    }
+  }
+  if (!best) return { bucket: "general", purpose: "data:general", score: 0 }
+  return { bucket: best.id, purpose: best.purpose, score: bestScore }
 }
 
 export function balancedChunks(items, size) {
@@ -147,15 +292,47 @@ export function balancedChunks(items, size) {
   return result
 }
 
+// Builds the pages for one DATA_SECTIONS entry (or the "general" sink),
+// paginated the same way a construction system is - shared so the sink
+// doesn't need its own bespoke page-shape.
+function dataSectionPages(section, members, limit) {
+  return balancedChunks(members, limit).map((pageParts, index, all) => {
+    const suffix = all.length > 1 ? " · " + (index + 1) + "/" + all.length : ""
+    return {
+      id: "data-" + section.id + (all.length > 1 ? "-" + (index + 1) : ""),
+      title: section.theme + suffix,
+      purpose: section.purpose,
+      system: section.id,
+      objective: section.objective,
+      criteria: section.criteria,
+      pieces: pageParts.map((part) => clean(part.id)),
+      views: section.views ? section.views.slice() : [],
+      // Consumed by deterministicPageLayout's data: branch - a size-chart
+      // page can want a measurement-points illustration, a QC checklist
+      // never should. "none" means never, "optional" means only if this
+      // page actually has views to show.
+      illustration: section.illustration,
+    }
+  })
+}
+
 export function partitionPartsBySystem(parts, { maxPartsPerPage = 8 } = {}) {
   const limit = Math.max(1, Math.floor(Number(maxPartsPerPage) || 8))
   const active = (Array.isArray(parts) ? parts : []).filter((part) => part && part.on !== false && clean(part.id))
-  const groups = new Map(SYSTEMS.map((system) => [system.id, []]))
-  active.forEach((part) => groups.get(classifyPartSystem(part)).push(part))
+  const systemGroups = new Map(SYSTEMS.map((system) => [system.id, []]))
+  const dataGroups = new Map(DATA_SECTIONS.filter((section) => !section.isSink).map((section) => [section.id, []]))
+  const generalGroup = []
+
+  active.forEach((part) => {
+    const { bucket, purpose } = classifyPartBucket(part)
+    if (purpose.startsWith("structure:")) systemGroups.get(bucket).push(part)
+    else if (dataGroups.has(bucket)) dataGroups.get(bucket).push(part)
+    else generalGroup.push(part)
+  })
 
   const pages = []
   for (const system of SYSTEMS) {
-    const members = groups.get(system.id)
+    const members = systemGroups.get(system.id)
     balancedChunks(members, limit).forEach((pageParts, index, all) => {
       const suffix = all.length > 1 ? " · " + (index + 1) + "/" + all.length : ""
       // Title and garmentPart are derived from THIS page's parts, so a page
@@ -179,6 +356,13 @@ export function partitionPartsBySystem(parts, { maxPartsPerPage = 8 } = {}) {
         })),
       })
     })
+  }
+  for (const section of DATA_SECTIONS) {
+    if (section.isSink) continue
+    pages.push(...dataSectionPages(section, dataGroups.get(section.id), limit))
+  }
+  if (generalGroup.length > 0) {
+    pages.push(...dataSectionPages(DATA_SECTION_BY_ID.get("general"), generalGroup, limit))
   }
   return pages
 }
@@ -254,6 +438,23 @@ export function deterministicPageLayout(page, context = {}) {
       regions: [...chrome, ...data, { type: "illustration", slots: views.length, refs: views, briefs: designBriefs(page, design) }, { type: "disclaimer" }],
     }
   }
+  if (purpose.startsWith("data:")) {
+    // The table is the protagonist here (size chart, QC checklist, factory
+    // notes) - an illustration is included only when the section actually
+    // asked for one (page.illustration, set by dataSectionPages above) AND
+    // there are real views to show it. "none" or no views -> table only.
+    const views = Array.isArray(page.views) ? page.views : []
+    const wantsIllustration = page.illustration === "optional" && views.length > 0
+    return {
+      ...page,
+      regions: [
+        ...chrome,
+        { type: "partsList" },
+        ...(wantsIllustration ? [{ type: "illustration", slots: views.length, refs: views, briefs: page.briefs || [] }] : []),
+        { type: "disclaimer" },
+      ],
+    }
+  }
   const views = Array.isArray(page.views) && page.views.length ? page.views : ["Vista tecnica"]
   return {
     ...page,
@@ -276,7 +477,11 @@ export function auditSemanticCoverage(plan, parts) {
   const counts = new Map(activeIds.map((id) => [id, 0]))
   for (const page of (plan && plan.pages) || []) {
     const purpose = clean(page && page.purpose)
-    if (!(purpose === "overview" || purpose === "lining" || purpose.startsWith("structure:"))) continue
+    // data:* pages (DATA_SECTIONS) hold real BOM coverage now too - a size
+    // chart or a QC checklist page is exactly as "covering" its pieces as a
+    // structure:* page is. Missing this would report every part correctly
+    // routed to a data section as falsely "missing".
+    if (!(purpose === "overview" || purpose === "lining" || purpose.startsWith("structure:") || purpose.startsWith("data:"))) continue
     for (const id of Array.isArray(page.pieces) ? page.pieces : []) {
       if (counts.has(clean(id))) counts.set(clean(id), counts.get(clean(id)) + 1)
     }
@@ -286,4 +491,13 @@ export function auditSemanticCoverage(plan, parts) {
     missing: [...counts].filter(([, count]) => count === 0).map(([id]) => id),
     duplicated: [...counts].filter(([, count]) => count > 1).map(([id]) => id),
   }
+}
+
+// Signal, not silence: if the "general" sink is absorbing a big chunk of the
+// document, that means DATA_SECTIONS' taxonomy is missing a real category -
+// worth a plan warning so it gets fixed, not quietly tolerated forever.
+export function auditSinkOverflow(pages, threshold = 8) {
+  const sinkPages = (Array.isArray(pages) ? pages : []).filter((page) => clean(page && page.purpose) === "data:general")
+  const count = sinkPages.reduce((total, page) => total + (Array.isArray(page.pieces) ? page.pieces.length : 0), 0)
+  return { count, overflowing: count > threshold }
 }

@@ -677,6 +677,21 @@ describe("reqsToDesigns", () => {
     })
   })
 
+  // analyzeDesignExpression's prompt now lets the model name a technique
+  // outside `tecs` when none of the catalog options honestly describe a real
+  // element (a laser-engraved button, an embossed buckle) - reqsToDesigns
+  // must pass that free text through untouched, not silently drop it for
+  // being unrecognized.
+  it("passes a free-text technique through unchanged when it is not in the tecs catalog", () => {
+    const reqs = {
+      fields: [
+        { key: "botones_nombre", label: "Nombre", category: "design", status: "known", value: "Botones personalizados", options: [], why: "", designSlot: "botones", designField: "name" },
+        { key: "botones_tecnica", label: "Tecnica", category: "design", status: "known", value: "Grabado laser en boton", options: [], why: "", designSlot: "botones", designField: "technique" },
+      ],
+    }
+    expect(reqsToDesigns(reqs)[0]).toMatchObject({ tec: "Grabado laser en boton" })
+  })
+
   // The whole point: a chat-built design could never carry real cotas before
   // this, because a typed "10cm x 8cm" only ever landed as prose in
   // notes/posDetail - renderDesignArtHero (buildPages.js) requires numeric

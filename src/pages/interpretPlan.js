@@ -20,6 +20,7 @@ import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
 import { partsCapacityForHeight } from "./tableMetrics.js"
+import { purposeFamily } from "./pageContracts.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
@@ -700,7 +701,11 @@ export function buildPlannedPages(plan, ctx, opts) {
     // A BOM without a visual target is not a useful production page. Plans
     // from fixtures, fallbacks or a weak model are repaired here as a final
     // document-level invariant before measurement and pagination.
-    if (pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
+    // EXCEPT a "data" family page (size chart, QC checklist, factory notes -
+    // see semanticOutline.js's DATA_SECTIONS): its contract legitimately
+    // omits illustration, and forcing one on here would silently override
+    // that after repairPage already agreed the page was complete.
+    if (purposeFamily(page.purpose) !== "data" && pageHasRegion(page, "partsList") && !pageHasRegion(page, "illustration")) {
       const regions = page.regions.slice()
       const footerIndex = regions.findIndex((region) => region.type === "disclaimer")
       regions.splice(footerIndex >= 0 ? footerIndex : regions.length, 0, {
