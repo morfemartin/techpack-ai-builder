@@ -3,7 +3,7 @@ import { uid } from "./core/idGen.js"
 import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanContractAssisted, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
-import { buildTranslationPayload, combineTranslations, translateContent } from "./core/translate.js"
+import { combineTranslations, translateContent } from "./core/translate.js"
 import { languageLabel, sortedTextileLanguages, toggleFactoryLanguage } from "./core/languageConfig.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed, extractSeedFromDocument } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
@@ -183,7 +183,6 @@ export default function App() {
   const [prevPage, setPrevPage] = useState(0)
   const [translating, setTranslating] = useState(false)
   const [translationError, setTranslationError] = useState(null)
-  const [previewRetryNonce, setPreviewRetryNonce] = useState(0)
   const translationRuns = useRef(0)
   const [txCache, setTxCache] = useState({})
   const [svgPages, setSvgPages] = useState(null)
@@ -569,12 +568,9 @@ export default function App() {
     }
   }
 
-  async function retryTranslation(error) {
+  function retryTranslation(error) {
     if (!error) return
-    const result = await (error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language))
-    setTranslationError(null)
-    setPreviewRetryNonce((value) => value + 1)
-    return result
+    return error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language)
   }
 
   async function ensureFactoryTranslations() {
@@ -932,7 +928,6 @@ export default function App() {
           emb: d.emb,
         })),
         hasLogo: !!logo,
-        previewRetryNonce,
       })
     : ""
 
@@ -964,34 +959,8 @@ export default function App() {
         setPlannedPreviewPages(pages)
         setPrevPage((p) => Math.min(p, Math.max(0, pages.length - 1)))
       })
-      .catch(async (error) => {
+      .catch(() => {
         if (!active) return
-        if (error && error.code === "translation_contract_failed") {
-          // A blocked language must not throw away a valid semantic layout.
-          // Keep previewing the same measured document in the source language
-          // while the requested translation remains explicitly blocked.
-          const sourceTx = buildTranslationPayload(hdr, parts, designs, sourceLanguage, fabricColors)
-          setPlannedPreviewError(sourceLanguage === "ES"
-            ? "La traduccion solicitada esta bloqueada; mostrando la estructura en el idioma base."
-            : "The requested translation is blocked; showing the structure in the source language.")
-          try {
-            const pages = await buildCustomDocumentPages(sourceLanguage, sourceTx, {
-              showModal: false,
-              designerTx: sourceTx,
-              onPages: (nextPages) => {
-                if (!active) return
-                setPlannedPreviewPages(nextPages)
-                setPrevPage((page) => Math.min(page, Math.max(0, nextPages.length - 1)))
-              },
-            })
-            if (!active) return
-            setPlannedPreviewPages(pages)
-            setPrevPage((page) => Math.min(page, Math.max(0, pages.length - 1)))
-            return
-          } catch {
-            // Only a real planning/rendering failure may use the legacy pages.
-          }
-        }
         const tx = txCache[prevLang] || null
         setPlannedPreviewError("No se pudo diseñar el documento con IA; mostrando fallback clásico.")
         setPlannedPreviewPages(buildAllPages(prevLang, hdr, parts, designs, logo, tx, garment, fabricColors))
