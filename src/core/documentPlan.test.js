@@ -196,7 +196,12 @@ describe("document plan AI wrappers", () => {
       })
     let telemetry
     await planDocumentOutline({ garmentType: "Polo", parts, designs: [] }, { onProposal: (value) => { telemetry = value } })
-    expect(telemetry.aiResult).toMatchObject({ provider: "contract", degraded: true })
+    expect(telemetry.aiResult).toMatchObject({
+      provider: "contract",
+      degraded: true,
+      fallbackReason: "assignment_batches_completed_by_contract",
+      degradedStages: { index: false, assignmentBatches: [1] },
+    })
   })
 
   it("never ships artwork blobs into section, assignment, or page prompts", async () => {

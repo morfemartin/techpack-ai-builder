@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { uid } from "./core/idGen.js"
-import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
+import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanContractAssisted, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { combineTranslations, translateContent } from "./core/translate.js"
@@ -697,7 +697,12 @@ export default function App() {
           // not be silent.
           onProposal: (proposal) => {
             if (proposal && proposal.aiResult && proposal.aiResult.provider === "contract") {
-              setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiPlanFailed(uiLang, proposal.aiResult.fallbackReason) }])
+              const stages = proposal.aiResult.degradedStages
+              if (stages && !stages.index && stages.assignmentBatches.length > 0) {
+                setDocumentPlanWarnings((w) => [...w, { level: "assisted", text: uiPlanContractAssisted(uiLang, stages.assignmentBatches.length) }])
+              } else {
+                setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiPlanFailed(uiLang, proposal.aiResult.fallbackReason) }])
+              }
             }
           },
         })
@@ -1541,8 +1546,18 @@ export default function App() {
                 // uiPagesUsedFallback vs uiPlanFailed).
                 var pageWarnings = documentPlanWarnings.filter((w) => w.level === "page")
                 var docWarnings = documentPlanWarnings.filter((w) => w.level === "document")
+                var assistedWarnings = documentPlanWarnings.filter((w) => w.level === "assisted")
                 return (
                   <>
+                    {assistedWarnings.length > 0 && (
+                      <span
+                        title={assistedWarnings.map((w) => w.text).join("\n")}
+                        style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.priority.fill, fontWeight: 700 }}
+                      >
+                        <Icon name="check" size={14} color={role.priority.fill} />
+                        {assistedWarnings[assistedWarnings.length - 1].text}
+                      </span>
+                    )}
                     {docWarnings.length > 0 && (
                       <span
                         title={docWarnings.map((w) => w.text).join("\n")}

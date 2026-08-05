@@ -537,6 +537,17 @@ export function uiPlanFailed(uiLang, reason) {
     : "El plan de documento con IA falló - usando la estructura de páginas estándar.") + suffix
 }
 
+export function uiPlanContractAssisted(uiLang, count) {
+  if (uiLang === "EN") {
+    return count === 1
+      ? "The verified contract completed 1 data batch; the AI index was preserved."
+      : `The verified contract completed ${count} data batches; the AI index was preserved.`
+  }
+  return count === 1
+    ? "El contrato verificable completó 1 lote de datos; se conservó el índice de la IA."
+    : `El contrato verificable completó ${count} lotes de datos; se conservó el índice de la IA.`
+}
+
 // A page's AI layout call resolved normally, but the CONTENT came from the
 // deterministic fallback (every provider either failed or the model's
 // answer failed the task's own validator) - runHybridAI already computes

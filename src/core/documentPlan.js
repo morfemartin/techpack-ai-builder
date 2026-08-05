@@ -359,10 +359,19 @@ export async function planDocumentOutline({ garmentType, parts, designs, brief, 
   const composed = composeOutlineFromSections(sectionResult.sections, assignmentResult.assignments, context)
   const repaired = repairOutline(composed.outline, context)
   const repairs = [...composed.changes, ...repaired.repairs]
-  const degraded = sectionResult.aiResult && sectionResult.aiResult.provider === "contract" ||
-    assignmentResult.results.some((result) => result.aiResult && result.aiResult.provider === "contract")
+  const indexUsedContract = !!(sectionResult.aiResult && sectionResult.aiResult.provider === "contract")
+  const assignmentBatchesUsingContract = assignmentResult.results
+    .filter((result) => result.aiResult && result.aiResult.provider === "contract")
+    .map((result) => result.batch)
+  const degraded = indexUsedContract || assignmentBatchesUsingContract.length > 0
   const aiResult = degraded
-    ? { provider: "contract", model: "deterministic", degraded: true, fallbackReason: "one_or_more_planning_stages_used_contract" }
+    ? {
+        provider: "contract",
+        model: "deterministic",
+        degraded: true,
+        fallbackReason: indexUsedContract ? "document_index_used_contract" : "assignment_batches_completed_by_contract",
+        degradedStages: { index: indexUsedContract, assignmentBatches: assignmentBatchesUsingContract },
+      }
     : sectionResult.aiResult
   if (typeof onProposal === "function") onProposal({
     raw: sectionResult.raw,

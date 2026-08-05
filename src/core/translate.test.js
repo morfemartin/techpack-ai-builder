@@ -32,6 +32,15 @@ describe("technical translation", () => {
     expect(extractStructured).toHaveBeenCalledTimes(2)
   })
 
+  it("continues to the repair pass when the provider returns malformed JSON", async () => {
+    const source = buildTranslationPayload(hdr, parts, designs)
+    const valid = structuredClone(source)
+    valid.pname = "20K Jacket"
+    extractStructured.mockRejectedValueOnce(new Error("invalid JSON")).mockResolvedValueOnce(valid)
+    await expect(translateContent(hdr, parts, designs, "EN")).resolves.toEqual(valid)
+    expect(extractStructured).toHaveBeenCalledTimes(2)
+  })
+
   it("blocks a language after repair and a fresh third attempt both fail", async () => {
     extractStructured.mockResolvedValue({ parts: [] })
     await expect(translateContent(hdr, parts, designs, "DE")).rejects.toMatchObject({ code: "translation_contract_failed", language: "DE" })

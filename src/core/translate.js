@@ -124,24 +124,34 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
   if (!targetName || !sourceName) throw new Error("Unsupported document language: " + targetLang)
 
   let previous = null
+  let lastError = null
   for (let attempt = 1; attempt <= 3; attempt++) {
     const repair = attempt === 2
       ? " The previous answer failed validation. Repair it: keep every key and array item, and preserve every number, unit, code, Pantone/Madeira reference, DIM/D/V identifier and hexadecimal value exactly."
       : attempt === 3
         ? " Start a fresh complete translation. The two previous structures were invalid; rebuild the whole JSON from the source and preserve every invariant exactly."
         : ""
-    const result = await extractStructured({
-      instructions:
-        "Translate a garment technical document from " + sourceName + " to " + targetName + ". " +
-        "Return the exact same JSON structure. Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
-      content: JSON.stringify({ source, previousInvalidAnswer: attempt === 2 ? previous : null }),
-      maxTokens: 4200,
-    })
-    if (validTranslation(source, result)) return result
-    previous = result
+    try {
+      const result = await extractStructured({
+        instructions:
+          "Translate a garment technical document from " + sourceName + " to " + targetName + ". " +
+          "Return the exact same JSON structure. Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
+        content: JSON.stringify({ source, previousInvalidAnswer: attempt === 2 ? previous : null }),
+        maxTokens: 4200,
+      })
+      if (validTranslation(source, result)) return result
+      previous = result
+      lastError = null
+    } catch (error) {
+      // A formatting miss is one invalid attempt, not the end of the language
+      // workflow. The following pass starts again from the intact source.
+      lastError = error
+      previous = error && error.cause && error.cause.raw ? error.cause.raw : null
+    }
   }
   const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
   error.code = "translation_contract_failed"
   error.language = targetLang
+  error.cause = lastError
   throw error
 }
