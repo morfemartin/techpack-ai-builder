@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { uid } from "./core/idGen.js"
-import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanContractAssisted, uiPlanFailed, uiPageUsedFallback } from "./core/i18n.js"
+import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanContractAssisted, uiPlanFailed, uiPageUsedFallback, uiSinkOverflow } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { combineTranslations, translateContent } from "./core/translate.js"
@@ -11,6 +11,7 @@ import { localProviderLabel } from "./core/hybridAI.js"
 import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/visionExtract.js"
 import { toGrayscale, hexToGray } from "./core/colorUtils.js"
 import { hasColorData, madeiraColorsToStops, normalizeFabricColor } from "./core/colorSpecs.js"
+import { newColorway, normalizeColorway, colorwaysFromFabricColors, renderColorwayDocument } from "./core/colorways.js"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
 import { buildAllPages } from "./pages/buildPages.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
@@ -21,6 +22,7 @@ import { buildCustomGarment, mapChatDesignsToDesigns } from "./garments/buildCus
 import { downloadGarmentFile } from "./garments/exportGarment.js"
 import { Inp, Sel, Fld } from "./components/FormControls.jsx"
 import { ColorsEditor } from "./components/ColorsEditor.jsx"
+import { ColorwaysEditor } from "./components/ColorwaysEditor.jsx"
 import { ImageUploader } from "./components/ImageUploader.jsx"
 import { EmbForm } from "./components/EmbForm.jsx"
 import { SvgModal } from "./components/SvgModal.jsx"
@@ -33,7 +35,7 @@ import { Icon } from "./components/Icon.jsx"
 import { MorfeLogo } from "./components/MorfeLogo.jsx"
 import { getPaletteNames, palette, role, setPalette, setCustomColor, CUSTOM_EDITABLE_KEYS, type, space } from "./design/tokens.js"
 import { GRID, PAGE } from "./design/metrics.js"
-import { deterministicPageLayout, withPartLabels } from "./core/semanticOutline.js"
+import { deterministicPageLayout, withPartLabels, auditSinkOverflow } from "./core/semanticOutline.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
 const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
@@ -174,7 +176,22 @@ export default function App() {
   // null (garmentId === "custom" before the chat finishes), that throws on
   // every re-render instead of just once safely at mount.
   const [parts, setParts] = useState(() => GARMENTS.cap.defaultParts.map((p) => Object.assign({}, p)))
-  const [fabricColors, setFabricColors] = useState([])
+  // `colorways` replaces the old flat `fabricColors` array - N named
+  // versions (Fair Green / Silver Lake Blue), each with its own swatches and
+  // optional per-design thread overrides (colorways.js). `fabricColors`
+  // below is DERIVED from colorways[0] so every one of the ~15 existing
+  // consumers (translate.js, the outline planner, buildAllPages, the design
+  // preview, ...) keeps working on the base colorway completely unchanged -
+  // only the export path (generateResolvedDocument/finishReview) and the
+  // editor UI need to know about `colorways` at all.
+  const [colorways, setColorways] = useState(() => [newColorway({})])
+  const fabricColors = colorways[0].fabricColors
+  function setFabricColors(next) {
+    setColorways((cws) => {
+      const nextColors = typeof next === "function" ? next(cws[0].fabricColors) : next
+      return [{ ...cws[0], fabricColors: nextColors }, ...cws.slice(1)]
+    })
+  }
   const [designs, setDesigns] = useState(() => [
     Object.assign(newDesign(), { name: "Logo Frontal", pos: GARMENTS.cap.positions.ES[3] || GARMENTS.cap.positions.ES[0], posDetail: "Centrado", colors: [{ name: "PANTONE 286 C", hex: "#003DA5" }, { name: "PANTONE White", hex: "#FFFFFF" }] }),
   ])
@@ -643,7 +660,11 @@ export default function App() {
   // user as "El plan de documento con IA fallo ... (aborted)" plus a pile of
   // pages on the deterministic layout. Cancelling the OLD run explicitly means
   // only the run nobody is waiting for dies, and it dies quietly.
-  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan, designerTx = null, signal } = {}) {
+  // `renderColorways` defaults to the base colorway ONLY - the live preview
+  // effect calls this on every edit and must keep showing one document (see
+  // its own "Preview renders colorway[0] only" comment); only the real
+  // Generar path (generateResolvedDocument) opts into the full colorway set.
+  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan, designerTx = null, signal, renderColorways } = {}) {
     var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
     // Distinguishes "we cancelled this run" from "the AI could not do it".
     // Checks the signal too, because an abort can surface as a plain rejection
@@ -736,6 +757,16 @@ export default function App() {
         outline = provisionalOutline
         setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiPlanFailed(uiLang, describeAIError(error)) }])
       }
+      // Built and unit-tested since the semantic-outline work, but never
+      // actually called from the app - the "the sink page is overflowing,
+      // the taxonomy came up short" signal existed only in tests. A
+      // data:general page this full means real construction facts landed in
+      // the catch-all instead of a real section, which is worth surfacing
+      // even though nothing failed outright.
+      var sinkAudit = auditSinkOverflow(outline.pages)
+      if (sinkAudit.overflowing) {
+        setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiSinkOverflow(uiLang, sinkAudit.count) }])
+      }
       var total = outline.pages.length
       var placeholders = outline.pages.map((page, i) => ({ name: plannedPageName(page, i), svg: placeholderSvg(page, i, total, { label: ui.queued, done: 0 }) }))
       publishPages(placeholders)
@@ -807,7 +838,12 @@ export default function App() {
       // the pre-download review can diff intake intent against what each page
       // actually carries.
       if (onPlan) onPlan({ pages: plannedPages })
-      var finalPages = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff", includeIndex: true })
+      // Re-renders this SAME plan once per colorway (renderColorwayDocument
+      // is buildPlannedPages underneath) - zero extra AI calls, since colors
+      // are render-time data the planner never reasoned about. With exactly
+      // one colorway this is byte-identical to the old plain buildPlannedPages
+      // call, so a document with no second colorway is unaffected.
+      var finalPages = renderColorwayDocument({ pages: plannedPages }, ctx, renderColorways || [colorways[0]], { documentMode: "illustration-handoff", includeIndex: true })
       setDocumentReady(true)
       return finalPages
     } finally {
@@ -846,7 +882,7 @@ export default function App() {
         previewRunRef.current = null
       }
       try {
-        pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p), designerTx })
+        pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p), designerTx, renderColorways: colorways })
       } catch {
         pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment, fabricColors)
       }
@@ -927,7 +963,10 @@ export default function App() {
         garment,
         dimensionUnit,
       }
-      const rendered = buildPlannedPages(revisedPlan, renderCtx, { documentMode: "illustration-handoff", includeIndex: true })
+      // Same colorway replay as buildCustomDocumentPages' final render - the
+      // review round only ever revises ONE plan, so this stays correct for
+      // every colorway without re-running the review itself per colorway.
+      const rendered = renderColorwayDocument(revisedPlan, renderCtx, colorways, { documentMode: "illustration-handoff", includeIndex: true })
 
       // Commit the snapshots only after the corrected document rendered.
       setHdr(applied.hdr)
@@ -954,7 +993,11 @@ export default function App() {
         outputMode,
         hdr,
         parts,
-        fabricColors,
+        // Superset of `fabricColors` (which is only colorways[0]) - without
+        // this, editing colorway 2's swatches or thread overrides would
+        // never re-trigger the live preview, since the preview key only
+        // reacted to the base colorway.
+        colorways,
         designs: designs.map((d) => ({
           name: d.name,
           pos: d.pos,
@@ -1232,7 +1275,7 @@ export default function App() {
             </div>
           </Fld>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: space(4) }}>
-            {[[tl.brand, "brand", "Ej: New Era", true], [tl.season, "season", "Ej: 2027 SS/FW"], [tl.sno, "sno", "Ej: 2ACP002"], [tl.fab, "fab", "Ej: 100% Poliester"], [tl.fac, "fac", "Ej: Colombia"], [tl.ind, "ind", "18/10/2027"], [tl.outd, "outd", "20/11/2027"]].map((row) => (
+            {[[tl.brand, "brand", "Ej: New Era", true], [tl.season, "season", "Ej: 2027 SS/FW"], [tl.sno, "sno", "Ej: 2ACP002"], [tl.fab, "fab", "Ej: 100% Poliester"], [tl.fac, "fac", "Ej: Venezuela"], [tl.ind, "ind", "18/10/2027"], [tl.outd, "outd", "20/11/2027"]].map((row) => (
               <Fld key={row[1]} lbl={row[3] ? <RequiredLabel text={row[0]} field={row[1]} /> : row[0]}>
                 <Inp v={hdr[row[1]]} ch={(v) => setHdr((p) => Object.assign({}, p, { [row[1]]: v }))} ph={row[2]} />
               </Fld>
@@ -1379,7 +1422,7 @@ export default function App() {
             <div style={{ marginBottom: space(2), fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase" }}>
               {uiLang === "EN" ? "Fabric colorways / Pantone" : "Colores de tela / Pantone"}
             </div>
-            <ColorsEditor colors={fabricColors} onChange={setFabricColors} />
+            <ColorwaysEditor colorways={colorways} onChange={setColorways} designs={designs} />
           </div>
           <div style={{ marginBottom: space(4), border: hair, background: C.white.hex, padding: space(3) }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: space(2), marginBottom: space(2) }}>

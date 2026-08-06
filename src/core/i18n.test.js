@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   T, UI,
   uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiResolvingBlock,
-  uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed,
+  uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiSinkOverflow,
 } from "./i18n.js"
 
 // UI is the app's OWN chrome (App.jsx's uiLang toggle) - distinct from T,
@@ -79,5 +79,10 @@ describe("interpolated UI helpers", () => {
   it("uiPageDesignFailed", () => {
     expect(uiPageDesignFailed("ES", 2, "Portada")).toContain("Página 2 (Portada)")
     expect(uiPageDesignFailed("EN", 2, "Cover")).toContain("Page 2 (Cover)")
+  })
+
+  it("uiSinkOverflow", () => {
+    expect(uiSinkOverflow("ES", 9)).toContain("9 datos")
+    expect(uiSinkOverflow("EN", 9)).toContain("9 fields")
   })
 })

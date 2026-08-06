@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { normalizeRequirements, answerFromSeed, ensureMinimumGeneralQuestions, ensureFabricColorQuestion, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, reqsToFabricColors, extractLastCompletedLabel } from "./techpackRequirements.js"
+import { normalizeRequirements, answerFromSeed, ensureMinimumGeneralQuestions, ensureFabricColorQuestion, fallbackRequirements, fallbackDesignFields, pendingFields, applyAnswer, skipField, revertField, looksLikeQuestion, isComplete, reqsToParts, reqsToFabricColors, extractLastCompletedLabel, pendingLabel, isPendingValue } from "./techpackRequirements.js"
 
 // Note: analyzeRequirements's real network behavior isn't tested here -
 // deepseekClient.js already covers deepseekChat/deepseekChatStream directly.
@@ -371,6 +371,15 @@ describe("skipField", () => {
     expect(pendingFields(skipped, "design").map((f) => f.key)).toEqual(["otro"])
   })
 
+  // The `skipped` flag is what lets reqsToParts (and, for design fields,
+  // whatever consumes them) tell "genuinely nothing to say" apart from "the
+  // user chose not to answer this one" - the two must never render the same.
+  it("marks the field as skipped, distinct from an ordinary empty assumed field", () => {
+    const skipped = skipField(reqs, "archivo_cierre")
+    expect(skipped.fields[0].skipped).toBe(true)
+    expect(skipped.fields[1].skipped).toBeUndefined()
+  })
+
   it("does not mutate the input", () => {
     skipField(reqs, "archivo_cierre")
     expect(reqs.fields[0].status).toBe("ask")
@@ -457,6 +466,38 @@ describe("reqsToParts", () => {
     expect(labels).not.toContain("Cierre") // still ask
     expect(labels).not.toContain("Forro") // whitespace value
     expect(labels).not.toContain("Logo") // design category
+  })
+
+  // A user-skipped field must print as an open item, not vanish - vanishing
+  // is indistinguishable from the field never having existed, which is
+  // exactly the silent-drop failure mode this app's contracts forbid
+  // elsewhere (see skipField's `skipped` flag).
+  it("keeps a skipped field, printed with the pending sentinel instead of dropped", () => {
+    const withSkip = {
+      fields: [...reqs.fields, { key: "puno", status: "assumed", value: "", skipped: true, category: "general", label: "Puno" }],
+    }
+    expect(reqsToParts(withSkip)).toContainEqual({ label: "Puno", val: "⏳ Pendiente" })
+  })
+
+  it("prints the skipped sentinel in English when asked", () => {
+    const withSkip = { fields: [{ key: "puno", status: "assumed", value: "", skipped: true, category: "general", label: "Cuff" }] }
+    expect(reqsToParts(withSkip, "EN")).toEqual([{ label: "Cuff", val: "⏳ Pending" }])
+  })
+})
+
+describe("PENDING sentinel", () => {
+  it("pendingLabel defaults to Spanish and switches on EN", () => {
+    expect(pendingLabel()).toBe("⏳ Pendiente")
+    expect(pendingLabel("ES")).toBe("⏳ Pendiente")
+    expect(pendingLabel("EN")).toBe("⏳ Pending")
+  })
+
+  it("isPendingValue recognizes both languages and rejects ordinary text", () => {
+    expect(isPendingValue("⏳ Pendiente")).toBe(true)
+    expect(isPendingValue("⏳ Pending")).toBe(true)
+    expect(isPendingValue("Rojo")).toBe(false)
+    expect(isPendingValue("")).toBe(false)
+    expect(isPendingValue(null)).toBe(false)
   })
 })
 

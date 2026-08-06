@@ -480,8 +480,14 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     askNext(reverted, "general")
   }
 
+  // Any question can be skipped now, not just ones the model marked
+  // `optional` - a mandatory field with no options previously had NO skip
+  // path at all, and the model's own `optional` guess is not always right
+  // for how the user actually wants to work. skipField's `skipped` flag (and
+  // reqsToParts' pendingLabel()) is what keeps a skip from silently deleting
+  // the row instead of asking again later.
   function skipCurrentField() {
-    if (!currentField || !currentField.optional || sending) return
+    if (!currentField || sending) return
     post("user", ui.skip)
     setAnswerStack((s) => [...s, { key: currentField.key, phase }])
     const nextReqs = skipField(reqs, currentField.key)
@@ -723,7 +729,7 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
     return {
       id: garmentLabel,
       label: garmentLabel,
-      parts: reqsToParts(reqs),
+      parts: reqsToParts(reqs, uiLang),
       fabricColors: reqsToFabricColors(reqs),
       positions: ["Toda la prenda"],
       // A design element added during "finalCheck" (after runBriefAuthoring
@@ -842,22 +848,13 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
           {/* Numbered option chips for the current question - click to answer, or type your own. */}
           {isWalking && currentField && currentField.options && currentField.options.length > 0 && !sending && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: space(1), alignSelf: "flex-start", maxWidth: "90%" }}>
-              {currentField.optional && (
-                <button
-                  onClick={skipCurrentField}
-                  style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
-                >
-                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>1</span>
-                  {ui.skip}
-                </button>
-              )}
               {currentField.options.map((opt, i) => (
                 <button
                   key={i}
                   onClick={() => send(opt)}
                   style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: C.white.hex, border: hair, cursor: "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex }}
                 >
-                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + (currentField.optional ? 2 : 1)}</span>
+                  <span style={{ width: 15, height: 15, flexShrink: 0, background: role.index.fill, color: role.index.on, fontFamily: type.fonts.data, fontWeight: 700, fontSize: 9, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
                   {opt}
                 </button>
               ))}
@@ -889,15 +886,29 @@ export function GarmentChat({ onComplete, tecs, seed, initialGarmentType, genera
             {aiStatus}
           </div>
         )}
-        {backAvailable && (
-          <div style={{ padding: `${space(1)}px ${space(3)}px`, borderTop: hair, display: "flex" }}>
-            <button
-              onClick={goBack}
-              disabled={sending}
-              style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: "none", border: "none", cursor: sending ? "not-allowed" : "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}
-            >
-              <Icon name="undo" size={14} /> {ui.back}
-            </button>
+        {(backAvailable || (isWalking && currentField)) && (
+          <div style={{ padding: `${space(1)}px ${space(3)}px`, borderTop: hair, display: "flex", gap: space(3) }}>
+            {backAvailable && (
+              <button
+                onClick={goBack}
+                disabled={sending}
+                style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: "none", border: "none", cursor: sending ? "not-allowed" : "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}
+              >
+                <Icon name="undo" size={14} /> {ui.back}
+              </button>
+            )}
+            {isWalking && currentField && (
+              // Always available, regardless of `optional` or whether this
+              // question has options - see skipCurrentField's comment for
+              // why the old `currentField.optional` gate was removed.
+              <button
+                onClick={skipCurrentField}
+                disabled={sending}
+                style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(1)}px ${space(2)}px`, background: "none", border: "none", cursor: sending ? "not-allowed" : "pointer", fontFamily: type.fonts.ui, fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7 }}
+              >
+                <Icon name="skip_next" size={14} /> {ui.skip}
+              </button>
+            )}
           </div>
         )}
         {inputActive ? (

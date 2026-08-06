@@ -548,6 +548,18 @@ export function uiPlanContractAssisted(uiLang, count) {
     : `El contrato verificable completó ${count} lotes de datos; se conservó el índice de la IA.`
 }
 
+// auditSinkOverflow (semanticOutline.js) flags when data:general - the
+// explicit catch-all for a piece that matched no real section - is carrying
+// more than the app's own threshold. Never blocks the document (the sink
+// exists precisely so nothing gets lost), but a full sink means real
+// construction facts landed in "sin clasificar" instead of a proper section,
+// which is worth a human glance.
+export function uiSinkOverflow(uiLang, count) {
+  return uiLang === "EN"
+    ? `${count} fields landed in "General data" without a specific section - worth a check.`
+    : `${count} datos cayeron en "Datos generales" sin una sección específica - vale la pena revisarlos.`
+}
+
 // A page's AI layout call resolved normally, but the CONTENT came from the
 // deterministic fallback (every provider either failed or the model's
 // answer failed the task's own validator) - runHybridAI already computes

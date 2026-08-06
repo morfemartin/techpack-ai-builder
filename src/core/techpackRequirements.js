@@ -73,6 +73,22 @@ function streamProgress(contentSoFar, tokensSoFar, provider) {
 // - "ask"     : genuinely needs the user - present as a question with options
 export const FIELD_STATUS = { KNOWN: "known", ASSUMED: "assumed", ASK: "ask" }
 
+// One sentinel shared by every place a real question was left open on
+// purpose instead of being silently dropped: a chat field the user skipped
+// (skipField below), a design spec the model authored but the user hasn't
+// filled in yet (routeDesignFields' form-venue fields), a size-chart cell
+// nobody graded. Matches the "⏳ Pendiente" language already used in real
+// production docs (Arrive Aruba's own tech packs), so the printed ficha
+// reads like something a textile professional already writes by hand -
+// never a blank cell that looks like it was simply forgotten.
+export const PENDING = { status: "pending", glyph: "⏳" }
+export function pendingLabel(lang = "ES") {
+  return lang === "EN" ? PENDING.glyph + " Pending" : PENDING.glyph + " Pendiente"
+}
+export function isPendingValue(value) {
+  return typeof value === "string" && value.trim().startsWith(PENDING.glyph)
+}
+
 /**
  * One DeepSeek call: reason like a textile technician about what a tech pack
  * for `garmentType` needs and enrich the evidence we already have. The final
@@ -621,7 +637,11 @@ export function skipField(reqs, key) {
     ...reqs,
     fields: fields.map((f) => {
       if (!f || f.key !== key) return f
-      return { ...f, status: FIELD_STATUS.ASSUMED, value: "" }
+      // `skipped: true` is what tells reqsToParts (and, for design fields,
+      // reqsToDesigns) to print this as an OPEN item instead of silently
+      // omitting the row - skipping a question must never look identical to
+      // the field never having existed.
+      return { ...f, status: FIELD_STATUS.ASSUMED, value: "", skipped: true }
     }),
   }
 }
@@ -688,11 +708,13 @@ export function isComplete(reqs, category) {
 // Bridges the reasoning core to what the rest of the app consumes: turns the
 // non-"ask" general fields (known + assumed) into the parts[] shape that
 // buildCustomGarment / the Piezas step already use.
-export function reqsToParts(reqs) {
+// `lang` only affects a SKIPPED field's printed placeholder - every other
+// value is whatever the user/model actually wrote, already in that language.
+export function reqsToParts(reqs, lang = "ES") {
   const fields = reqs && Array.isArray(reqs.fields) ? reqs.fields : []
   return fields
-    .filter((f) => f.category === "general" && f.status !== FIELD_STATUS.ASK && String(f.value || "").trim())
-    .map((f) => ({ label: f.label, val: f.value }))
+    .filter((f) => f.category === "general" && f.status !== FIELD_STATUS.ASK && (String(f.value || "").trim() || f.skipped))
+    .map((f) => ({ label: f.label, val: String(f.value || "").trim() || pendingLabel(lang) }))
 }
 
 export function reqsToFabricColors(reqs) {
