@@ -22,6 +22,37 @@ describe("technical translation", () => {
     expect(validTranslation(source, translated)).toBe(false)
   })
 
+  // Verified live against Mistral: wrapping the payload in {source,
+  // previousInvalidAnswer: null} on EVERY attempt made the model mirror that
+  // envelope back nested under "source" - 3/3 real translations came back
+  // perfectly translated but failed sameKeys() before the content was ever
+  // inspected. The first attempt must send the document with no envelope.
+  it("sends the first attempt unwrapped - no source/previousInvalidAnswer envelope", async () => {
+    const source = buildTranslationPayload(hdr, parts, designs)
+    const valid = structuredClone(source)
+    valid.pname = "20K Jacket"
+    extractStructured.mockResolvedValueOnce(valid)
+    await translateContent(hdr, parts, designs, "EN")
+    const call = extractStructured.mock.calls[0][0]
+    const sent = JSON.parse(call.content)
+    expect(Object.keys(sent).sort()).toEqual(["designs", "fabricColors", "lexicon", "parts", "pname"])
+    expect(call.instructions).toContain("EXACTLY these top-level keys")
+  })
+
+  it("wraps only the repair attempt, with the previous invalid answer alongside the document", async () => {
+    const source = buildTranslationPayload(hdr, parts, designs)
+    const invalid = { ...source, parts: [] }
+    const valid = structuredClone(source)
+    valid.pname = "20K Jacket"
+    extractStructured.mockResolvedValueOnce(invalid).mockResolvedValueOnce(valid)
+    await translateContent(hdr, parts, designs, "EN")
+    const secondCall = extractStructured.mock.calls[1][0]
+    const sent = JSON.parse(secondCall.content)
+    expect(Object.keys(sent).sort()).toEqual(["documentToTranslate", "invalidPreviousAttempt"])
+    expect(sent.documentToTranslate).toEqual(source)
+    expect(sent.invalidPreviousAttempt).toEqual(invalid)
+  })
+
   it("repairs one invalid answer before failing", async () => {
     const source = buildTranslationPayload(hdr, parts, designs)
     const invalid = { ...source, parts: [] }

@@ -131,12 +131,29 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
       : attempt === 3
         ? " Start a fresh complete translation. The two previous structures were invalid; rebuild the whole JSON from the source and preserve every invariant exactly."
         : ""
+    // Only wrap the payload in an envelope when there is a previous invalid
+    // answer worth showing (repair attempt). Verified live against Mistral:
+    // wrapping it EVERY attempt (even as {source, previousInvalidAnswer:
+    // null}) made the model mirror that wrapper back - 3/3 real translations
+    // came back perfectly translated but nested under a "source" key, so
+    // validTranslation's sameKeys() check failed on every attempt before the
+    // content was ever inspected. The instructions now also say the exact
+    // top-level keys expected, since "return the exact same structure" left
+    // it ambiguous whether that meant the envelope's structure or the
+    // document's.
+    const showPrevious = attempt === 2 && previous
+    const envelope = showPrevious ? { documentToTranslate: source, invalidPreviousAttempt: previous } : source
     try {
       const result = await extractStructured({
         instructions:
           "Translate a garment technical document from " + sourceName + " to " + targetName + ". " +
-          "Return the exact same JSON structure. Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
-        content: JSON.stringify({ source, previousInvalidAnswer: attempt === 2 ? previous : null }),
+          "Respond with a JSON object containing EXACTLY these top-level keys, translated: pname, parts, designs, fabricColors, lexicon. " +
+          "Do not wrap your answer in any other key (no 'source', no 'translation', no 'documentToTranslate') - your entire response IS that object, at the top level. " +
+          (showPrevious
+            ? "The input below has two keys: documentToTranslate (translate this one) and invalidPreviousAttempt (a rejected prior answer, shown so you can avoid its mistake - keep every key and array item, and preserve every number, unit, code, Pantone/Madeira reference, DIM/D/V identifier and hexadecimal value exactly). "
+            : "") +
+          "Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
+        content: JSON.stringify(envelope),
         maxTokens: 4200,
       })
       if (validTranslation(source, result)) return result
