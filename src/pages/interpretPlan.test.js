@@ -574,3 +574,49 @@ describe("Layout Engine v3 document assembly", () => {
     expect(pages[22].svg).toContain("P. 23 / 23")
   })
 })
+
+// The Polo tech pack that surfaced this: every semantic page shows a SUBSET
+// of the BOM, but translate.js returns ONE flat array of values for the whole
+// document with no ids. Reading it by row position printed a page's labels
+// against the first N values of the document - live output included
+// "Marca: Morfe Studio" and "Botones: Polo manga corta". Labels have always
+// resolved by part.id; this locks the values to the same rule.
+describe("translated values stay with their own part on subset pages", () => {
+  const parts = [
+    { id: 1, val: "Polo manga corta", on: true },
+    { id: 2, val: "91% Poliester / 9% Spandex", on: true },
+    { id: 3, val: "Regular Classic", on: true },
+    { id: 4, val: "Arrive Aruba", on: true },
+  ]
+  const txData = {
+    parts: ["Short sleeve polo", "91% Polyester / 9% Spandex", "Regular Classic fit", "Arrive Aruba"],
+  }
+  const ctx = {
+    lang: "ES",
+    hdr: { brand: "Arrive Aruba", pname: "Polo" },
+    parts,
+    designs: [],
+    logo: null,
+    txData,
+    garment: { partLabels: { ES: { 1: "Tipo de prenda", 2: "Composicion", 3: "Fit", 4: "Marca" } } },
+  }
+  const page = {
+    id: "materiales",
+    title: "Materiales",
+    purpose: "data:materials",
+    pieces: ["4"],
+    regions: [
+      { type: "header", weight: 8 },
+      { type: "titleBar", weight: 5 },
+      { type: "partsList", weight: 60 },
+      { type: "disclaimer", weight: 8 },
+    ],
+  }
+
+  it("pairs the label with its own translated value, not the row at that index", () => {
+    const [rendered] = buildPlannedPages({ pages: [page] }, ctx)
+    expect(rendered.svg).toContain("Arrive Aruba")
+    // Index 0 of the translated array - what the positional lookup used to show.
+    expect(rendered.svg).not.toContain("Short sleeve polo")
+  })
+})

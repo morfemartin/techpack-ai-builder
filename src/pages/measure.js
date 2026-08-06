@@ -23,7 +23,7 @@ import { CHROME, GRID, PRINT, ROW, snapBaseline } from "../design/metrics.js"
 import { headerHeight, wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { hasColorData } from "../core/colorSpecs.js"
-import { effectiveParts, partsTableMetrics } from "./tableMetrics.js"
+import { effectiveParts, partsTableMetrics, translatedPartsById } from "./tableMetrics.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
 // wins, then the page's first `covers` entry. Moved here from
@@ -135,7 +135,13 @@ export function measureRegion(region, page, ctx, width) {
       ? garment.partLabels[(ctx && ctx.lang) || "ES"] || garment.partLabels.ES || {}
       : {}
     const txParts = ctx && ctx.txData && ctx.txData.parts
-    const table = partsTableMetrics({ parts, partLabels, txParts, width: width || 300 })
+    // `parts` above is already narrowed to this page, so the flat translated
+    // array can no longer be read by row position - resolve by id, using the
+    // index interpretPlan built from the full BOM when it is available (see
+    // withTranslatedPartIndex) and deriving it here otherwise, since a wrong
+    // value here also measures the wrong row height.
+    const txPartsById = (ctx && ctx.txPartsById) || translatedPartsById(ctx && ctx.parts, txParts)
+    const table = partsTableMetrics({ parts, partLabels, txParts, txPartsById, width: width || 300 })
     return {
       natural: table.height,
       min: table.height,

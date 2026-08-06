@@ -184,6 +184,10 @@ export default function App() {
   const [translating, setTranslating] = useState(false)
   const [translationError, setTranslationError] = useState(null)
   const translationRuns = useRef(0)
+  // The in-flight live-preview planning run, so a new one can cancel it (see
+  // the preview effect) instead of leaving two runs racing for the same
+  // runHybridAI task slot.
+  const previewRunRef = useRef(null)
   const [txCache, setTxCache] = useState({})
   const [svgPages, setSvgPages] = useState(null)
   const [csvImporting, setCsvImporting] = useState(false)
@@ -631,8 +635,23 @@ export default function App() {
     return deterministicPageLayout(page, { parts, designs, fabricColors })
   }
 
-  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan, designerTx = null } = {}) {
+  // `signal` is what stops two overlapping runs from sabotaging each other.
+  // runHybridAI keys its in-flight operations by TASK and aborts the previous
+  // one whenever a new call arrives with the same task - so a second run
+  // (the live preview re-firing on any edit, or Generar landing on top of it)
+  // silently killed the first run's outline/page calls, which surfaced to the
+  // user as "El plan de documento con IA fallo ... (aborted)" plus a pile of
+  // pages on the deterministic layout. Cancelling the OLD run explicitly means
+  // only the run nobody is waiting for dies, and it dies quietly.
+  async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan, designerTx = null, signal } = {}) {
     var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+    // Distinguishes "we cancelled this run" from "the AI could not do it".
+    // Checks the signal too, because an abort can surface as a plain rejection
+    // from whichever await was in flight rather than as a named AbortError.
+    function wasCancelled(error) {
+      if (signal && signal.aborted) return true
+      return !!(error && (error.name === "AbortError" || error.name === "DOMException"))
+    }
     function publishPages(pages) {
       if (onPages) onPages(pages)
       if (showModal) setSvgPages(pages)
@@ -669,6 +688,7 @@ export default function App() {
       var outline
       try {
         outline = await planDocumentOutline(baseContext, {
+          signal,
           onStatus: (status) => {
             setDocumentPlanStatus(status)
             drawWaiting(provisionalOutline.pages, { label: ui.structuringDocument, detail: status, done: 0 })
@@ -707,6 +727,12 @@ export default function App() {
           },
         })
       } catch (error) {
+        // A run the app itself cancelled is not a planning failure: reporting
+        // it told the user "El plan de documento con IA fallo ... (aborted)"
+        // about work nobody was waiting for any more, while the run that
+        // replaced it was still going fine. Bail out instead of warning and
+        // then planning ~30 pages that will be thrown away.
+        if (wasCancelled(error)) throw error
         outline = provisionalOutline
         setDocumentPlanWarnings((w) => [...w, { level: "document", text: uiPlanFailed(uiLang, describeAIError(error)) }])
       }
@@ -737,6 +763,7 @@ export default function App() {
               page,
               baseContext,
               {
+                signal,
                 onStatus: setDocumentPlanStatus,
                 onProgress: (function (index, label) {
                   return function (progress) {
@@ -762,6 +789,11 @@ export default function App() {
             )
           plannedPages.push(planned)
         } catch (error) {
+          // Same rule as the outline above: a cancelled run stops here rather
+          // than filling the remaining pages with the deterministic layout and
+          // reporting each one as an AI failure ("29 paginas usaron layout
+          // estandar" came from exactly this loop running on after an abort).
+          if (wasCancelled(error)) throw error
           plannedPages.push(fallbackPageLayout(page))
           setDocumentPlanWarnings((w) => [...w, { level: "page", text: uiPageDesignFailed(uiLang, i + 1, plannedPageName(page, i), describeAIError(error)) }])
         }
@@ -806,6 +838,13 @@ export default function App() {
     var pages
     var plan = null
     if (garmentId === "custom" && customGarment) {
+      // The live preview may still be planning the very same document. Both
+      // runs would claim the same runHybridAI task slots and abort each
+      // other's calls, so the real generation takes precedence explicitly.
+      if (previewRunRef.current) {
+        previewRunRef.current.abort()
+        previewRunRef.current = null
+      }
       try {
         pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p), designerTx })
       } catch {
@@ -941,6 +980,14 @@ export default function App() {
     if (plannedPreviewKey === previewPlanKey && plannedPreviewPages && plannedPreviewPages.length > 0) return
 
     var active = true
+    // Cancels the PREVIOUS preview run before starting this one. Without it
+    // both runs stayed alive and fought over runHybridAI's per-task slot, so
+    // the surviving run reported its own calls as aborted (see
+    // buildCustomDocumentPages). `active` alone was not enough: it only
+    // ignored the stale RESULT, it never stopped the stale WORK.
+    if (previewRunRef.current) previewRunRef.current.abort()
+    var controller = new AbortController()
+    previewRunRef.current = controller
     setPlannedPreviewKey(previewPlanKey)
     setPlannedPreviewPages(null)
     setPlannedPreviewError(null)
@@ -948,6 +995,7 @@ export default function App() {
       .then(([tx, designerTx]) => buildCustomDocumentPages(prevLang, tx, {
         showModal: false,
         designerTx,
+        signal: controller.signal,
         onPages: (pages) => {
           if (!active) return
           setPlannedPreviewPages(pages)
@@ -959,8 +1007,11 @@ export default function App() {
         setPlannedPreviewPages(pages)
         setPrevPage((p) => Math.min(p, Math.max(0, pages.length - 1)))
       })
-      .catch(() => {
-        if (!active) return
+      .catch((error) => {
+        // A run we cancelled on purpose is not a failure to report - showing
+        // "no se pudo disenar el documento" for the run the user themselves
+        // superseded is exactly the misleading message this fix removes.
+        if (!active || (error && error.name === "AbortError")) return
         const tx = txCache[prevLang] || null
         setPlannedPreviewError("No se pudo diseñar el documento con IA; mostrando fallback clásico.")
         setPlannedPreviewPages(buildAllPages(prevLang, hdr, parts, designs, logo, tx, garment, fabricColors))
@@ -968,6 +1019,8 @@ export default function App() {
 
     return () => {
       active = false
+      controller.abort()
+      if (previewRunRef.current === controller) previewRunRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewPlanKey])

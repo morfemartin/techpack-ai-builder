@@ -8,10 +8,10 @@ import { neutral, palette, type } from "../design/tokens.js"
 import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
 import { briefLines, factoryBriefLines } from "./briefs.js"
 import { convertMeasure, formatMeasure, normalizeUnit } from "../core/units.js"
-import { partsTableLayout } from "./tableMetrics.js"
+import { partsTableLayout, lookupTranslatedValue } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
-export function renderPartsList(box, { parts, partLabels, txParts, labels, compact, fill, startIndex } = {}) {
+export function renderPartsList(box, { parts, partLabels, txParts, txPartsById, labels, compact, fill, startIndex } = {}) {
   var safeParts = Array.isArray(parts) ? parts.filter(function (p) { return p && p.on !== false }) : []
   var pn = partLabels || {}
   var txP = Array.isArray(txParts) ? txParts : null
@@ -24,7 +24,7 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
   // aligned, so a short parts list reads as a clean table with breathing room
   // instead of a few rows stretched tall with tiny text floating in huge cells.
   // The registered Cap keeps the default flex-fill rows (grow:1) untouched.
-  var tableLayout = compact ? partsTableLayout({ parts: safeParts, partLabels: pn, txParts: txP, width: box.width }) : null
+  var tableLayout = compact ? partsTableLayout({ parts: safeParts, partLabels: pn, txParts: txP, txPartsById, width: box.width }) : null
   var measuredRows = tableLayout ? tableLayout.rows : null
   var columns = tableLayout ? tableLayout.columns : PARTS_COL
   var rowExtra = fill && tableLayout && measuredRows.length > 0
@@ -58,7 +58,10 @@ export function renderPartsList(box, { parts, partLabels, txParts, labels, compa
         var bg = i % 2 === 0 ? palette.white.hex : neutral.faint.hex
         var metric = compact ? measuredRows[i] : null
         var nm = metric ? metric.name : pn[p.id] || p.customName || "P" + p.id
-        var v = metric ? metric.value : txP ? txP[i] : p.val
+        // Same id-first rule as tableMetrics' measuring pass - see
+        // lookupTranslatedValue. The positional `txP[i]` only holds while this
+        // table renders the whole BOM in document order.
+        var v = metric ? metric.value : lookupTranslatedValue(txPartsById, p, () => (txP ? txP[i] : p.val))
         var st = colStops(b)
         function textLines(lines, x) {
           var safeLines = Array.isArray(lines) && lines.length ? lines : [""]

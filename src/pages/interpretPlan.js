@@ -20,7 +20,7 @@ import { documentIndexRows, measureRegion, pageColors, paginateDocumentIndexEntr
 import { normalizeSlotBriefs } from "./briefs.js"
 import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
-import { partsCapacityForHeight } from "./tableMetrics.js"
+import { partsCapacityForHeight, translatedPartsById } from "./tableMetrics.js"
 import { purposeFamily } from "./pageContracts.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
@@ -67,6 +67,18 @@ function workingHeight(ctx) {
 // when a page doesn't specify pieces (e.g. a genuine overview) or when none
 // of the given ids match anything real, so a bad id never produces an empty
 // table.
+// Attaches an id-keyed view of the translated BOM values to the context while
+// `ctx.parts` is still the FULL document - after this, every page is free to
+// narrow `parts` without the values losing track of which row they belong to.
+// Idempotent, so the nested calls (interpretPagePlan inside buildPlannedPages)
+// only pay for it once.
+export function withTranslatedPartIndex(ctx) {
+  const safe = ctx || {}
+  if (safe.txPartsById !== undefined) return safe
+  const txParts = safe.txData && safe.txData.parts
+  return { ...safe, txPartsById: translatedPartsById(safe.parts, txParts) }
+}
+
 export function effectivePartsForPage(allParts, page) {
   const all = Array.isArray(allParts) ? allParts : []
   const wanted = page && Array.isArray(page.pieces) ? page.pieces.filter((x) => typeof x === "string" && x.trim()) : []
@@ -395,6 +407,11 @@ function leafForRegion(region, page, ctx) {
           parts: (ctx && ctx.parts) || [],
           partLabels,
           txParts: txData && txData.parts,
+          // Built once from the FULL parts list before any page narrowing -
+          // see withTranslatedPartIndex. Without it the flat translated array
+          // would be read by row position and pair each label with a
+          // stranger's value on every subset page.
+          txPartsById: ctx && ctx.txPartsById,
           labels: { spec: t.sp, detail: t.dt },
           compact: true,
           fill: !!region._fillRows,
@@ -474,7 +491,7 @@ function buildCompositionNode(ast, page, ctx, isRoot = false) {
 }
 
 export function interpretPagePlan(page, ctx) {
-  const safeCtx = ctx || {}
+  const safeCtx = withTranslatedPartIndex(ctx || {})
   const normalized = optimizePageComposition(normalizePlan({ pages: [page] }).pages[0], safeCtx, { width: CONTENT_W, height: workingHeight(safeCtx) })
   const grows = weightsToGrow(normalized.regions)
   // Piece-aware narrowing happens ONCE here, so both a direct interpretPagePlan
@@ -573,7 +590,9 @@ function measuredPartsCapacity(parts, pageCtx, width, height) {
   const lang = (pageCtx && pageCtx.lang) || "ES"
   const partLabels = garment && garment.partLabels ? garment.partLabels[lang] || garment.partLabels.ES || {} : {}
   const txParts = pageCtx && pageCtx.txData && pageCtx.txData.parts
-  return partsCapacityForHeight({ parts, partLabels, txParts, width: width || GRID.span(3) }, height)
+  // `parts` here is a page slice, so the value lookup has to go through the
+  // id index for the measured heights to match what actually gets rendered.
+  return partsCapacityForHeight({ parts, partLabels, txParts, txPartsById: pageCtx && pageCtx.txPartsById, width: width || GRID.span(3) }, height)
 }
 
 function partsContinuationPage(page, continuation) {
@@ -682,7 +701,10 @@ export function buildPlannedPages(plan, ctx, opts) {
   const H = PAGE_H
   const allParts = (ctx && ctx.parts) || []
 
-  const baseCtx = { ...(ctx || {}), documentMode }
+  // Indexed here, where `ctx.parts` is still the whole BOM - the per-page
+  // narrowing and the pagination slices below both reuse this same map, so a
+  // continuation page keeps each value with its own row too.
+  const baseCtx = { ...withTranslatedPartIndex(ctx || {}), documentMode }
   function resolvedTreeFor(page, pageCtx) {
     return solveLayout(interpretPagePlan(page, { ...baseCtx, ...(pageCtx || {}) }), { x: 0, y: 0, width: W, height: H })
   }

@@ -44,4 +44,38 @@ describe("width-aware BOM metrics", () => {
   it("measures only the pieces assigned to the page", () => {
     expect(effectiveParts(parts, { pieces: ["zip"] }).map((part) => part.id)).toEqual(["zip"])
   })
+
+  // The translated values arrive as ONE flat array covering the whole
+  // document (translate.js only ever sends/receives `val` strings, no ids),
+  // but a semantic page shows a SUBSET of the BOM. Reading that array by the
+  // row's position inside the page therefore pairs a page-specific label with
+  // whatever value happens to sit at that index of the FULL document - which
+  // is how a real Polo tech pack ended up printing "Marca: Morfe Studio" and
+  // "Botones: Polo manga corta". The label already resolves by part.id; the
+  // value has to resolve by part.id too.
+  it("keeps a translated value with its own part when the page shows a BOM subset", () => {
+    const allParts = [
+      { id: "body", val: "Nylon ripstop", on: true },
+      { id: "zip", val: "YKK Vislon #8", on: true },
+      { id: "cuff", val: "Puno elastico", on: true },
+    ]
+    const txPartsById = new Map([
+      ["body", "Ripstop nylon"],
+      ["zip", "YKK Vislon #8 slider"],
+      ["cuff", "Elastic cuff"],
+    ])
+    const [row] = partsRowMetrics({
+      parts: effectiveParts(allParts, { pieces: ["cuff"] }),
+      partLabels: { cuff: "Puno" },
+      txPartsById,
+      width: 414,
+    })
+    expect(row.name).toBe("Puno")
+    expect(row.value).toBe("Elastic cuff")
+  })
+
+  it("still accepts a positional translation array when the page shows the whole BOM", () => {
+    const rows = partsRowMetrics({ parts, partLabels: { body: "Shell", zip: "Cierre" }, txParts: ["Shell fabric", "Zipper"], width: 414 })
+    expect(rows.map((row) => row.value)).toEqual(["Shell fabric", "Zipper"])
+  })
 })
