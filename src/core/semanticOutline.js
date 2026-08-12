@@ -1,4 +1,5 @@
 import { hasColorData } from "./colorSpecs.js"
+import { hasSizeChartData } from "./sizeChart.js"
 
 // Each system is a family of related parts. Its title used to be a fixed
 // string sized for a technical parka - so a plain t-shirt whose only neck part
@@ -443,6 +444,14 @@ export function deterministicPageLayout(page, context = {}) {
   if (purpose.startsWith("data:")) {
     if (purpose === "data:colorways") {
       return { ...page, regions: [...chrome, { type: "colorSpecs" }, { type: "disclaimer" }] }
+    }
+    // Gated on real chart data (never on the purpose string alone) - a
+    // data:measurements page with no POMs filled in falls straight through
+    // to the generic partsList branch below, byte-identical to before this
+    // feature existed. See pageContracts.js's contractForPage for the same
+    // gate on the contract side.
+    if (purpose === "data:measurements" && hasSizeChartData(context && context.sizeChart)) {
+      return { ...page, regions: [...chrome, { type: "sizeChart" }, { type: "disclaimer" }] }
     }
     // The table is the protagonist here (size chart, QC checklist, factory
     // notes) - an illustration is included only when the section actually

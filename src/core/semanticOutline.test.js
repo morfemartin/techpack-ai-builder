@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { alpineParkaBenchmark } from "../layoutLab/benchmarkProject.js"
-import { auditSemanticCoverage, auditSinkOverflow, balancedChunks, buildSemanticDocumentPlan, buildSemanticOutline, classifyPartBucket, classifyPartSystem, partDisplayLabel, partitionPartsBySystem, withPartLabels } from "./semanticOutline.js"
+import { auditSemanticCoverage, auditSinkOverflow, balancedChunks, buildSemanticDocumentPlan, buildSemanticOutline, classifyPartBucket, classifyPartSystem, deterministicPageLayout, partDisplayLabel, partitionPartsBySystem, withPartLabels } from "./semanticOutline.js"
+import { newPom, newSizeChart } from "./sizeChart.js"
 
 const context = { ...alpineParkaBenchmark, garmentType: alpineParkaBenchmark.label }
 
@@ -239,5 +240,24 @@ describe("system titles name only the aspects a page actually contains", () => {
   it("keeps the stable Sistema NN production index", () => {
     const pages = partitionPartsBySystem([{ id: "cuello", label: "Cuello", val: "Redondo", on: true }])
     expect(pages.every((p) => /^Sistema \d\d · /.test(p.title))).toBe(true)
+  })
+})
+
+describe("deterministicPageLayout: data:measurements gated on real chart data", () => {
+  const page = { id: "medidas", title: "Medidas", purpose: "data:measurements" }
+  const chart = newSizeChart({ poms: [newPom({ label: "Medio pecho", values: { M: 54 } })] })
+
+  it("draws sizeChart once the chart actually has POMs", () => {
+    const layout = deterministicPageLayout(page, { sizeChart: chart })
+    expect(layout.regions.map((r) => r.type)).toContain("sizeChart")
+    expect(layout.regions.map((r) => r.type)).not.toContain("partsList")
+  })
+
+  it("falls through to the plain partsList branch with no chart - unchanged from before this feature", () => {
+    const noChart = deterministicPageLayout(page, { sizeChart: newSizeChart() })
+    const noCtx = deterministicPageLayout(page, {})
+    expect(noChart.regions.map((r) => r.type)).toContain("partsList")
+    expect(noChart.regions.map((r) => r.type)).not.toContain("sizeChart")
+    expect(noCtx.regions).toEqual(noChart.regions)
   })
 })

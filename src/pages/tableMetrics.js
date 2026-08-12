@@ -1,5 +1,7 @@
 import { wrapLines } from "../core/svgPrimitives.js"
 import { PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
+import { normalizeSizeChart } from "../core/sizeChart.js"
+import { parseMeasure, convertMeasure, formatMeasure, formatTolerance } from "../core/units.js"
 
 export function effectiveParts(parts, page) {
   const all = Array.isArray(parts) ? parts.filter((part) => part && part.on !== false) : []
@@ -90,6 +92,64 @@ export function partsTableMetrics(input) {
 
 export function partsCapacityForHeight(input, height) {
   const rows = partsRowMetrics(input)
+  let used = ROW.tableHeader
+  let count = 0
+  for (const row of rows) {
+    if (used + row.height > height) break
+    used += row.height
+    count++
+  }
+  return count
+}
+
+// One cell: the value converted to the output unit, or empty/pending markers
+// for the render pass to draw distinctly. `pending` covers an unfilled cell
+// AND any cell that isn't user-typed and isn't verified yet - "derived"
+// (arithmetic from a rule) and "suggested" (an AI-proposed base value) are
+// held to the exact same "never print a guess as if it were confirmed" bar.
+// See sizeChart.js's chartWarnings, which applies the same rule chart-wide.
+function sizeCell(pom, size, outUnit) {
+  const n = parseMeasure(pom.values[size])
+  if (n === null) return { text: "", pending: true, empty: true }
+  const converted = convertMeasure(n, pom.unit, outUnit || pom.unit)
+  return { text: formatMeasure(converted, outUnit || pom.unit), pending: pom.source !== "user" && !pom.verified, empty: false }
+}
+
+// Fixed-width numeric columns (one per size, plus tolerance) - numbers do not
+// wrap, so there is nothing to measure there; only the label column is
+// content-aware. Feeds BOTH measure.js's height branch and buildPages.js's
+// renderSizeChart, same discipline as partsTableLayout above: one function,
+// so the measured height and the drawn height can never disagree.
+export function sizeChartTableLayout({ chart, outUnit, width } = {}) {
+  const safe = normalizeSizeChart(chart)
+  const w = Math.max(200, Number(width) || 300)
+  const numericCols = safe.sizes.length + 1 // + tolerance
+  const labelWidth = Math.max(60, w * 0.28)
+  const numericWidth = Math.max(28, (w - labelWidth) / numericCols)
+  const rows = safe.poms.map((pom) => {
+    const nameLines = wrapLines(pom.label || "", labelWidth - TEXT_PAD * 2, PRINT.minFont)
+    const lineCount = Math.max(nameLines.length, 1)
+    return {
+      pom,
+      nameLines,
+      cells: safe.sizes.map((size) => sizeCell(pom, size, outUnit)),
+      toleranceText: formatTolerance(pom.tolerance, outUnit || pom.unit),
+      height: Math.max(ROW.table, lineCount * TABLE.lineHeight + TABLE.verticalPadding),
+    }
+  })
+  return {
+    sizes: safe.sizes,
+    baseSize: safe.baseSize,
+    constants: safe.constants,
+    labelWidth,
+    numericWidth,
+    rows,
+    height: ROW.tableHeader + rows.reduce((sum, row) => sum + row.height, 0),
+  }
+}
+
+export function sizeChartCapacityForHeight(input, height) {
+  const rows = sizeChartTableLayout(input).rows
   let used = ROW.tableHeader
   let count = 0
   for (const row of rows) {

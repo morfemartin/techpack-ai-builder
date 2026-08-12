@@ -18,6 +18,7 @@ import {
   planPageLayout,
   withPlanningTimeout,
 } from "./documentPlan.js"
+import { newPom, newSizeChart } from "./sizeChart.js"
 
 const SECTIONS = [
   { id: "construction", title: "Construccion", purpose: "structure:shell-body", objective: "Definir ensamble", criteria: "Paneles y uniones", views: ["Frente"] },
@@ -40,6 +41,66 @@ describe("document plan AI wrappers", () => {
     const purposes = result.pages.map((page) => page.purpose)
     expect(purposes).toContain("data:colorways")
     expect(purposes.indexOf("data:colorways")).toBeLessThan(purposes.indexOf("design:Chest Logo"))
+  })
+
+  it("adds a dedicated size-chart page before artwork pages (fallback outline)", () => {
+    const chart = newSizeChart({ poms: [newPom({ label: "Medio pecho", values: { M: 54 } })] })
+    const result = fallbackDocumentOutline({
+      garmentType: "Polo",
+      parts: [{ id: "body", label: "Cuerpo", val: "Pique", on: true }],
+      designs: [{ name: "Chest Logo", colors: [{ name: "White", hex: "#FFFFFF" }] }],
+      sizeChart: chart,
+    })
+    const purposes = result.pages.map((page) => page.purpose)
+    expect(purposes).toContain("data:measurements")
+    expect(purposes.indexOf("data:measurements")).toBeLessThan(purposes.indexOf("design:Chest Logo"))
+  })
+
+  it("does not add a size-chart page when there is no size-chart data (no regression)", () => {
+    const result = fallbackDocumentOutline({
+      garmentType: "Polo",
+      parts: [{ id: "body", label: "Cuerpo", val: "Pique", on: true }],
+      designs: [],
+    })
+    expect(result.pages.map((page) => page.purpose)).not.toContain("data:measurements")
+  })
+
+  it("composeOutlineFromSections force-inserts data:measurements even when the model's own section list omitted it - the real bug: a filled size chart used to silently vanish from the AI-planned document because the outline-index prompt is never told a chart exists", () => {
+    const chart = newSizeChart({ poms: [newPom({ label: "Medio pecho", values: { M: 54 } })] })
+    const parts = [{ id: 1, label: "Cuerpo", val: "Pique", on: true }]
+    const result = composeOutlineFromSections(SECTIONS, [{ piece: "1", section: "construction" }], {
+      garmentType: "Polo",
+      parts,
+      designs: [],
+      sizeChart: chart,
+    })
+    const purposes = result.outline.pages.map((page) => page.purpose)
+    expect(purposes).toContain("data:measurements")
+  })
+
+  it("composeOutlineFromSections never duplicates data:measurements when the model's own section list already earned one", () => {
+    const chart = newSizeChart({ poms: [newPom({ label: "Medio pecho", values: { M: 54 } })] })
+    const parts = [{ id: 1, label: "Rango de talles", val: "XS a XXL, base M", on: true }]
+    const sections = [{ id: "measurements", title: "Medidas", purpose: "data:measurements", objective: "Definir tallaje", criteria: "Puntos de medida" }]
+    const result = composeOutlineFromSections(sections, [{ piece: "1", section: "measurements" }], {
+      garmentType: "Polo",
+      parts,
+      designs: [],
+      sizeChart: chart,
+    })
+    const measurementPages = result.outline.pages.filter((page) => page.purpose === "data:measurements")
+    expect(measurementPages).toHaveLength(1)
+    // The real one (with the piece assigned), not the empty forced one.
+    expect(measurementPages[0].pieces).toEqual(["1"])
+  })
+
+  it("does not force a data:measurements page onto composeOutlineFromSections when there is no size-chart data", () => {
+    const result = composeOutlineFromSections(SECTIONS, [{ piece: "1", section: "construction" }], {
+      garmentType: "Polo",
+      parts: [{ id: 1, label: "Cuerpo", val: "Pique", on: true }],
+      designs: [],
+    })
+    expect(result.outline.pages.map((page) => page.purpose)).not.toContain("data:measurements")
   })
 
   it("bounds stalled planning calls so the caller can use its fallback", async () => {
@@ -219,6 +280,16 @@ describe("document plan AI wrappers", () => {
     expect(events.batches).toEqual([{ index: 1, total: 1, size: 2 }])
     expect(events.proposal.assignments).toHaveLength(2)
     expect(outline.pages.filter((page) => page.pieces).flatMap((page) => page.pieces).sort()).toEqual(["1", "2"])
+  })
+
+  it("threads sizeChart through planDocumentOutline into the final document, even when the model's own section list never mentions measurements", async () => {
+    const chart = newSizeChart({ poms: [newPom({ label: "Medio pecho", values: { M: 54 } })] })
+    const parts = [{ id: 1, label: "Tela", val: "Pique", on: true }]
+    deepseekChat
+      .mockResolvedValueOnce(JSON.stringify({ sections: SECTIONS })) // no data:measurements section proposed
+      .mockResolvedValueOnce(JSON.stringify({ asignaciones: [{ pieza: "1", seccion: "materials" }] }))
+    const outline = await planDocumentOutline({ garmentType: "Polo", parts, designs: [], sizeChart: chart })
+    expect(outline.pages.map((page) => page.purpose)).toContain("data:measurements")
   })
 
   it("reports a degraded document when any planning stage uses its contract", async () => {

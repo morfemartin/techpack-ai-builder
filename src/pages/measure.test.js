@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import { measureRegion, pageColors, paginateDocumentIndexEntries, selectedDesign } from "./measure.js"
 import { ROW } from "../design/metrics.js"
+import { newPom, newSizeChart } from "../core/sizeChart.js"
+import { sizeChartTableLayout } from "./tableMetrics.js"
 
 // Contract for the measure registry used by Layout Engine v3:
 //
@@ -63,6 +65,36 @@ describe("measureRegion", () => {
     // head = 32; the sequence adds its separator, heading, screen-reference
     // notice and one stop row.
     expect(m.natural).toBe(32 + (14 + 3 + 1) * ROW.emb)
+  })
+
+  it("sizeChart: matches sizeChartTableLayout exactly - the hard rule this file is named for", () => {
+    const chart = newSizeChart({
+      poms: [
+        newPom({ label: "Medio pecho", unit: "cm", tolerance: 1, values: { XS: 48, S: 51, M: 54, L: 57, XL: 60, XXL: 63 } }),
+        newPom({ label: "Largo de cuerpo", unit: "cm", tolerance: 1, values: { XS: 68, S: 70, M: 72, L: 74, XL: 76, XXL: 78 } }),
+      ],
+    })
+    const m = measureRegion({ type: "sizeChart" }, page, { ...ctx, sizeChart: chart }, 400)
+    const layout = sizeChartTableLayout({ chart, width: 400 })
+    expect(m.natural).toBe(layout.height)
+    expect(m.canAbsorb).toBe(false)
+  })
+
+  it("sizeChart: reserves one extra row per constant caption line and one for the pending banner", () => {
+    const chart = newSizeChart({
+      poms: [newPom({ label: "Medio pecho", unit: "cm", source: "derived", verified: false, values: { XS: 48, S: 51, M: 54, L: 57, XL: 60, XXL: 63 } })],
+      constants: [{ label: "Altura del cuello", value: 3.5, unit: "cm" }],
+    })
+    const m = measureRegion({ type: "sizeChart" }, page, { ...ctx, sizeChart: chart }, 400)
+    const layout = sizeChartTableLayout({ chart, width: 400 })
+    // constants: 1 caption-header row + 1 per constant (here 1) = 2 rows.
+    // pending: this whole chart is derived-unverified, so +1 banner row.
+    expect(m.natural).toBe(layout.height + (2 + 1) * ROW.table)
+  })
+
+  it("sizeChart with no POMs measures to zero (nothing will render)", () => {
+    expect(measureRegion({ type: "sizeChart" }, page, { ...ctx, sizeChart: newSizeChart() }, 400).natural).toBe(0)
+    expect(measureRegion({ type: "sizeChart" }, page, ctx, 400).natural).toBe(0)
   })
 
   it("embSpecs with no emb data measures to zero (nothing will render)", () => {

@@ -7,6 +7,7 @@ import { HYBRID_TASKS } from "./hybridTasks.js"
 import { hasEmbSpecs } from "./helpers.js"
 import { LANGUAGE_NAMES } from "./languageConfig.js"
 import { hasColorData } from "./colorSpecs.js"
+import { hasSizeChartData } from "./sizeChart.js"
 
 const ESTIMATED_PAGE_EVENT_BUDGET = 40
 const REMOTE_PLANNING_TIMEOUT_MS = 45000
@@ -47,17 +48,40 @@ function fabricColorPage(context) {
   } : null
 }
 
-function fallbackOutline({ garmentType, parts, designs, fabricColors }) {
+// Mirrors fabricColorPage exactly, same reasoning: the size-chart page is
+// never a matter of the model's judgment - it exists precisely when
+// hasSizeChartData(sizeChart) is true, full stop. See sizeChart.js's own
+// header comment for why a wrong number here is worse than most mistakes;
+// the page it belongs on cannot be optional along with everything else.
+function measurementsPage(context) {
+  return hasSizeChartData(context && context.sizeChart) ? {
+    id: "data-measurements",
+    title: "Medidas y tolerancias",
+    purpose: "data:measurements",
+    objective: "Publicar la tabla de medidas por talla con tolerancias para control de calidad.",
+    criteria: "Cada punto de medida conserva su valor por talla, su tolerancia y su estado de verificacion.",
+    // Deliberately no `pieces` key (unlike fabricColorPage's `pieces: []`) -
+    // a data:measurements page (unlike data:colorways) IS a legitimate BOM-
+    // family page when the model itself routes real parts there (see
+    // pageContracts.js's isBomFamilyPage), so an empty `pieces` array here
+    // would read as "a structural page covering zero parts" and get dropped
+    // by repairOutline's empty/duplicate-page cleanup. Omitting the key
+    // entirely reads as unrestricted, same as a page that was never given a
+    // pieces list to begin with.
+  } : null
+}
+
+function fallbackOutline({ garmentType, parts, designs, fabricColors, sizeChart }) {
   // Page capacity is a layout concern. Keep one descriptor per production
   // objective here; buildPlannedPages measures the translated rows and adds
   // continuations only when the selected composition genuinely runs out of
   // room. Splitting every eight fields at outline time was the source of
   // documents with 20+ sparse pages.
   const outline = buildSemanticOutline({ garmentType, parts, designs, maxPartsPerPage: Number.POSITIVE_INFINITY })
-  const page = fabricColorPage({ fabricColors })
-  if (page) {
+  const extraPages = [fabricColorPage({ fabricColors }), measurementsPage({ sizeChart })].filter(Boolean)
+  if (extraPages.length > 0) {
     const designIndex = outline.pages.findIndex((item) => String(item.purpose || "").startsWith("design:"))
-    outline.pages.splice(designIndex < 0 ? outline.pages.length : designIndex, 0, page)
+    outline.pages.splice(designIndex < 0 ? outline.pages.length : designIndex, 0, ...extraPages)
   }
   return outline
 }
@@ -278,6 +302,15 @@ export function composeOutlineFromSections(sectionsInput, assignmentsInput, cont
     .filter((page) => typeof page.purpose === "string" && page.purpose.startsWith("design:"))
   const colorPage = fabricColorPage(context)
   if (colorPage) pages.push(colorPage)
+  // Guarded (unlike colorPage above) against the case where the model's OWN
+  // section list already earned a data:measurements page with real pieces
+  // assigned to it - forcing an empty duplicate on top of that would be
+  // exactly the double-printed-data bug this whole force-injection exists to
+  // prevent, just from the other direction.
+  if (!pages.some((page) => page.purpose === "data:measurements")) {
+    const sizePage = measurementsPage(context)
+    if (sizePage) pages.push(sizePage)
+  }
   pages.push(...designOnly)
   return { outline: { pages }, changes }
 }
@@ -428,8 +461,17 @@ export async function assignPartsToSections(sections, context, { onStatus, onBat
   return { assignments, results }
 }
 
-export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES" }, { onProposal, onStatus, onSections, onBatch, signal, providers } = {}) {
-  const context = { garmentType, parts, designs, brief, lang, providers }
+export async function planDocumentOutline({ garmentType, parts, designs, brief, lang = "ES", fabricColors, sizeChart }, { onProposal, onStatus, onSections, onBatch, signal, providers } = {}) {
+  // fabricColors/sizeChart never reach the section-index or piece-assignment
+  // AI calls (promptSafeParts/promptSafeDesigns already strip anything the
+  // planner doesn't reason about) - they only matter to composeOutlineFromSections
+  // below, which force-inserts a data:colorways/data:measurements page
+  // whenever real data exists, REGARDLESS of whether the model's own section
+  // list happened to include one. Without threading them into this context,
+  // that force-insertion silently no-ops (context.fabricColors/.sizeChart
+  // read as undefined) and a size chart the user filled in can vanish from
+  // the AI-planned document even though hasSizeChartData(sizeChart) is true.
+  const context = { garmentType, parts, designs, brief, lang, providers, fabricColors, sizeChart }
   const sectionResult = await planDocumentSections(context, { onStatus, signal, providers })
   if (typeof onSections === "function") onSections(sectionResult.sections)
   const assignmentResult = await assignPartsToSections(sectionResult.sections, context, { onStatus, onBatch, signal, providers })

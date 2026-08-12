@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { CONTRACTS, layoutPolicyFor, normalizePriority, purposeFamily, validatePage, repairPage, validateOutline, repairOutline } from "./pageContracts.js"
+import { newPom, newSizeChart } from "../core/sizeChart.js"
 
 // Contract for the page-contract system used by Layout Engine v3:
 // deterministic encoding of how a tech-pack designer thinks - what MUST be
@@ -336,5 +337,35 @@ describe("design data stays on the design's own page", () => {
     const repaired = repairPage({ id: "d", title: "Chest Logo", purpose: "design:Chest Logo", regions: [...chrome, { type: "colorSpecs", weight: 6 }, { type: "embSpecs", weight: 6 }, { type: "illustration", weight: 40 }, disclaimer] }, ctx).page
     const types = repaired.regions.map((r) => r.type)
     expect(types).toEqual(expect.arrayContaining(["colorSpecs", "embSpecs"]))
+  })
+})
+
+describe("data:measurements page contract - gated on real chart data", () => {
+  const chart = newSizeChart({ poms: [newPom({ label: "Medio pecho", values: { M: 54 } })] })
+  const emptyChart = newSizeChart()
+
+  it("mandates sizeChart only when ctx.sizeChart actually has POMs", () => {
+    const withChart = layoutPolicyFor({ purpose: "data:measurements" }, { sizeChart: chart })
+    expect(withChart.mandatory).toContain("sizeChart")
+    expect(withChart.mandatory).not.toContain("partsList")
+  })
+
+  it("falls through to the plain data-family contract with no chart - byte-identical to before this feature existed", () => {
+    const noChart = layoutPolicyFor({ purpose: "data:measurements" }, { sizeChart: emptyChart })
+    const noCtxAtAll = layoutPolicyFor({ purpose: "data:measurements" })
+    expect(noChart).toEqual(CONTRACTS.data)
+    expect(noCtxAtAll).toEqual(CONTRACTS.data)
+  })
+
+  it("repairPage inserts the missing sizeChart region when the AI's plan omitted it", () => {
+    const page = { id: "medidas", title: "Medidas", purpose: "data:measurements", regions: [{ type: "header" }, { type: "titleBar" }, { type: "disclaimer" }] }
+    const repaired = repairPage(page, { sizeChart: chart }).page
+    expect(repaired.regions.map((r) => r.type)).toContain("sizeChart")
+  })
+
+  it("validatePage reports missing-mandatory for a data:measurements page with a chart but no sizeChart region", () => {
+    const page = { id: "medidas", title: "Medidas", purpose: "data:measurements", regions: [{ type: "header" }, { type: "titleBar" }, { type: "partsList" }, { type: "disclaimer" }] }
+    const errors = validatePage(page, { sizeChart: chart })
+    expect(errors).toContainEqual({ code: "missing-mandatory", type: "sizeChart" })
   })
 })

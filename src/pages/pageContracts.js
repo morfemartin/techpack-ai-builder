@@ -25,6 +25,7 @@ import { pageColors, selectedDesign } from "./measure.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { hasColorData } from "../core/colorSpecs.js"
 import { partitionPartsBySystem } from "../core/semanticOutline.js"
+import { hasSizeChartData } from "../core/sizeChart.js"
 
 export const CONTRACTS = {
   index: {
@@ -110,17 +111,32 @@ export function purposeFamily(purpose) {
   return CONTRACTS[p] && p !== "design" && p !== "data" ? p : "structure"
 }
 
-export function layoutPolicyFor(page) {
-  return contractForPage(page)
+export function layoutPolicyFor(page, ctx) {
+  return contractForPage(page, ctx)
 }
 
-function contractForPage(page) {
+// The `ctx.sizeChart` gate is the whole regression guarantee: a document
+// with no chart data never takes this branch, so `data:measurements` falls
+// through to the plain `data` family contract exactly as it always has -
+// mandatory partsList, no sizeChart mention anywhere. Only once the user has
+// actually filled in POM rows does this page's contract change shape.
+function contractForPage(page, ctx) {
   if (page && page.purpose === "data:colorways") {
     return {
       mandatory: ["header", "titleBar", "colorSpecs", "disclaimer"],
       forbidden: ["illustration", "partsList", "embSpecs"],
       priorityRank: { colorSpecs: 3 },
       illustrationShare: { min: 0, max: 0 },
+      minIllustrationHeight: 0,
+      dataSide: "left",
+    }
+  }
+  if (page && page.purpose === "data:measurements" && hasSizeChartData(ctx && ctx.sizeChart)) {
+    return {
+      mandatory: ["header", "titleBar", "sizeChart", "disclaimer"],
+      forbidden: ["colorSpecs", "embSpecs"],
+      priorityRank: { sizeChart: 3, illustration: 2, note: 1 },
+      illustrationShare: { min: 0, max: 0.45 },
       minIllustrationHeight: 0,
       dataSide: "left",
     }
@@ -182,7 +198,7 @@ function conditionalMandatory(page, ctx, family) {
 export function validatePage(page, ctx) {
   const errors = []
   const family = purposeFamily(page && page.purpose)
-  const contract = contractForPage(page)
+  const contract = contractForPage(page, ctx)
 
   const leaves = flattenRegions(page && page.regions)
   const typeCounts = new Map()
@@ -223,7 +239,7 @@ export function validatePage(page, ctx) {
 export function repairPage(page, ctx) {
   const repairs = []
   const family = purposeFamily(page && page.purpose)
-  const contract = contractForPage(page)
+  const contract = contractForPage(page, ctx)
   const renderDesign = selectedDesign(page, ctx)
   const condDesign = pageDesign(page, ctx)
 
@@ -282,6 +298,7 @@ export function repairPage(page, ctx) {
     titleBar: { type: "titleBar", weight: 5 },
     disclaimer: { type: "disclaimer", weight: 8 },
     partsList: { type: "partsList", weight: 30 },
+    sizeChart: { type: "sizeChart", weight: 60 },
     colorSpecs: { type: "colorSpecs", weight: 25 },
     embSpecs: { type: "embSpecs", weight: 25 },
     documentIndex: { type: "documentIndex", weight: 80 },

@@ -164,6 +164,14 @@ export const UI = {
     productionDetailsLayer: "Detalles de produccion",
     forTheTechPack: "Para la ficha",
     back: "Volver",
+    sizeChartHelp: "Cargá la talla base de cada medida; el documento solo muestra una página de tabla de medidas una vez que hay al menos una cargada. Este paso es opcional.",
+    applyToDocument: "Aplicar al documento",
+    applyingChanges: "Aplicando...",
+    documentUpdated: "Documento actualizado.",
+    viewInPreview: "Ver en Vista Previa",
+    unappliedChanges: "Cambios sin aplicar — tocá \"Aplicar al documento\" para actualizarlo (va a replanificar con IA).",
+    sizeChartNotPrintedYet: "En este flujo (prenda registrada) la tabla de medidas todavía no se imprime en la ficha final - falta cablearla en el generador clásico. Los datos se guardan igual, no se pierden.",
+    localPreviewTitle: "Vista previa (sin llamar a la IA)",
   },
   EN: {
     garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same. If you already have the data collected in a CSV or a document (Markdown/plain text), upload it below: the chat starts right from that and only asks about what's genuinely missing.",
@@ -315,6 +323,14 @@ export const UI = {
     productionDetailsLayer: "Production details",
     forTheTechPack: "For the tech pack",
     back: "Back",
+    sizeChartHelp: "Fill in the base size for each measurement; the document only shows a size chart page once at least one is filled in. This step is optional.",
+    applyToDocument: "Apply to document",
+    applyingChanges: "Applying...",
+    documentUpdated: "Document updated.",
+    viewInPreview: "View in Preview",
+    unappliedChanges: "Unapplied changes — tap \"Apply to document\" to update it (this will replan with AI).",
+    sizeChartNotPrintedYet: "In this flow (registered garment) the size chart is not printed in the final tech pack yet - it still needs wiring in the classic generator. The data is saved either way, nothing is lost.",
+    localPreviewTitle: "Local preview (no AI call)",
   },
 }
 
@@ -322,7 +338,7 @@ export const UI = {
 // positions live in src/garments/*.js instead, since they differ by garment.
 export const T = {
   ES: {
-    steps: ["Prenda", "Idiomas", "Header", "Piezas", "Disenos", "Vista Previa"],
+    steps: ["Prenda", "Idiomas", "Header", "Piezas", "Disenos", "Vista Previa", "Tallaje"],
     garmentStep: "Selecciona el tipo de prenda para esta ficha tecnica:",
     langStep: "Idioma o idiomas para la fabrica:",
     brand: "Marca", season: "Temporada", sno: "Codigo", cat: "Categoria", fab: "Tela", fac: "Fabrica",
@@ -336,6 +352,7 @@ export const T = {
     pageDesign: "Diseno",
     disc: "Todos los disenos son de derecho de autor exclusivo de", discSfx: ". Todos los derechos reservados.",
     embTitle: "Ficha Tecnica de Bordado",
+    sizeChartTitle: "Tabla de Medidas",
     posDetail: "Posicion Detallada", wDes: "Ancho diseno (mm)", hDes: "Alto diseno (mm)",
     noApplica: "Diseno cubre toda la prenda - medidas no aplican",
     fileName: "Nombre del Archivo", driveLink: "Enlace Drive",
@@ -343,7 +360,7 @@ export const T = {
     factory: "Fabrica", reference: "Referencia grafica disponible - NO A ESCALA", pending: "PENDIENTE DE CONFIRMAR",
   },
   EN: {
-    steps: ["Garment", "Languages", "Header", "Parts", "Designs", "Preview"],
+    steps: ["Garment", "Languages", "Header", "Parts", "Designs", "Preview", "Sizing"],
     garmentStep: "Select the garment type for this tech pack:",
     langStep: "Language or languages for the factory:",
     brand: "Brand", season: "Season", sno: "Style No", cat: "Category", fab: "Fabric", fac: "Factory",
@@ -357,6 +374,7 @@ export const T = {
     pageDesign: "Design",
     disc: "All designs are the exclusive copyright of", discSfx: ". All rights reserved.",
     embTitle: "Embroidery Tech Sheet",
+    sizeChartTitle: "Size Chart",
     posDetail: "Detailed Position", wDes: "Design Width (mm)", hDes: "Design Height (mm)",
     noApplica: "Design covers entire garment - dimensions N/A",
     fileName: "File Name", driveLink: "Drive Link",
@@ -364,7 +382,7 @@ export const T = {
     factory: "Factory", reference: "Graphic reference available - NOT TO SCALE", pending: "PENDING CONFIRMATION",
   },
   ZH: {
-    steps: ["服装类型", "语言", "标题", "零件", "设计", "预览"],
+    steps: ["服装类型", "语言", "标题", "零件", "设计", "预览", "尺码表"],
     garmentStep: "选择此工艺单对应的服装类型:",
     langStep: "选择导出SVG的语言:",
     brand: "品牌", season: "季节", sno: "款号", cat: "类别", fab: "面料", fac: "工厂",
@@ -378,6 +396,7 @@ export const T = {
     pageDesign: "设计",
     disc: "本文件所有设计均为", discSfx: "的专有版权。保留所有权利。",
     embTitle: "绣花工艺单",
+    sizeChartTitle: "尺寸表",
     posDetail: "详细位置", wDes: "设计宽度(mm)", hDes: "设计高度(mm)",
     noApplica: "设计覆盖整件服装 - 尺寸不适用",
     fileName: "文件名", driveLink: "Drive 链接",

@@ -55,6 +55,20 @@ export function formatMeasure(value, unit) {
   return fixed.replace(/\.?0+$/, "") + u
 }
 
+// A size-chart tolerance band, e.g. "±0.5 cm" - always signed and spaced
+// (unlike formatMeasure's compact "80mm") because a tolerance is read as a
+// standalone spec next to a POM row, not as part of a running dimension.
+// Returns "" for a missing/zero tolerance rather than printing "±0" - a
+// factory reading "±0" would reasonably assume exact-cut is required, which
+// is a claim the app has no basis to make.
+export function formatTolerance(value, unit) {
+  const n = parseMeasure(value)
+  if (n === null || n === 0) return ""
+  const u = normalizeUnit(unit)
+  const fixed = Math.abs(n).toFixed(DECIMALS[u])
+  return "±" + fixed.replace(/\.?0+$/, "") + " " + u
+}
+
 // The one-line dimension label the tech pack prints. Returns "" when either
 // side is missing, so a half-filled design never emits "Ancho 80mm x Alto".
 export function formatDimensions(w, h, from, to = from) {

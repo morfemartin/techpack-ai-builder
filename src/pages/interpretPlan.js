@@ -18,15 +18,16 @@ import { toGrayscale } from "../core/colorUtils.js"
 import { hasColorData } from "../core/colorSpecs.js"
 import { documentIndexRows, measureRegion, pageColors, paginateDocumentIndexEntries, selectedDesign } from "./measure.js"
 import { normalizeSlotBriefs } from "./briefs.js"
-import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset } from "./buildPages.js"
+import { renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderReferenceAsset, renderSizeChart } from "./buildPages.js"
 import { optimizePageComposition } from "./composition.js"
-import { partsCapacityForHeight, translatedPartsById } from "./tableMetrics.js"
+import { partsCapacityForHeight, translatedPartsById, sizeChartCapacityForHeight } from "./tableMetrics.js"
+import { hasSizeChartData } from "../core/sizeChart.js"
 import { purposeFamily } from "./pageContracts.js"
 
 // The only LEAF region types the interpreter knows how to render. Anything else
 // the model invents is dropped by normalizePlan rather than risking a broken
 // page. `split` (below) is a COMPOSITE, handled separately: it is not a leaf.
-export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "references", "documentIndex", "note", "spacer", "disclaimer"]
+export const VOCAB = ["header", "titleBar", "illustration", "partsList", "colorSpecs", "embSpecs", "sizeChart", "references", "documentIndex", "note", "spacer", "disclaimer"]
 
 // Shared A4 print canvas, so a page reads the same regardless of which builder
 // made it. Hoisted here (not just local to buildPlannedPages) because the
@@ -419,6 +420,7 @@ function leafForRegion(region, page, ctx) {
         }))
       }
       if (region.type === "colorSpecs") return semanticGroup(region.type, renderColorSpecs(box, { colors: pageColors(page, ctx) }))
+      if (region.type === "sizeChart") return semanticGroup(region.type, renderSizeChart(box, { chart: ctx && ctx.sizeChart, outUnit: ctx && ctx.dimensionUnit, title: t.sizeChartTitle }))
       if (region.type === "embSpecs") return semanticGroup(region.type, renderEmbSpecs(box, { emb: design && design.emb, title: t.embTitle }))
       if (region.type === "references") return semanticGroup(region.type, renderReferenceAsset(box, { design }))
       if (region.type === "documentIndex") return semanticGroup(region.type, renderDocumentIndex(box, ctx && ctx.documentIndex))
@@ -620,6 +622,39 @@ function partsContinuationPage(page, continuation) {
   }
 }
 
+// Mirrors partsContinuationPage - a size chart is structurally the same
+// shape (one bounded table that may outgrow its page), simpler than the
+// color/emb combined splitter below since a size-chart page never shares its
+// page with a colorSpecs/embSpecs block (data:measurements pages carry one
+// or the other, never both). Deliberately does NOT force a default
+// illustration onto the continuation page (unlike partsContinuationPage) -
+// data:measurements pages are illustration-OPTIONAL by design
+// (DATA_SECTIONS), so a chart-only continuation page with no illustration is
+// the correct, contract-compliant shape, not a gap to paper over.
+function sizeChartContinuationPage(page, continuation) {
+  function keepVisualContext(regions) {
+    return (regions || []).flatMap((region) => {
+      if (region.type === "illustration") return [{ ...region }]
+      if (region.type !== "split") return []
+      return keepVisualContext(region.regions)
+    })
+  }
+  const artwork = keepVisualContext(page.regions)
+  return {
+    ...page,
+    id: page.id + "-cont-" + continuation,
+    title: (page.title || "") + " (cont.)",
+    purpose: page.purpose,
+    regions: [
+      { type: "header", weight: 8 },
+      { type: "titleBar", weight: 5 },
+      ...artwork,
+      { type: "sizeChart", weight: 60 },
+      { type: "disclaimer", weight: 8 },
+    ],
+  }
+}
+
 function colorCapacity(height) {
   return Math.max(0, Math.floor((height - 32) / 32))
 }
@@ -742,6 +777,52 @@ export function buildPlannedPages(plan, ctx, opts) {
       page = { ...page, regions }
     }
     const firstPass = resolvedTreeFor(page, baseCtx)
+
+    // Size-chart overflow: paginate POM ROWS, never split a size COLUMN
+    // across pages - a factory reading an L column that started on the
+    // previous page would cut an L to an XL's chest. Rows are the only unit
+    // that ever moves; every continuation page repeats every size column.
+    const sizeChartLeaf = findRegionLeaf(firstPass, "sizeChart")
+    const chart = baseCtx && baseCtx.sizeChart
+    if (sizeChartLeaf && hasSizeChartData(chart)) {
+      const capacityFor = (leaf) => Math.max(1, sizeChartCapacityForHeight({ chart, outUnit: baseCtx.dimensionUnit, width: leaf.width }, availableTableHeight(leaf)))
+      const firstCap = capacityFor(sizeChartLeaf)
+      if (chart.poms.length > firstCap) {
+        const continuationProbe = resolvedTreeFor(sizeChartContinuationPage(page, 1), baseCtx)
+        const continuationLeaf = findRegionLeaf(continuationProbe, "sizeChart")
+        const continuationCap = continuationLeaf ? capacityFor(continuationLeaf) : firstCap
+
+        // Same "smallest page count, evenly distributed" rule as the parts
+        // list below - a 20-POM chart reads 10/10, not a cramped 14/6.
+        let pageCount = 2
+        let firstChunkSize = 1
+        while (true) {
+          firstChunkSize = Math.min(firstCap, Math.ceil(chart.poms.length / pageCount))
+          const remaining = chart.poms.length - firstChunkSize
+          if (remaining <= (pageCount - 1) * continuationCap) break
+          pageCount++
+        }
+
+        const firstChunk = chart.poms.slice(0, firstChunkSize)
+        let rest = chart.poms.slice(firstChunkSize)
+        // Constants (non-graded measurements) and the pending-count banner
+        // print once, on whichever page carries the LAST row - not the
+        // first, and not every page, so the caption never repeats.
+        addDescriptor({ ...page, pieces: undefined }, { ...baseCtx, sizeChart: { ...chart, poms: firstChunk, constants: rest.length > 0 ? [] : chart.constants } }, i)
+
+        let contN = 1
+        while (rest.length > 0) {
+          const remainingPages = pageCount - contN
+          const chunkSize = Math.min(continuationCap, Math.ceil(rest.length / remainingPages))
+          const chunk = rest.slice(0, chunkSize)
+          rest = rest.slice(chunkSize)
+          addDescriptor(sizeChartContinuationPage(page, contN), { ...baseCtx, sizeChart: { ...chart, poms: chunk, constants: rest.length === 0 ? chart.constants : [] } }, i)
+          contN++
+        }
+        return
+      }
+    }
+
     const partsLeaf = findPartsListLeaf(firstPass)
     const effective = effectivePartsForPage(allParts, page)
 

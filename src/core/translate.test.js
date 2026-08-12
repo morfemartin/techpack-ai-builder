@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 vi.mock("./deepseekClient.js", () => ({ extractStructured: vi.fn() }))
 import { extractStructured } from "./deepseekClient.js"
 import { buildTranslationPayload, combineTranslations, translateContent, validTranslation } from "./translate.js"
+import { newPom, newSizeChart } from "./sizeChart.js"
 
 const hdr = { pname: "Chaqueta 20K" }
 const parts = [{ on: true, val: "Cierre YKK 5, largo 620mm" }]
@@ -35,7 +36,7 @@ describe("technical translation", () => {
     await translateContent(hdr, parts, designs, "EN")
     const call = extractStructured.mock.calls[0][0]
     const sent = JSON.parse(call.content)
-    expect(Object.keys(sent).sort()).toEqual(["designs", "fabricColors", "lexicon", "parts", "pname"])
+    expect(Object.keys(sent).sort()).toEqual(["designs", "fabricColors", "lexicon", "parts", "pname", "sizeChart"])
     expect(call.instructions).toContain("EXACTLY these top-level keys")
   })
 
@@ -99,5 +100,62 @@ describe("technical translation", () => {
     expect(combined.pname).toBe("ES: Chaqueta 20K / EN: 20K Jacket")
     expect(combined.parts).toHaveLength(1)
     expect(combined.languages).toEqual(["ES", "EN"])
+  })
+
+  describe("size chart translation - labels only, never the numbers", () => {
+    const chart = newSizeChart({
+      poms: [newPom({ label: "Medio pecho", howToMeasure: "2.5 cm bajo la axila", unit: "cm", tolerance: 1, values: { M: 54 } })],
+      constants: [{ label: "Altura del cuello", value: 3.5, unit: "cm" }],
+    })
+
+    // The safety property this whole feature exists for: a wrong POM number
+    // is a garment cut wrong, so the number must be structurally impossible
+    // to alter here - not merely "the model was told not to change it".
+    it("never puts a POM value, unit or tolerance in the translation payload", () => {
+      const source = buildTranslationPayload(hdr, parts, designs, "ES", [], chart)
+      const serialized = JSON.stringify(source.sizeChart)
+      expect(serialized).not.toContain("54")
+      expect(serialized).not.toContain("3.5")
+      // The exact-shape check is what actually proves it: only label/
+      // howToMeasure survive - unit, tolerance and values are structurally
+      // absent, not just empty. howToMeasure is free descriptive text and
+      // may legitimately mention "cm" ("2.5 cm bajo la axila") - that is not
+      // the stored, authoritative unit field.
+      expect(source.sizeChart).toEqual({ poms: [{ label: "Medio pecho", howToMeasure: "2.5 cm bajo la axila" }], constants: [{ label: "Altura del cuello" }] })
+    })
+
+    it("validates a translation that only changes the labels", () => {
+      const source = buildTranslationPayload(hdr, parts, designs, "ES", [], chart)
+      const translated = structuredClone(source)
+      translated.sizeChart.poms[0].label = "Half chest"
+      translated.sizeChart.poms[0].howToMeasure = "2.5 cm below the armhole"
+      translated.sizeChart.constants[0].label = "Neck height"
+      expect(validTranslation(source, translated)).toBe(true)
+    })
+
+    it("rejects a translation that drops or resizes the POM/constant arrays", () => {
+      const source = buildTranslationPayload(hdr, parts, designs, "ES", [], chart)
+      const droppedPom = structuredClone(source)
+      droppedPom.sizeChart.poms = []
+      expect(validTranslation(source, droppedPom)).toBe(false)
+      const droppedConstant = structuredClone(source)
+      droppedConstant.sizeChart.constants = []
+      expect(validTranslation(source, droppedConstant)).toBe(false)
+    })
+
+    it("combines sizeChart labels across languages the same way as every other field", () => {
+      const es = buildTranslationPayload(hdr, parts, designs, "ES", [], chart)
+      const en = structuredClone(es)
+      en.sizeChart.poms[0].label = "Half chest"
+      en.sizeChart.constants[0].label = "Neck height"
+      const combined = combineTranslations({ ES: es, EN: en }, ["ES", "EN"])
+      expect(combined.sizeChart.poms[0].label).toBe("ES: Medio pecho / EN: Half chest")
+      expect(combined.sizeChart.constants[0].label).toBe("ES: Altura del cuello / EN: Neck height")
+    })
+
+    it("defaults to an empty sizeChart when none is given - no regression for documents without one", () => {
+      const source = buildTranslationPayload(hdr, parts, designs)
+      expect(source.sizeChart).toEqual({ poms: [], constants: [] })
+    })
   })
 })

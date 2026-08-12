@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { buildPage1, formatEmbroideryStop, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList } from "./buildPages.js"
+import { buildPage1, formatEmbroideryStop, renderColorSpecs, renderEmbSpecs, renderIllustrationZone, renderPartsList, renderSizeChart } from "./buildPages.js"
+import { newPom, newSizeChart } from "../core/sizeChart.js"
 import { capGarment } from "../garments/cap.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
@@ -240,6 +241,54 @@ describe("reusable page block helpers", () => {
   it("prints the Madeira code, official name and descriptive color in each stop", () => {
     expect(formatEmbroideryStop({ stop: 2, code: "1055", name: "Latte", color: "Beige", stitches: 1800 }))
       .toBe("Stop 2: Madeira 1055 · Latte · Beige (1800 pt.)")
+  })
+
+  describe("renderSizeChart - the real Polo measurements", () => {
+    const chart = newSizeChart({
+      baseSize: "M",
+      poms: [
+        newPom({ label: "Medio pecho", unit: "cm", tolerance: 1, values: { XS: 48, S: 51, M: 54, L: 57, XL: 60, XXL: 63 } }),
+        newPom({ label: "Largo de cuerpo", unit: "cm", tolerance: 1, values: { XS: 68, S: 70, M: 72, L: 74, XL: 76, XXL: 78 } }),
+      ],
+      constants: [{ label: "Altura del cuello", value: 3.5, unit: "cm" }],
+    })
+
+    it("draws every size column, the base marked, and the tolerance", () => {
+      const svg = renderSizeChart({ x: 0, y: 0, width: 700, height: 300 }, { chart, title: "Tabla de Medidas" })
+      expect(svg).toContain("Tabla de Medidas")
+      expect(svg).toContain("Medio pecho")
+      expect(svg).toContain(">54cm<")
+      expect(svg).toContain(">M*<") // base size marked
+      expect(svg).toContain(">±1 cm<")
+    })
+
+    it("prints constants (non-graded measurements) below the matrix", () => {
+      const svg = renderSizeChart({ x: 0, y: 0, width: 700, height: 300 }, { chart })
+      expect(svg).toContain("Altura del cuello: 3.5cm")
+    })
+
+    it("marks an empty cell with the pending glyph instead of inventing a value", () => {
+      const sparse = newSizeChart({ poms: [newPom({ label: "Ancho hombros", unit: "cm", values: { M: 47 } })] })
+      const svg = renderSizeChart({ x: 0, y: 0, width: 700, height: 300 }, { chart: sparse })
+      expect(svg).toContain("⏳")
+      expect(svg).toContain("47cm")
+    })
+
+    it("marks a derived-unverified row's cells as pending even though every cell is filled", () => {
+      const derived = newSizeChart({ poms: [newPom({ label: "Medio pecho", unit: "cm", source: "derived", verified: false, values: { XS: 48, S: 51, M: 54, L: 57, XL: 60, XXL: 63 } })] })
+      const svg = renderSizeChart({ x: 0, y: 0, width: 700, height: 300 }, { chart: derived })
+      expect(svg).toContain("⏳ 54cm")
+    })
+
+    it("prints a one-line banner naming how many rows are still pending, not a per-cell hunt", () => {
+      const derived = newSizeChart({ poms: [newPom({ label: "Medio pecho", unit: "cm", source: "derived", verified: false, values: { XS: 48, S: 51, M: 54, L: 57, XL: 60, XXL: 63 } })] })
+      const svg = renderSizeChart({ x: 0, y: 0, width: 700, height: 300 }, { chart: derived })
+      expect(svg).toContain("1 medida pendiente de verificar")
+    })
+
+    it("returns nothing for an empty chart, rather than drawing a headerless table", () => {
+      expect(renderSizeChart({ x: 0, y: 0, width: 700, height: 300 }, { chart: newSizeChart() })).toBe("")
+    })
   })
 
   it("keeps factory facts outside the removable designer group", () => {

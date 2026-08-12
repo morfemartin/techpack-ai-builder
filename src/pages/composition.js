@@ -313,7 +313,7 @@ function summarize(candidate) {
 export function evaluatePageCompositions(page, ctx, dimensions = {}) {
   const width = Number(dimensions.width) || GRID.span(8)
   const height = Number(dimensions.height) || PAGE_BODY.height
-  const policy = layoutPolicyFor(page)
+  const policy = layoutPolicyFor(page, ctx)
   const regions = collectRegions(page, ctx)
   const illustration = regions.find((region) => region.type === "illustration")
   const data = regions.filter((region) => region.type !== "illustration" && !CHROME_TYPES.has(region.type))

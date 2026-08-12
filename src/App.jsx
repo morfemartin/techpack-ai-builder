@@ -12,8 +12,11 @@ import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/vision
 import { toGrayscale, hexToGray } from "./core/colorUtils.js"
 import { hasColorData, madeiraColorsToStops, normalizeFabricColor } from "./core/colorSpecs.js"
 import { newColorway, normalizeColorway, colorwaysFromFabricColors, renderColorwayDocument } from "./core/colorways.js"
+import { newSizeChart, normalizeSizeChart, hasSizeChartData, seedSizesFromParts } from "./core/sizeChart.js"
+import { SizeChartEditor } from "./components/SizeChartEditor.jsx"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
-import { buildAllPages } from "./pages/buildPages.js"
+import { buildAllPages, renderSizeChart } from "./pages/buildPages.js"
+import { sizeChartTableLayout } from "./pages/tableMetrics.js"
 import { buildPlannedPages } from "./pages/interpretPlan.js"
 import { repairPage } from "./pages/pageContracts.js"
 import { fallbackDocumentOutline, planDocumentOutline, planPageLayout, withPlanningTimeout } from "./core/documentPlan.js"
@@ -38,7 +41,7 @@ import { GRID, PAGE } from "./design/metrics.js"
 import { deterministicPageLayout, withPartLabels, auditSinkOverflow } from "./core/semanticOutline.js"
 
 // Material Symbols per wizard step (no emojis). Order matches T.*.steps.
-const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility"]
+const STEP_ICONS = ["checkroom", "translate", "badge", "widgets", "brush", "visibility", "straighten"]
 
 const C = palette
 const hair = `1px solid ${C.ink.hex}`
@@ -192,6 +195,41 @@ export default function App() {
       return [{ ...cws[0], fabricColors: nextColors }, ...cws.slice(1)]
     })
   }
+  // Empty by default (no POMs) - hasSizeChartData() is false, so every
+  // contract/layout gate this feature touches falls through to its
+  // pre-existing behavior until the user actually fills in a measurement.
+  const [sizeChart, setSizeChart] = useState(() => newSizeChart({}))
+  // The document only ever replans against THIS copy, not the live
+  // `sizeChart` the Tallaje step edits keystroke by keystroke - otherwise
+  // every character typed into a POM cell would trigger a full outline
+  // replan (real AI calls). Committed the moment the user LEAVES the
+  // Tallaje step (see the effect below) - by "Aplicar al documento", the
+  // Atras button, or even the stepper chip, all three just change `step`.
+  const [committedSizeChart, setCommittedSizeChart] = useState(() => newSizeChart({}))
+  // Leaving step 6 (Tallaje), by whatever path, commits the chart exactly
+  // once - keyed on `step` itself so it fires on the transition, not on
+  // every sizeChart edit while still on the step. Harmless when nothing
+  // changed: committedSizeChart already holds this value, so previewPlanKey
+  // does not change and no replan fires.
+  useEffect(() => {
+    if (step !== 6) setCommittedSizeChart(sizeChart)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step])
+  // Arriving at Tallaje: seed sizes/baseSize from whatever the user already
+  // answered ("Rango de talles" in the chat, or a registered garment's own
+  // "Tallas" part row). `parts` itself only carries {id, val, on} - the
+  // label lives separately in garment.partLabels, so it has to be joined in
+  // here (same pattern the render code already uses via `pn[p.id]`) before
+  // seedSizesFromParts has anything to match against. A safe no-op once the
+  // chart stops being pristine, so firing this on every arrival is fine.
+  useEffect(() => {
+    if (step === 6 && garment) {
+      const labels = (garment.partLabels && garment.partLabels.ES) || {}
+      const labeledParts = parts.map((p) => ({ label: p.customName || labels[p.id] || "", val: p.val }))
+      setSizeChart((chart) => seedSizesFromParts(chart, labeledParts))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step])
   const [designs, setDesigns] = useState(() => [
     Object.assign(newDesign(), { name: "Logo Frontal", pos: GARMENTS.cap.positions.ES[3] || GARMENTS.cap.positions.ES[0], posDetail: "Centrado", colors: [{ name: "PANTONE 286 C", hex: "#003DA5" }, { name: "PANTONE White", hex: "#FFFFFF" }] }),
   ])
@@ -558,7 +596,7 @@ export default function App() {
     setTranslating(true)
     setTranslationError(null)
     try {
-      var tx = await translateContent(hdr, parts, designs, lang, { sourceLang: sourceLanguage, fabricColors })
+      var tx = await translateContent(hdr, parts, designs, lang, { sourceLang: sourceLanguage, fabricColors, sizeChart })
       setTxCache((p) => Object.assign({}, p, { [lang]: tx }))
       return tx
     } catch (error) {
@@ -577,7 +615,7 @@ export default function App() {
     setTranslating(true)
     setTranslationError(null)
     try {
-      const tx = await translateContent(hdr, parts, designs, designerLanguage, { sourceLang: sourceLanguage, fabricColors })
+      const tx = await translateContent(hdr, parts, designs, designerLanguage, { sourceLang: sourceLanguage, fabricColors, sizeChart })
       setTxCache((current) => Object.assign({}, current, { [key]: tx }))
       return tx
     } catch (error) {
@@ -686,10 +724,10 @@ export default function App() {
       // ("180-220 GSM" instead of "Gramaje") - garment.partLabels holds the
       // name for a chat-built custom garment, but baseContext never carried
       // `garment` before, so nothing downstream could resolve it.
-      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, lang, sourceLanguage, designerLanguage }
+      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, sizeChart, lang, sourceLanguage, designerLanguage }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
-      var ctx = { lang, hdr, parts, designs, fabricColors, logo, txData: tx, designerTx, garment, dimensionUnit }
+      var ctx = { lang, hdr, parts, designs, fabricColors, sizeChart, logo, txData: tx, designerTx, garment, dimensionUnit }
       // Deliberately NOT publishing the rendered provisional plan here. It
       // looks exactly like a finished document, so the preview showed a
       // complete-looking tech pack while the AI had not started - the user
@@ -926,6 +964,7 @@ export default function App() {
       parts: applied.parts,
       designs: applied.designs,
       fabricColors,
+      sizeChart,
       lang: pending.lang,
     }
     const affected = new Set(applied.affectedPageIds)
@@ -957,6 +996,7 @@ export default function App() {
         parts: applied.parts,
         designs: applied.designs,
         fabricColors,
+        sizeChart,
         logo,
         txData: pending.tx,
         designerTx: pending.designerTx,
@@ -984,7 +1024,12 @@ export default function App() {
     }
   }
 
-  var previewPlanKey = step === 5 && garmentId === "custom" && customGarment
+  // Gated on step 5 OR 6 (Vista Previa / Tallaje) so moving to the Tallaje
+  // step never wipes the already-planned preview (see the effect below) -
+  // only actually leaving both steps should drop it. Note this reads
+  // `committedSizeChart`, NOT the live `sizeChart` the Tallaje step edits -
+  // a replan is a real AI cost, and nobody should pay it per keystroke.
+  var previewPlanKey = (step === 5 || step === 6) && garmentId === "custom" && customGarment
     ? JSON.stringify({
         lang: prevLang,
         sourceLanguage,
@@ -998,6 +1043,7 @@ export default function App() {
         // never re-trigger the live preview, since the preview key only
         // reacted to the base colorway.
         colorways,
+        sizeChart: committedSizeChart,
         designs: designs.map((d) => ({
           name: d.name,
           pos: d.pos,
@@ -1753,6 +1799,82 @@ export default function App() {
         </div>
       )
     }
+
+    if (step === 6) {
+      const pn = garment.partLabels.ES
+      const garmentTypeLabel = (garment.label && (garment.label.ES || Object.values(garment.label)[0])) || ""
+      // Same lookup for both flows: the custom-chat garment sets `parts`
+      // from its chat draft (handleGarmentChatComplete), a registered
+      // garment's parts table is `parts` directly - one scan covers both,
+      // same as seedSizesFromParts does on arrival at this step.
+      const generalFields = parts.filter((p) => p.on && p.val).map((p) => ({ label: p.customName || pn[p.id] || "Pieza", val: p.val }))
+      // The AI-planned document only ever replans against `committedSizeChart`
+      // (see previewPlanKey) - this flags when the live edit is ahead of what
+      // Vista Previa actually shows, and the cost of catching up (a real
+      // outline replan) rather than hiding it.
+      const hasUnappliedChanges = garmentId === "custom" && customGarment && JSON.stringify(sizeChart) !== JSON.stringify(committedSizeChart)
+      // A local, zero-AI preview of just the size-chart page(s) - the exact
+      // same pure renderSizeChart/sizeChartTableLayout the real document
+      // uses, so what you see here is not a mockup, it just isn't full-page
+      // paginated. Scaled the same way the Vista Previa page thumbnail is.
+      const previewBox = { x: GRID.margin, y: GRID.margin + 40, width: PAGE.width - GRID.margin * 2 }
+      const previewInner = hasSizeChartData(sizeChart) ? renderSizeChart(previewBox, { chart: sizeChart, outUnit: dimensionUnit, title: tl.sizeChartTitle }) : ""
+      const previewSvg = previewInner
+        ? "<svg viewBox='0 0 " + PAGE.width + " " + PAGE.height + "' xmlns='http://www.w3.org/2000/svg'><rect x='0' y='0' width='" + PAGE.width + "' height='" + PAGE.height + "' fill='" + C.white.hex + "'/>" + previewInner + "</svg>"
+        : ""
+      return (
+        <div>
+          <p style={{ marginBottom: space(3), fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, maxWidth: 560 }}>{ui.sizeChartHelp}</p>
+          {garmentId !== "custom" && (
+            <div style={{ marginBottom: space(3), display: "flex", alignItems: "flex-start", gap: space(2), padding: space(3), border: `1px dashed ${role.index.fill}`, background: C.white.hex, fontSize: type.size.xs, color: C.ink.hex }}>
+              <Icon name="info" size={16} color={role.index.fill} />
+              <span>{ui.sizeChartNotPrintedYet}</span>
+            </div>
+          )}
+          <SizeChartEditor chart={sizeChart} onChange={setSizeChart} garmentType={garmentTypeLabel || "prenda"} generalFields={generalFields} />
+          {previewSvg && (
+            <div style={{ marginTop: space(4) }}>
+              <div style={{ marginBottom: space(2), fontSize: type.size.xs, fontWeight: 700, color: C.ink.hex, textTransform: "uppercase" }}>{ui.localPreviewTitle}</div>
+              <div style={{ width: PAGE.width * 0.54, height: PAGE.height * 0.54, position: "relative" }}>
+                <div
+                  style={{ width: PAGE.width, height: PAGE.height, transformOrigin: "top left", transform: "scale(0.54)", background: C.white.hex, border: `1.5px solid ${C.ink.hex}`, overflow: "hidden" }}
+                  dangerouslySetInnerHTML={{ __html: previewSvg }}
+                />
+              </div>
+            </div>
+          )}
+          {garmentId === "custom" && customGarment && (
+            <div style={{ marginTop: space(4), display: "flex", alignItems: "center", gap: space(3), flexWrap: "wrap" }}>
+              <button
+                onClick={() => setCommittedSizeChart(sizeChart)}
+                disabled={documentPlanning}
+                style={{ ...primaryBtnStyle(!documentPlanning), cursor: documentPlanning ? "wait" : "pointer" }}
+              >
+                {documentPlanning ? ui.applyingChanges : ui.applyToDocument} <Icon name={documentPlanning ? "sync" : "arrow_forward"} size={18} color={C.white.hex} />
+              </button>
+              {documentPlanning && (
+                <span style={{ fontSize: type.size.xs, color: C.ink.hex, opacity: 0.7, display: "inline-flex", alignItems: "center", gap: space(1) }}>
+                  {documentPlanStatus || ui.structuringDocument}
+                </span>
+              )}
+              {!documentPlanning && !hasUnappliedChanges && plannedPreviewPages && plannedPreviewKey === previewPlanKey && (
+                <span style={{ fontSize: type.size.xs, color: "#2a7a2a", display: "inline-flex", alignItems: "center", gap: space(2) }}>
+                  <Icon name="check_circle" size={16} color="#2a7a2a" /> {ui.documentUpdated}
+                  <button onClick={() => setStep(5)} style={{ background: "none", border: "none", color: role.priority.fill, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: type.fonts.ui, fontSize: type.size.xs, textDecoration: "underline" }}>
+                    {ui.viewInPreview}
+                  </button>
+                </span>
+              )}
+              {hasUnappliedChanges && (
+                <span style={{ fontSize: type.size.xs, color: role.index.fill, display: "inline-flex", alignItems: "center", gap: space(1) }}>
+                  <Icon name="warning" size={14} color={role.index.fill} /> {ui.unappliedChanges}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    }
   }
 
   return (
@@ -1850,14 +1972,16 @@ export default function App() {
           <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...secondaryBtnStyle, opacity: step === 0 ? 0.4 : 1, cursor: step === 0 ? "not-allowed" : "pointer" }}>
             <Icon name="arrow_back" size={18} /> {tl.bk}
           </button>
-          {step < 5 ? (
+          {step < 6 ? (
             <button onClick={() => { if (canNext()) setStep((s) => s + 1) }} disabled={!canNext()} style={primaryBtnStyle(canNext())}>
               {step === 4 ? tl.gen : tl.nxt} <Icon name="arrow_forward" size={18} color={canNext() ? C.white.hex : "#9AA0AB"} />
             </button>
           ) : (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: space(2), fontSize: type.size.sm, color: C.ink.hex, opacity: 0.7, alignSelf: "center" }}>
-              <Icon name="bolt" size={18} /> {ui.generateHint}
-            </span>
+            // Tallaje (the new last step) puts its own primary action
+            // ("Aplicar al documento") inline in the step content, next to
+            // the chart it applies - repeating it here would be a second,
+            // redundant button for the same action.
+            <span />
           )}
         </div>
       </div>

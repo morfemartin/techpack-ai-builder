@@ -33,7 +33,22 @@ function colorPayload(color) {
   }
 }
 
-export function buildTranslationPayload(hdr, parts, designs, sourceLang = "ES", fabricColors = []) {
+// Labels only - NEVER a POM's values, tolerance or unit. A translation
+// round-trip corrupting a size number is not a cosmetic bug, it is a
+// garment cut wrong; keeping the numbers physically out of this payload
+// means they cannot be corrupted here even if the model or the network
+// misbehaves - there is nothing to corrupt.
+function sizeChartPayload(chart) {
+  const safe = chart && typeof chart === "object" ? chart : {}
+  const poms = Array.isArray(safe.poms) ? safe.poms : []
+  const constants = Array.isArray(safe.constants) ? safe.constants : []
+  return {
+    poms: poms.map((pom) => ({ label: String((pom && pom.label) || ""), howToMeasure: String((pom && pom.howToMeasure) || "") })),
+    constants: constants.map((c) => ({ label: String((c && c.label) || "") })),
+  }
+}
+
+export function buildTranslationPayload(hdr, parts, designs, sourceLang = "ES", fabricColors = [], sizeChart = null) {
   return {
     pname: (hdr && hdr.pname) || "",
     parts: (parts || []).filter((part) => part && part.on !== false).map((part) => String(part.val || "")),
@@ -46,8 +61,18 @@ export function buildTranslationPayload(hdr, parts, designs, sourceLang = "ES", 
       colors: Array.isArray(design && design.colors) ? design.colors.map(colorPayload) : [],
     })),
     fabricColors: Array.isArray(fabricColors) ? fabricColors.map(colorPayload) : [],
+    sizeChart: sizeChartPayload(sizeChart),
     lexicon: T[sourceLang] || T.ES,
   }
+}
+
+function validSizeChartTranslation(source, translated) {
+  if (!translated || typeof translated !== "object" || !sameKeys(source, translated)) return false
+  if (!Array.isArray(translated.poms) || translated.poms.length !== source.poms.length) return false
+  if (!Array.isArray(translated.constants) || translated.constants.length !== source.constants.length) return false
+  if (translated.poms.some((pom, i) => !pom || typeof pom !== "object" || !sameKeys(source.poms[i], pom) || typeof pom.label !== "string" || typeof pom.howToMeasure !== "string")) return false
+  if (translated.constants.some((c, i) => !c || typeof c !== "object" || !sameKeys(source.constants[i], c) || typeof c.label !== "string")) return false
+  return true
 }
 
 export function validTranslation(source, translated) {
@@ -72,6 +97,7 @@ export function validTranslation(source, translated) {
       design.colors.some((color, colorIndex) => !validColorTranslation(sourceDesign.colors[colorIndex], color))
   })) return false
   if (translated.fabricColors.some((color, index) => !validColorTranslation(source.fabricColors[index], color))) return false
+  if (!validSizeChartTranslation(source.sizeChart, translated.sizeChart)) return false
   return sameTokens(source, translated)
 }
 
@@ -101,6 +127,15 @@ export function combineTranslations(translations, languages) {
       ...color,
       name: combineValue(translations, selected, (translation) => translation.fabricColors[index].name),
     })),
+    sizeChart: {
+      poms: first.sizeChart.poms.map((_, index) => ({
+        label: combineValue(translations, selected, (translation) => translation.sizeChart.poms[index].label),
+        howToMeasure: combineValue(translations, selected, (translation) => translation.sizeChart.poms[index].howToMeasure),
+      })),
+      constants: first.sizeChart.constants.map((_, index) => ({
+        label: combineValue(translations, selected, (translation) => translation.sizeChart.constants[index].label),
+      })),
+    },
     lexicon: Object.fromEntries(Object.keys(first.lexicon).map((key) => {
       const value = first.lexicon[key]
       if (Array.isArray(value)) {
@@ -116,7 +151,7 @@ export function combineTranslations(translations, languages) {
 
 export async function translateContent(hdr, parts, designs, targetLang, options = {}) {
   const sourceLang = options.sourceLang || "ES"
-  const source = buildTranslationPayload(hdr, parts, designs, sourceLang, options.fabricColors)
+  const source = buildTranslationPayload(hdr, parts, designs, sourceLang, options.fabricColors, options.sizeChart)
   if (targetLang === sourceLang) return source
 
   const targetName = LANGUAGE_NAMES[targetLang]
@@ -147,14 +182,26 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
       const result = await extractStructured({
         instructions:
           "Translate a garment technical document from " + sourceName + " to " + targetName + ". " +
-          "Respond with a JSON object containing EXACTLY these top-level keys, translated: pname, parts, designs, fabricColors, lexicon. " +
+          "Respond with a JSON object containing EXACTLY these top-level keys, translated: pname, parts, designs, fabricColors, sizeChart, lexicon. " +
           "Do not wrap your answer in any other key (no 'source', no 'translation', no 'documentToTranslate') - your entire response IS that object, at the top level. " +
           (showPrevious
             ? "The input below has two keys: documentToTranslate (translate this one) and invalidPreviousAttempt (a rejected prior answer, shown so you can avoid its mistake - keep every key and array item, and preserve every number, unit, code, Pantone/Madeira reference, DIM/D/V identifier and hexadecimal value exactly). "
             : "") +
           "Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
         content: JSON.stringify(envelope),
-        maxTokens: 4200,
+        // Was 4200. sizeChart added a 6th top-level key the model has to
+        // reproduce in full (every POM's label + howToMeasure, every
+        // constant) on top of everything already being translated - a
+        // document with a real size chart (up to 12 POMs) plus several
+        // pieces/designs can now legitimately exceed 4200 output tokens.
+        // extractStructured's repairTruncatedJSON salvages a cut-off
+        // response by DROPPING whatever array item was mid-write, so a
+        // truncated answer correctly fails validSizeChartTranslation's
+        // length check (fewer poms than the source) - not a validator bug,
+        // just not enough room to finish. Raised with margin rather than
+        // tuned to the observed failure, since a bigger document (more
+        // parts, more designs) hits the same ceiling.
+        maxTokens: 6400,
       })
       if (validTranslation(source, result)) return result
       previous = result

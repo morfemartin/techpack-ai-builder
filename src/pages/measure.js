@@ -23,7 +23,8 @@ import { CHROME, GRID, PRINT, ROW, snapBaseline } from "../design/metrics.js"
 import { headerHeight, wrapLines } from "../core/svgPrimitives.js"
 import { hasEmbSpecs } from "../core/helpers.js"
 import { hasColorData } from "../core/colorSpecs.js"
-import { effectiveParts, partsTableMetrics, translatedPartsById } from "./tableMetrics.js"
+import { effectiveParts, partsTableMetrics, translatedPartsById, sizeChartTableLayout } from "./tableMetrics.js"
+import { hasSizeChartData } from "../core/sizeChart.js"
 
 // Which design a page is about: an explicit "design:<name>" purpose token
 // wins, then the page's first `covers` entry. Moved here from
@@ -147,6 +148,21 @@ export function measureRegion(region, page, ctx, width) {
       min: table.height,
       canAbsorb: false,
     }
+  }
+
+  if (type === "sizeChart") {
+    const chart = ctx && ctx.sizeChart
+    if (!hasSizeChartData(chart)) return { natural: 0, min: 0, canAbsorb: false }
+    const layout = sizeChartTableLayout({ chart, outUnit: ctx && ctx.dimensionUnit, width: width || 300 })
+    // + one baseline row per constant caption line, plus the pending-count
+    // banner when there is one - both drawn by renderSizeChart AFTER the
+    // matrix, so they must count here too or the box comes up short and the
+    // banner gets clipped by whatever sits below it on the page.
+    const constantsRows = layout.constants.length > 0 ? 1 + layout.constants.length : 0
+    const pendingBannerRows = layout.rows.some((row) => row.cells.some((cell) => cell.pending)) ? 1 : 0
+    const extra = (constantsRows + pendingBannerRows) * ROW.table
+    const total = layout.height + extra
+    return { natural: total, min: total, canAbsorb: false }
   }
 
   if (type === "colorSpecs") {

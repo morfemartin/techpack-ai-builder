@@ -8,7 +8,7 @@ import { neutral, palette, type } from "../design/tokens.js"
 import { BAR, CHROME, COL, CHIP, GRID, INSET, PAGE, PARTS_COL, PRINT, ROW, TABLE, TEXT_PAD } from "../design/metrics.js"
 import { briefLines, factoryBriefLines } from "./briefs.js"
 import { convertMeasure, formatMeasure, normalizeUnit } from "../core/units.js"
-import { partsTableLayout, lookupTranslatedValue } from "./tableMetrics.js"
+import { partsTableLayout, lookupTranslatedValue, sizeChartTableLayout } from "./tableMetrics.js"
 import { GENERIC_SILHOUETTE } from "../garments/genericSilhouette.js"
 
 export function renderPartsList(box, { parts, partLabels, txParts, txPartsById, labels, compact, fill, startIndex } = {}) {
@@ -194,6 +194,78 @@ export function renderEmbSpecs(box, { emb, title } = {}) {
     })
     s += TX(box.x + INSET, ty, "Muestra digital de referencia · codigo Madeira vinculante", PRINT.minFont, false, "start", neutral.mid.hex, type.svgFonts.data)
   }
+  return s
+}
+
+// Grid of POM x size cells plus a tolerance column, fed by sizeChartTableLayout
+// (the SAME function measure.js's height branch reads - see tableMetrics.js's
+// hard-rule comment). A cell that is empty or derived-but-unverified prints
+// the pending glyph inline - same "⏳ Pendiente" vocabulary as the rest of the
+// app (techpackRequirements.js's PENDING sentinel) - so a number a factory
+// should NOT yet treat as confirmed never looks identical to one that is.
+export function renderSizeChart(box, { chart, outUnit, title } = {}) {
+  var layout = sizeChartTableLayout({ chart, outUnit, width: box.width })
+  if (layout.rows.length === 0) return ""
+  var s = ""
+  var W = box.width
+  var ty = box.y
+  var fontSize = PRINT.minFont
+
+  s += "<line x1='" + box.x + "' y1='" + ty + "' x2='" + (box.x + W) + "' y2='" + ty + "' stroke='#ddd' stroke-width='1'/>"
+  s += svgSectionBar(box.x, ty, W, title || "Tabla de Medidas")
+  ty += BAR.h + SECTION_AFTER_BAR_GAP
+
+  var labelW = layout.labelWidth
+  var colX = layout.sizes.map(function (_, i) { return box.x + labelW + i * layout.numericWidth })
+  var tolX = box.x + labelW + layout.sizes.length * layout.numericWidth
+
+  var headH = ROW.tableHeader
+  s += R(box.x, ty, W, headH, neutral.paleBorder.hex, palette.ink.hex, "0.6")
+  s += TX(box.x + TEXT_PAD, ty + headH / 2, "POM", fontSize, true, "start")
+  layout.sizes.forEach(function (size, i) {
+    var label = size === layout.baseSize ? size + "*" : size
+    s += TX(colX[i] + layout.numericWidth / 2, ty + headH / 2, label, fontSize, true, "middle")
+  })
+  s += TX(tolX + layout.numericWidth / 2, ty + headH / 2, "Tol.", fontSize, true, "middle")
+  ty += headH
+
+  var pendingRows = 0
+  layout.rows.forEach(function (row, i) {
+    var bg = i % 2 === 0 ? palette.white.hex : neutral.faint.hex
+    s += R(box.x, ty, W, row.height, bg, "#ccc", "0.4")
+    var lineStartY = ty + row.height / 2 - ((row.nameLines.length - 1) * TABLE.lineHeight) / 2
+    row.nameLines.forEach(function (line, li) {
+      s += TX(box.x + TEXT_PAD, lineStartY + li * TABLE.lineHeight, line, fontSize, false, "start")
+    })
+    var rowHasPending = false
+    row.cells.forEach(function (cell, ci) {
+      if (cell.pending) rowHasPending = true
+      var text = cell.empty ? "⏳" : cell.pending ? "⏳ " + cell.text : cell.text
+      s += TX(colX[ci] + layout.numericWidth / 2, ty + row.height / 2, text, fontSize, false, "middle", undefined, type.svgFonts.data)
+    })
+    if (rowHasPending) pendingRows++
+    s += TX(tolX + layout.numericWidth / 2, ty + row.height / 2, row.toleranceText || NA, fontSize, false, "middle", undefined, type.svgFonts.data)
+    ty += row.height
+  })
+
+  if (layout.constants.length > 0) {
+    ty += SECTION_AFTER_BAR_GAP
+    s += TX(box.x + INSET, ty, "Medidas constantes:", fontSize, true, "start")
+    ty += ROW.table
+    layout.constants.forEach(function (c) {
+      s += TX(box.x + INSET, ty, c.label + ": " + formatMeasure(c.value, c.unit), fontSize, false, "start", undefined, type.svgFonts.data)
+      ty += ROW.table
+    })
+  }
+
+  // The document must never block on an unconfirmed number (house rule), but
+  // it must never look confirmed either - one banner naming the count instead
+  // of a per-cell reader having to spot every glyph individually.
+  if (pendingRows > 0) {
+    ty += SECTION_AFTER_BAR_GAP
+    s += TX(box.x + INSET, ty, pendingRows + (pendingRows === 1 ? " medida pendiente de verificar" : " medidas pendientes de verificar"), fontSize, true, "start")
+  }
+
   return s
 }
 

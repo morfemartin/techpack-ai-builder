@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { UNITS, DEFAULT_UNIT, convertMeasure, formatDimensions, formatMeasure, normalizeUnit, parseMeasure } from "./units.js"
+import { UNITS, DEFAULT_UNIT, convertMeasure, formatDimensions, formatMeasure, formatTolerance, normalizeUnit, parseMeasure } from "./units.js"
 
 describe("parseMeasure", () => {
   it("accepts numbers and plain numeric strings", () => {
@@ -65,6 +65,25 @@ describe("formatMeasure", () => {
 
   it("returns empty string for no measurement", () => {
     expect(formatMeasure("", "mm")).toBe("")
+  })
+})
+
+describe("formatTolerance", () => {
+  it("signs and spaces the value, unlike formatMeasure's compact style", () => {
+    expect(formatTolerance(0.5, "cm")).toBe("±0.5 cm")
+    expect(formatTolerance(1, "cm")).toBe("±1 cm")
+  })
+
+  it("takes the absolute value - a tolerance band is symmetric by convention", () => {
+    expect(formatTolerance(-0.5, "cm")).toBe("±0.5 cm")
+  })
+
+  // A factory reading "±0" would reasonably assume exact-cut is required -
+  // a claim the app has no basis to make from a missing/zero tolerance.
+  it("returns empty for a missing or zero tolerance instead of printing +-0", () => {
+    expect(formatTolerance(0, "cm")).toBe("")
+    expect(formatTolerance("", "cm")).toBe("")
+    expect(formatTolerance(null, "cm")).toBe("")
   })
 })
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { VOCAB, buildPlannedPages, effectivePartsForPage, interpretPagePlan, normalizePlan, weightsToGrow } from "./interpretPlan.js"
 import { solveLayout } from "../layout/solve.js"
+import { newPom, newSizeChart } from "../core/sizeChart.js"
 
 describe("weightsToGrow", () => {
   it("returns exact proportions when weights already sum to 100", () => {
@@ -618,5 +619,57 @@ describe("translated values stay with their own part on subset pages", () => {
     expect(rendered.svg).toContain("Arrive Aruba")
     // Index 0 of the translated array - what the positional lookup used to show.
     expect(rendered.svg).not.toContain("Short sleeve polo")
+  })
+})
+
+describe("buildPlannedPages: sizeChart pagination never splits a size column", () => {
+  const page = {
+    id: "medidas", title: "Medidas", purpose: "data:measurements",
+    regions: [{ type: "header", weight: 8 }, { type: "titleBar", weight: 5 }, { type: "sizeChart", weight: 60 }, { type: "disclaimer", weight: 8 }],
+  }
+  const baseCtx = {
+    lang: "ES",
+    hdr: { brand: "Arrive Aruba", season: "2027", sno: "AA-POLO-001", cat: "Custom", fab: "", fac: "", ind: "", outd: "", pname: "Polo" },
+    parts: [], designs: [], logo: null, txData: null, garment: { partLabels: { ES: {} } },
+  }
+
+  it("stays on one page when the chart fits", () => {
+    const chart = newSizeChart({
+      poms: [
+        newPom({ label: "Medio pecho", unit: "cm", tolerance: 1, values: { XS: 48, S: 51, M: 54, L: 57, XL: 60, XXL: 63 } }),
+        newPom({ label: "Largo de cuerpo", unit: "cm", tolerance: 1, values: { XS: 68, S: 70, M: 72, L: 74, XL: 76, XXL: 78 } }),
+      ],
+    })
+    const pages = buildPlannedPages({ pages: [page] }, { ...baseCtx, sizeChart: chart })
+    expect(pages).toHaveLength(1)
+    expect(pages[0].svg).toContain("Medio pecho")
+    expect(pages[0].svg).toContain("Largo de cuerpo")
+  })
+
+  it("paginates by ROW when the chart overflows, repeating every size column on each page", () => {
+    const poms = Array.from({ length: 60 }, (_, i) =>
+      newPom({ label: "Punto de medida " + (i + 1), unit: "cm", tolerance: 0.5, values: { XS: 40 + i, S: 42 + i, M: 44 + i, L: 46 + i, XL: 48 + i, XXL: 50 + i } })
+    )
+    const chart = newSizeChart({ poms })
+    const pages = buildPlannedPages({ pages: [page] }, { ...baseCtx, sizeChart: chart })
+    expect(pages.length).toBeGreaterThan(1)
+    // Every page shows every size column - never a partial size run.
+    for (const p of pages) {
+      for (const size of ["XS", "S", "M", "L", "XL", "XXL"]) expect(p.svg).toContain(">" + (size === "M" ? "M*" : size) + "<")
+    }
+    // No POM label lost and none duplicated across the split.
+    const totalMentions = poms.filter((pom) => pages.some((p) => p.svg.includes(pom.label))).length
+    expect(totalMentions).toBe(60)
+  })
+
+  it("prints constants and the pending banner exactly once, on the last page of the split", () => {
+    const poms = Array.from({ length: 60 }, (_, i) =>
+      newPom({ label: "Punto de medida " + (i + 1), unit: "cm", source: i === 59 ? "derived" : "user", verified: false, values: { XS: 40, S: 42, M: 44, L: 46, XL: 48, XXL: 50 } })
+    )
+    const chart = newSizeChart({ poms, constants: [{ label: "Altura del cuello", value: 3.5, unit: "cm" }] })
+    const pages = buildPlannedPages({ pages: [page] }, { ...baseCtx, sizeChart: chart })
+    const withConstant = pages.filter((p) => p.svg.includes("Altura del cuello"))
+    expect(withConstant).toHaveLength(1)
+    expect(withConstant[0]).toBe(pages[pages.length - 1])
   })
 })
