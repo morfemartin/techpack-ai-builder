@@ -50,11 +50,19 @@ const RETRYABLE_BASE_DELAY_MS = 1500
 // response, no error, for 20-30s+) while still answering malformed/unrelated
 // requests instantly, meaning the service is technically "up" but a specific
 // call just never resolves. `fetch()` has no built-in timeout, so without
-// this the UI waited forever with no way to even retry. 30s is generous
-// enough for a legitimately slow real generation (observed up to ~20s) while
-// still turning a genuine hang into a clear, RETRYABLE error within a bounded
-// time instead of an infinite spinner.
-const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_DEEPSEEK_FETCH_TIMEOUT_MS) || 30000
+// this the UI waited forever with no way to even retry. Was 30s (generous
+// for the ~20s generations observed at the time), but that was tuned before
+// translateContent started asking for up to 6400 output tokens to fit a full
+// size-chart payload - a real generation that size can legitimately run
+// longer than 30s, and a timeout here is ALSO a retryable networkError (see
+// wrapFetchFailure), so a too-short timeout was firing before NVIDIA ever
+// got a chance to finish, then retrying into the same wall. Raised to sit
+// just under api/deepseek.js's own UPSTREAM_TIMEOUT_MS (55000ms hardcoded
+// server-side) so our own AbortError fires first on a genuine hang instead
+// of riding out the server's timeout too - same reasoning documented in
+// hybridTasks.js's TASK_POLICIES budgetMs comments, applied here because
+// this path (no `task`) skips hybridAI and its budgets entirely.
+const FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_DEEPSEEK_FETCH_TIMEOUT_MS) || 52000
 const LOCAL_FETCH_TIMEOUT_MS = Number(import.meta.env.VITE_LOCAL_AI_FETCH_TIMEOUT_MS) || 180000
 const ESTIMATED_COMPAT_EVENTS = 60
 

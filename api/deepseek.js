@@ -26,7 +26,14 @@
 const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1"
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v4-pro"
 const NVIDIA_FALLBACK_MODEL = process.env.NVIDIA_FALLBACK_MODEL || ""
-const MAX_TOKENS_CAP = 4000
+// Was 4000. translateContent (translate.js) now asks for up to 6400 to fit
+// a full size-chart payload (labels + how-to-measure for every POM) without
+// truncating mid-response - this proxy silently clamped every request back
+// down to 4000 regardless of what the client asked for, so that fix only
+// ever took effect on Studio (which talks to the local Mistral bridge
+// directly, bypassing this proxy). Matches Studio's ceiling so both flows
+// get the same protection against a cut-off translation.
+const MAX_TOKENS_CAP = 6400
 const UPSTREAM_TIMEOUT_MS = Number(process.env.NVIDIA_UPSTREAM_TIMEOUT_MS) || 55000
 const UPSTREAM_STREAM_STALL_TIMEOUT_MS = Number(process.env.NVIDIA_UPSTREAM_STREAM_STALL_TIMEOUT_MS) || 55000
 
