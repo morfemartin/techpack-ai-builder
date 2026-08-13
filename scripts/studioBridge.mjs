@@ -10,7 +10,8 @@ export const DEFAULT_ALLOWED_ORIGINS = [
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_MESSAGES = 64
 const MAX_MESSAGE_CHARS = 120000
-const MAX_TOKENS = 4096
+export const LOCAL_MAX_TOKENS = 4096
+export const HOSTED_MAX_TOKENS = 6400
 
 // A base64 Wilcom worksheet PDF is comfortably larger than a chat message -
 // its own budget, separate from MAX_BODY_BYTES, so this stays generous
@@ -89,7 +90,7 @@ function textContentOnly(content) {
   return text
 }
 
-export function sanitizeCompletionPayload(body, model = DEFAULT_STUDIO_MODEL) {
+export function sanitizeCompletionPayload(body, model = DEFAULT_STUDIO_MODEL, maxTokens = LOCAL_MAX_TOKENS) {
   if (!body || !Array.isArray(body.messages) || body.messages.length === 0 || body.messages.length > MAX_MESSAGES) {
     throw new Error("messages_invalid")
   }
@@ -104,7 +105,7 @@ export function sanitizeCompletionPayload(body, model = DEFAULT_STUDIO_MODEL) {
   return {
     model,
     messages,
-    max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1000, 1), MAX_TOKENS),
+    max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1000, 1), maxTokens),
     temperature: Math.min(Math.max(Number(body.temperature) || 0, 0), 1),
     stream: !!body.stream,
   }
@@ -161,6 +162,7 @@ export function createStudioBridge({
   // Reported on /health so the UI can show which upstream is actually
   // answering ("Mistral" vs "Qwen") instead of a hardcoded label.
   provider = "mlx",
+  maxTokens = LOCAL_MAX_TOKENS,
 } = {}) {
   return createServer(async (req, res) => {
     if (!allowedHost(req.headers.host)) return sendJSON(res, 403, { error: "host_forbidden" })
@@ -212,7 +214,7 @@ export function createStudioBridge({
     }
 
     try {
-      const payload = sanitizeCompletionPayload(await readJSON(req), model)
+      const payload = sanitizeCompletionPayload(await readJSON(req), model, maxTokens)
       const upstream = await fetchImpl(upstreamBaseURL + "/chat/completions", {
         method: "POST",
         headers: {

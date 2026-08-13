@@ -3,7 +3,7 @@ import { uid } from "./core/idGen.js"
 import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentSectionsReady, uiAssigningDocumentBatch, uiResolvingBlock, uiApplyingRevision, uiPagesUsedFallback, uiPageDesignFailed, uiPlanContractAssisted, uiPlanFailed, uiPageUsedFallback, uiSinkOverflow } from "./core/i18n.js"
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
-import { combineTranslations, translateContent } from "./core/translate.js"
+import { buildTranslationPayload, combineTranslations, translateContent } from "./core/translate.js"
 import { languageLabel, sortedTextileLanguages, toggleFactoryLanguage } from "./core/languageConfig.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed, extractSeedFromDocument } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
@@ -12,6 +12,7 @@ import { splitImageIntoQuadrants, extractGarmentFromImages } from "./core/vision
 import { toGrayscale, hexToGray } from "./core/colorUtils.js"
 import { hasColorData, madeiraColorsToStops, normalizeFabricColor } from "./core/colorSpecs.js"
 import { newColorway, normalizeColorway, colorwaysFromFabricColors, renderColorwayDocument } from "./core/colorways.js"
+import { buildDeterministicCustomDocument } from "./core/deterministicDocument.js"
 import { newSizeChart, normalizeSizeChart, hasSizeChartData, seedSizesFromParts } from "./core/sizeChart.js"
 import { SizeChartEditor } from "./components/SizeChartEditor.jsx"
 import { analyzeRequirements, pendingFields } from "./core/techpackRequirements.js"
@@ -239,6 +240,8 @@ export default function App() {
   const [translating, setTranslating] = useState(false)
   const [translationError, setTranslationError] = useState(null)
   const translationRuns = useRef(0)
+  const translationGeneration = useRef(0)
+  const [translationRevision, setTranslationRevision] = useState(0)
   // The in-flight live-preview planning run, so a new one can cancel it (see
   // the preview effect) instead of leaving two runs racing for the same
   // runHybridAI task slot.
@@ -304,9 +307,10 @@ export default function App() {
   }, [uiLang])
   const sourceLanguage = uiLang
   useEffect(() => {
+    translationGeneration.current += 1
     setTxCache({})
     setTranslationError(null)
-  }, [sourceLanguage, hdr, parts, designs])
+  }, [sourceLanguage, hdr, parts, designs, fabricColors, sizeChart])
   useEffect(() => {
     if (!factoryLanguages.includes(prevLang)) setPrevLang(factoryLanguages[0])
   }, [factoryLanguages, prevLang])
@@ -592,14 +596,17 @@ export default function App() {
 
   async function ensureTx(lang) {
     if (txCache[lang]) return txCache[lang]
+    const generation = translationGeneration.current
     translationRuns.current += 1
     setTranslating(true)
     setTranslationError(null)
     try {
       var tx = await translateContent(hdr, parts, designs, lang, { sourceLang: sourceLanguage, fabricColors, sizeChart })
+      if (generation !== translationGeneration.current) throw new DOMException("Translation superseded", "AbortError")
       setTxCache((p) => Object.assign({}, p, { [lang]: tx }))
       return tx
     } catch (error) {
+      if (generation !== translationGeneration.current || (error && error.name === "AbortError")) throw error
       setTranslationError({ language: lang, audience: "factory", message: (error && error.message) || "No se pudo traducir el documento." })
       throw error
     } finally {
@@ -611,14 +618,17 @@ export default function App() {
   async function ensureDesignerTx() {
     const key = "designer:" + designerLanguage
     if (txCache[key]) return txCache[key]
+    const generation = translationGeneration.current
     translationRuns.current += 1
     setTranslating(true)
     setTranslationError(null)
     try {
       const tx = await translateContent(hdr, parts, designs, designerLanguage, { sourceLang: sourceLanguage, fabricColors, sizeChart })
+      if (generation !== translationGeneration.current) throw new DOMException("Translation superseded", "AbortError")
       setTxCache((current) => Object.assign({}, current, { [key]: tx }))
       return tx
     } catch (error) {
+      if (generation !== translationGeneration.current || (error && error.name === "AbortError")) throw error
       setTranslationError({ language: designerLanguage, audience: "designer", message: (error && error.message) || "No se pudo traducir la comunicacion del disenador." })
       throw error
     } finally {
@@ -627,14 +637,20 @@ export default function App() {
     }
   }
 
-  function retryTranslation(error) {
+  async function retryTranslation(error) {
     if (!error) return
-    return error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language)
+    const result = await (error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language))
+    setTranslationRevision((value) => value + 1)
+    return result
   }
 
   async function ensureFactoryTranslations() {
     const entries = await Promise.all(factoryLanguages.map(async (language) => [language, await ensureTx(language)]))
     return Object.fromEntries(entries)
+  }
+
+  function sourceDocumentTranslation() {
+    return buildTranslationPayload(hdr, parts, designs, sourceLanguage, fabricColors, sizeChart)
   }
 
   function svgSafeText(value) {
@@ -688,6 +704,16 @@ export default function App() {
 
   function fallbackPageLayout(page) {
     return deterministicPageLayout(page, { parts, designs, fabricColors })
+  }
+
+  // Translation and layout are independent contracts. If a provider cannot
+  // translate, the document still goes through the measured semantic engine;
+  // it must never fall back to the old fixed template with floating tables.
+  function buildDeterministicCustomPages(lang, tx, designerTx, renderColorways) {
+    var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+    var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, sizeChart, lang, sourceLanguage, designerLanguage }
+    var ctx = { lang, hdr, parts, designs, fabricColors, sizeChart, logo, txData: tx, designerTx, garment, dimensionUnit }
+    return buildDeterministicCustomDocument({ baseContext, renderContext: ctx, colorways: renderColorways || [colorways[0]] })
   }
 
   // `signal` is what stops two overlapping runs from sabotaging each other.
@@ -898,14 +924,29 @@ export default function App() {
   }
 
   async function handleGenerate(lang) {
-    var results = await Promise.all([ensureTx(lang), ensureDesignerTx()])
-    return generateResolvedDocument(lang, results[0], results[1])
+    try {
+      var results = await Promise.all([ensureTx(lang), ensureDesignerTx()])
+      return generateResolvedDocument(lang, results[0], results[1])
+    } catch {
+      // ensureTx/ensureDesignerTx already leave a recoverable, language-specific
+      // error in the UI. The original-language export remains available.
+      return null
+    }
   }
 
   async function handleGenerateMultilingual() {
-    var results = await Promise.all([ensureFactoryTranslations(), ensureDesignerTx()])
-    var combined = combineTranslations(results[0], factoryLanguages)
-    return generateResolvedDocument(factoryLanguages[0], combined, results[1])
+    try {
+      var results = await Promise.all([ensureFactoryTranslations(), ensureDesignerTx()])
+      var combined = combineTranslations(results[0], factoryLanguages)
+      return generateResolvedDocument(factoryLanguages[0], combined, results[1])
+    } catch {
+      return null
+    }
+  }
+
+  function handleGenerateSource() {
+    var source = sourceDocumentTranslation()
+    return generateResolvedDocument(sourceLanguage, source, source)
   }
 
   async function generateResolvedDocument(lang, tx, designerTx) {
@@ -922,7 +963,7 @@ export default function App() {
       try {
         pages = await buildCustomDocumentPages(lang, tx, { showModal: false, onPlan: (p) => (plan = p), designerTx, renderColorways: colorways })
       } catch {
-        pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment, fabricColors)
+        pages = buildDeterministicCustomPages(lang, tx, designerTx, colorways)
       }
     } else {
       pages = buildAllPages(lang, hdr, parts, designs, logo, tx, garment, fabricColors)
@@ -1080,8 +1121,13 @@ export default function App() {
     setPlannedPreviewKey(previewPlanKey)
     setPlannedPreviewPages(null)
     setPlannedPreviewError(null)
-    Promise.all([ensureTx(prevLang), ensureDesignerTx()])
-      .then(([tx, designerTx]) => buildCustomDocumentPages(prevLang, tx, {
+    Promise.allSettled([ensureTx(prevLang), ensureDesignerTx()])
+      .then(([factoryResult, designerResult]) => {
+        var factoryOk = factoryResult.status === "fulfilled"
+        var renderLang = factoryOk ? prevLang : sourceLanguage
+        var tx = factoryOk ? factoryResult.value : sourceDocumentTranslation()
+        var designerTx = designerResult.status === "fulfilled" ? designerResult.value : sourceDocumentTranslation()
+        return buildCustomDocumentPages(renderLang, tx, {
         showModal: false,
         designerTx,
         signal: controller.signal,
@@ -1090,7 +1136,8 @@ export default function App() {
           setPlannedPreviewPages(pages)
           setPrevPage((p) => Math.min(p, Math.max(0, pages.length - 1)))
         },
-      }))
+        })
+      })
       .then((pages) => {
         if (!active) return
         setPlannedPreviewPages(pages)
@@ -1101,9 +1148,10 @@ export default function App() {
         // "no se pudo disenar el documento" for the run the user themselves
         // superseded is exactly the misleading message this fix removes.
         if (!active || (error && error.name === "AbortError")) return
-        const tx = txCache[prevLang] || null
-        setPlannedPreviewError("No se pudo diseñar el documento con IA; mostrando fallback clásico.")
-        setPlannedPreviewPages(buildAllPages(prevLang, hdr, parts, designs, logo, tx, garment, fabricColors))
+        var tx = txCache[prevLang] || sourceDocumentTranslation()
+        var renderLang = txCache[prevLang] ? prevLang : sourceLanguage
+        setPlannedPreviewError("No se pudo completar el plan con IA; mostrando la composición semántica medida.")
+        setPlannedPreviewPages(buildDeterministicCustomPages(renderLang, tx, sourceDocumentTranslation()))
       })
 
     return () => {
@@ -1112,7 +1160,7 @@ export default function App() {
       if (previewRunRef.current === controller) previewRunRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewPlanKey])
+  }, [previewPlanKey, translationRevision])
 
   function canNext() {
     if (step === 0) return !!garmentId && !visionExtracting
@@ -1728,6 +1776,11 @@ export default function App() {
                   style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: C.white.hex, color: C.ink.hex, border: hair, fontSize: type.size.xs, cursor: "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}
                 >
                   <Icon name="download" size={16} color={C.ink.hex} /> {ui.downloadGarmentFile}
+                </button>
+              )}
+              {!factoryLanguages.includes(sourceLanguage) && (
+                <button onClick={handleGenerateSource} disabled={documentPlanning} style={{ display: "inline-flex", alignItems: "center", gap: space(1), padding: `${space(2)}px ${space(3)}px`, background: documentPlanning ? C.canvas.hex : C.white.hex, color: documentPlanning ? "#9AA0AB" : C.ink.hex, border: hair, fontSize: type.size.xs, cursor: documentPlanning ? "wait" : "pointer", fontWeight: 700, fontFamily: type.fonts.ui, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  <Icon name="download" size={16} color={C.ink.hex} /> {ui.generateSourceSvg} [{sourceLanguage}]
                 </button>
               )}
               {outputMode === "separate" ? factoryLanguages.map((l) => (
