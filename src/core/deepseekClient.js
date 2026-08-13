@@ -514,7 +514,7 @@ export async function deepseekJSON({ messages, maxTokens = 1000, temperature = 0
  * a parsed object. No conversation history, no silent fallback - throws
  * DeepSeekError on any failure so the UI can surface it.
  */
-export async function extractStructured({ instructions, content, maxTokens = 1500 }) {
+export async function extractStructured({ instructions, content, maxTokens = 1500, signal }) {
   const raw = await deepseekChat({
     messages: [
       {
@@ -524,6 +524,7 @@ export async function extractStructured({ instructions, content, maxTokens = 150
     ],
     maxTokens,
     temperature: 0.1,
+    signal,
   })
   const cleaned = raw.replace(/```json|```/g, "").trim()
   try {

@@ -16,6 +16,27 @@ function sameKeys(source, translated) {
   return Object.keys(source).sort().join("|") === Object.keys(translated).sort().join("|")
 }
 
+const IMMUTABLE_TRANSLATION_KEYS = new Set(["hex", "pantoneApprox", "pantoneStatus", "source", "madeiraCode"])
+
+function validFragment(source, translated, key = "") {
+  if (Array.isArray(source)) {
+    return Array.isArray(translated) && translated.length === source.length &&
+      source.every((value, index) => validFragment(value, translated[index], key))
+  }
+  if (source && typeof source === "object") {
+    return translated && typeof translated === "object" && !Array.isArray(translated) &&
+      sameKeys(source, translated) &&
+      Object.keys(source).every((childKey) => validFragment(source[childKey], translated[childKey], childKey))
+  }
+  if (IMMUTABLE_TRANSLATION_KEYS.has(key)) return translated === source
+  if (typeof source === "string") return typeof translated === "string"
+  return translated === source
+}
+
+function fragmentContract(source, translated) {
+  return validFragment(source, translated) && sameTokens(source, translated)
+}
+
 function validColorTranslation(source, translated) {
   if (!translated || typeof translated !== "object" || !sameKeys(source, translated)) return false
   if (typeof translated.name !== "string") return false
@@ -149,6 +170,125 @@ export function combineTranslations(translations, languages) {
   }
 }
 
+function chunk(values, size) {
+  const result = []
+  for (let index = 0; index < values.length; index += size) result.push({ index, values: values.slice(index, index + size) })
+  return result
+}
+
+function needsChunkedTranslation(source) {
+  return source.parts.length > 24 || source.designs.length > 4 || JSON.stringify(source).length > 24000
+}
+
+function buildTranslationFragments(source, targetLang) {
+  const fragments = []
+  const partChunks = chunk(source.parts, 24)
+  if (!partChunks.length) fragments.push({ type: "core", index: 0, source: { pname: source.pname, parts: [] } })
+  partChunks.forEach((entry, position) => fragments.push({
+    type: "core",
+    index: entry.index,
+    source: position === 0 ? { pname: source.pname, parts: entry.values } : { parts: entry.values },
+  }))
+  chunk(source.designs, 3).forEach((entry) => fragments.push({ type: "designs", index: entry.index, source: { designs: entry.values } }))
+  chunk(source.fabricColors, 12).forEach((entry) => fragments.push({ type: "fabricColors", index: entry.index, source: { fabricColors: entry.values } }))
+  chunk(source.sizeChart.poms, 10).forEach((entry) => fragments.push({ type: "poms", index: entry.index, source: { poms: entry.values } }))
+  chunk(source.sizeChart.constants, 16).forEach((entry) => fragments.push({ type: "constants", index: entry.index, source: { constants: entry.values } }))
+
+  const trustedLexicon = T[targetLang]
+  if (!trustedLexicon || !fragmentContract(source.lexicon, trustedLexicon)) {
+    chunk(Object.entries(source.lexicon), 36).forEach((entry) => fragments.push({
+      type: "lexicon",
+      index: entry.index,
+      source: { lexicon: Object.fromEntries(entry.values) },
+    }))
+  }
+  return { fragments, trustedLexicon: trustedLexicon && fragmentContract(source.lexicon, trustedLexicon) ? trustedLexicon : null }
+}
+
+async function translateFragment(fragment, sourceName, targetName, signal) {
+  let previous = null
+  let lastError = null
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const repairing = attempt === 2
+    const content = repairing && previous
+      ? { documentToTranslate: fragment.source, invalidPreviousAttempt: previous }
+      : fragment.source
+    try {
+      const result = await extractStructured({
+        instructions:
+          "Translate this small section of a garment technical document from " + sourceName + " to " + targetName + ". " +
+          "Return EXACTLY the same JSON keys, arrays and item order as the input document; do not add a wrapper. " +
+          "Translate human-readable text only. Preserve every number, measurement, unit, ID, brand, file name, Pantone/Madeira reference, hexadecimal color and status value exactly. " +
+          (repairing ? "The previous answer was rejected; repair its shape and invariants." : ""),
+        content: JSON.stringify(content),
+        maxTokens: 3200,
+        signal,
+      })
+      if (fragmentContract(fragment.source, result)) return result
+      previous = result
+      lastError = null
+    } catch (error) {
+      lastError = error
+      previous = error && error.cause && error.cause.raw ? error.cause.raw : null
+    }
+  }
+  const error = new Error("Translation fragment failed: " + fragment.type)
+  error.cause = lastError
+  throw error
+}
+
+async function mapWithConcurrency(values, limit, mapper) {
+  const results = new Array(values.length)
+  let cursor = 0
+  async function worker() {
+    while (cursor < values.length) {
+      const index = cursor++
+      results[index] = await mapper(values[index], index)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()))
+  return results
+}
+
+async function translateContentInFragments(source, sourceName, targetName, targetLang, externalSignal) {
+  const { fragments, trustedLexicon } = buildTranslationFragments(source, targetLang)
+  const controller = new AbortController()
+  const abortFromExternal = () => controller.abort(externalSignal.reason)
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort(externalSignal.reason)
+    else externalSignal.addEventListener("abort", abortFromExternal, { once: true })
+  }
+  const timer = setTimeout(() => controller.abort(), 120000)
+  let translatedFragments
+  try {
+    translatedFragments = await mapWithConcurrency(fragments, 2, (fragment) => translateFragment(fragment, sourceName, targetName, controller.signal))
+  } finally {
+    clearTimeout(timer)
+    if (externalSignal) externalSignal.removeEventListener("abort", abortFromExternal)
+  }
+  const translated = {
+    pname: source.pname,
+    parts: [],
+    designs: [],
+    fabricColors: [],
+    sizeChart: { poms: [], constants: [] },
+    lexicon: trustedLexicon || {},
+  }
+  translatedFragments.forEach((result, fragmentIndex) => {
+    const fragment = fragments[fragmentIndex]
+    if (fragment.type === "core") {
+      if (typeof result.pname === "string") translated.pname = result.pname
+      translated.parts.splice(fragment.index, 0, ...result.parts)
+    } else if (fragment.type === "designs") translated.designs.splice(fragment.index, 0, ...result.designs)
+    else if (fragment.type === "fabricColors") translated.fabricColors.splice(fragment.index, 0, ...result.fabricColors)
+    else if (fragment.type === "poms") translated.sizeChart.poms.splice(fragment.index, 0, ...result.poms)
+    else if (fragment.type === "constants") translated.sizeChart.constants.splice(fragment.index, 0, ...result.constants)
+    else if (fragment.type === "lexicon") Object.assign(translated.lexicon, result.lexicon)
+  })
+  if (!validTranslation(source, translated)) throw new Error("Translated fragments do not satisfy the complete document contract")
+  return translated
+}
+
 export async function translateContent(hdr, parts, designs, targetLang, options = {}) {
   const sourceLang = options.sourceLang || "ES"
   const source = buildTranslationPayload(hdr, parts, designs, sourceLang, options.fabricColors, options.sizeChart)
@@ -157,6 +297,18 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
   const targetName = LANGUAGE_NAMES[targetLang]
   const sourceName = LANGUAGE_NAMES[sourceLang]
   if (!targetName || !sourceName) throw new Error("Unsupported document language: " + targetLang)
+
+  if (needsChunkedTranslation(source)) {
+    try {
+      return await translateContentInFragments(source, sourceName, targetName, targetLang, options.signal)
+    } catch (cause) {
+      const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
+      error.code = "translation_contract_failed"
+      error.language = targetLang
+      error.cause = cause
+      throw error
+    }
+  }
 
   let previous = null
   let lastError = null
