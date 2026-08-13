@@ -24,7 +24,12 @@
 // resending everything verbatim) before the public launch.
 
 const NVIDIA_BASE_URL = process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1"
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v4-pro"
+// Was "deepseek-ai/deepseek-v4-pro" - retired from NVIDIA's hosted catalog
+// (integrate.api.nvidia.com), so every request failed with 410 Gone
+// regardless of payload size or token budget. Confirmed live against the
+// catalog: "deepseek-v4-pro" is no longer listed; "deepseek-v4-flash-0731"
+// is, and answers real completions successfully.
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "deepseek-ai/deepseek-v4-flash-0731"
 const NVIDIA_FALLBACK_MODEL = process.env.NVIDIA_FALLBACK_MODEL || ""
 // Was 4000. translateContent (translate.js) now asks for up to 6400 to fit
 // a full size-chart payload (labels + how-to-measure for every POM) without
