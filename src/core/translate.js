@@ -2,7 +2,7 @@ import { extractStructured } from "./deepseekClient.js"
 import { LANGUAGE_NAMES } from "./languageConfig.js"
 import { T } from "./i18n.js"
 
-const TECH_TOKEN = /(?:%\s?\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?(?:\s?(?:g\/m2|gsm|kg|mm|cm|in|pt\.?|m|g|%))?|#[0-9a-f]{3,8}|\b(?:PANTONE|MADEIRA|DIM|D|V|P)[- .]?\d+[a-z0-9-]*\b)/gi
+const TECH_TOKEN = /(?:%\s?\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?(?:\s?(?:g\/m2|gsm|kg|mm|cm|in|pt\.?|m|g|%))?|#[0-9a-f]{3,8}|\b(?:PANTONE|MADEIRA)[- .]?\d+[a-z0-9-]*\b|\b(?:DIM|D|V|P)[- .]?\d+(?:\.\d+)?[a-z0-9-]*\b)/gi
 const TECH_PLACEHOLDER = /__TECH_[A-Z]+__/g
 
 function normalizeTechnicalToken(token) {
@@ -167,6 +167,57 @@ export function validTranslation(source, translated) {
   return sameTokens(source, translated)
 }
 
+function describeValue(value) {
+  if (Array.isArray(value)) return "array(" + value.length + ")"
+  if (value === null) return "null"
+  return typeof value
+}
+
+function collectContractIssues(source, translated, path, issues, key = "") {
+  const label = path || "document"
+  if (Array.isArray(source)) {
+    if (!Array.isArray(translated)) {
+      issues.push(label + ": expected array, received " + describeValue(translated))
+      return
+    }
+    if (translated.length !== source.length) issues.push(label + ": expected " + source.length + " items, received " + translated.length)
+    source.forEach((value, index) => {
+      if (index < translated.length) collectContractIssues(value, translated[index], label + "[" + index + "]", issues, key)
+    })
+    return
+  }
+  if (source && typeof source === "object") {
+    if (!translated || typeof translated !== "object" || Array.isArray(translated)) {
+      issues.push(label + ": expected object, received " + describeValue(translated))
+      return
+    }
+    if (!sameKeys(source, translated)) issues.push(label + ": object keys changed")
+    Object.keys(source).forEach((childKey) => {
+      if (Object.prototype.hasOwnProperty.call(translated, childKey)) {
+        collectContractIssues(source[childKey], translated[childKey], label + "." + childKey, issues, childKey)
+      }
+    })
+    return
+  }
+  if (IMMUTABLE_TRANSLATION_KEYS.has(key) && translated !== source) {
+    issues.push(label + ": immutable value changed")
+    return
+  }
+  if (typeof source === "string") {
+    if (typeof translated !== "string") issues.push(label + ": expected string, received " + describeValue(translated))
+    else if (!sameTokens(source, translated)) issues.push(label + ": technical tokens changed")
+    return
+  }
+  if (translated !== source) issues.push(label + ": scalar value changed")
+}
+
+export function translationContractIssues(source, translated) {
+  const issues = []
+  collectContractIssues(source, translated, "", issues)
+  if (!issues.length && !validTranslation(source, translated)) issues.push("document: specialized translation contract failed")
+  return issues
+}
+
 function combineValue(translations, languages, getter) {
   return languages.map((language) => language + ": " + String(getter(translations[language]) || "")).join(" / ")
 }
@@ -231,6 +282,7 @@ function setPath(target, path, value) {
 function translationCatalog(source, targetLang) {
   const target = structuredClone(source)
   const items = []
+  const trustedLexicon = T[targetLang]
   function add(id, path, text) {
     if (typeof text !== "string" || text.length === 0) return
     items.push({ id, path, text })
@@ -241,6 +293,14 @@ function translationCatalog(source, targetLang) {
   source.partLabels.forEach((text, index) => add("part-label:" + index, ["partLabels", index], text))
   source.designs.forEach((design, index) => {
     for (const key of ["name", "pos", "posDetail", "technique", "illustrationBrief"]) {
+      if (key === "technique" && trustedLexicon && Array.isArray(source.lexicon.tecs) && Array.isArray(trustedLexicon.tecs)) {
+        const sourceTechnique = String(design[key] || "").trim().toLocaleLowerCase()
+        const techniqueIndex = source.lexicon.tecs.findIndex((value) => String(value).trim().toLocaleLowerCase() === sourceTechnique)
+        if (techniqueIndex >= 0 && typeof trustedLexicon.tecs[techniqueIndex] === "string") {
+          target.designs[index][key] = trustedLexicon.tecs[techniqueIndex]
+          continue
+        }
+      }
       add("design:" + index + ":" + key, ["designs", index, key], design[key])
     }
     design.colors.forEach((color, colorIndex) => add("design:" + index + ":color:" + colorIndex, ["designs", index, "colors", colorIndex, "name"], color.name))
@@ -252,7 +312,6 @@ function translationCatalog(source, targetLang) {
   })
   source.sizeChart.constants.forEach((constant, index) => add("constant:" + index, ["sizeChart", "constants", index, "label"], constant.label))
 
-  const trustedLexicon = T[targetLang]
   if (trustedLexicon && fragmentContract(source.lexicon, trustedLexicon)) {
     target.lexicon = structuredClone(trustedLexicon)
   } else {
@@ -358,7 +417,12 @@ async function translateCatalog(source, sourceName, targetName, targetLang, { si
   }
   const byId = new Map(translatedBatches.flat().map((item) => [item.id, item.text]))
   for (const item of items) setPath(target, item.path, byId.get(item.id))
-  if (!validTranslation(source, target)) throw new Error("Translated catalog does not satisfy the complete document contract")
+  if (!validTranslation(source, target)) {
+    const issues = translationContractIssues(source, target)
+    const error = new Error("Translated catalog does not satisfy the complete document contract: " + issues.join("; "))
+    error.contractIssues = issues
+    throw error
+  }
   return target
 }
 
@@ -374,11 +438,13 @@ export async function translateContent(hdr, parts, designs, targetLang, options 
   try {
     return await translateCatalog(source, sourceName, targetName, targetLang, options)
   } catch (cause) {
-    const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
+    const issue = Array.isArray(cause && cause.contractIssues) && cause.contractIssues.length ? " Campo: " + cause.contractIssues[0] + "." : ""
+    const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + "." + issue)
     error.code = "translation_contract_failed"
     error.language = targetLang
     error.cause = cause
     error.translationItems = Array.isArray(cause && cause.items) ? cause.items : []
+    error.contractIssues = Array.isArray(cause && cause.contractIssues) ? cause.contractIssues : []
     throw error
   }
 }
