@@ -338,7 +338,7 @@ function leafForRegion(region, page, ctx) {
   const t = (ctx && ctx.txData && ctx.txData.lexicon) || T[(ctx && ctx.lang) || "ES"] || T.ES
   const design = selectedDesign(page, ctx)
   const garment = ctx && ctx.garment ? ctx.garment : null
-  const partLabels = garment && garment.partLabels ? garment.partLabels[(ctx && ctx.lang) || "ES"] || garment.partLabels.ES || {} : {}
+  const partLabels = (ctx && ctx.partLabels) || (garment && garment.partLabels ? garment.partLabels[(ctx && ctx.lang) || "ES"] || garment.partLabels.ES || {} : {})
   const txData = ctx && ctx.txData ? ctx.txData : null
   const hdr = ctx && ctx.hdr ? ctx.hdr : {}
 
