@@ -79,6 +79,25 @@ describe("technical translation", () => {
     expect(extractStructured).toHaveBeenCalledTimes(3)
   })
 
+  it("splits large documents into bounded translations and validates the assembled result", async () => {
+    const manyParts = Array.from({ length: 50 }, (_, index) => ({ on: true, val: "Pieza " + (index + 1) + " - 20mm" }))
+    extractStructured.mockImplementation(async ({ content }) => {
+      const parsed = JSON.parse(content)
+      return structuredClone(parsed.documentToTranslate || parsed)
+    })
+
+    const translated = await translateContent(hdr, manyParts, designs, "EN")
+
+    expect(translated.parts).toHaveLength(50)
+    expect(extractStructured).toHaveBeenCalledTimes(4)
+    const partCalls = extractStructured.mock.calls
+      .map(([call]) => JSON.parse(call.content))
+      .filter((payload) => Array.isArray(payload.parts))
+    expect(partCalls).toHaveLength(3)
+    expect(partCalls.every((payload) => payload.parts.length <= 24)).toBe(true)
+    expect(extractStructured.mock.calls.every(([call]) => call.maxTokens === 3200)).toBe(true)
+  })
+
   it("translates color names while preserving Pantone and hexadecimal references", () => {
     const source = buildTranslationPayload(hdr, parts, designs, "ES", fabricColors)
     const translated = structuredClone(source)

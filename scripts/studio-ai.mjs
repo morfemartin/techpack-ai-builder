@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { loadEnvLocal } from "./loadEnvLocal.mjs"
-import { createStudioBridge, DEFAULT_ALLOWED_ORIGINS, DEFAULT_STUDIO_MODEL } from "./studioBridge.mjs"
+import { createStudioBridge, DEFAULT_ALLOWED_ORIGINS, DEFAULT_STUDIO_MODEL, HOSTED_MAX_TOKENS } from "./studioBridge.mjs"
 
 loadEnvLocal()
 
@@ -36,6 +36,7 @@ function runWithHostedUpstream() {
     readiness,
     apiKey: mistralApiKey,
     provider: "mistral",
+    maxTokens: HOSTED_MAX_TOKENS,
   })
   bridge.listen(bridgePort, "127.0.0.1", () => {
     console.log(`[studio-ai] private bridge: http://127.0.0.1:${bridgePort}`)

@@ -5,18 +5,22 @@ analysis on the existing NVIDIA server-side proxy.
 
 ## Architecture
 
-- Text, intake, document planning and review: DeepSeek V4-Pro starts first;
-  `mlx-community/Qwen3-8B-4bit` joins after a task-specific grace period.
-- The first response that passes the JSON and domain contract wins. If neither
-  provider returns a valid answer, deterministic application code continues.
+- Studio text, intake, translation, document planning and review: the private
+  loopback bridge uses hosted Mistral when `MISTRAL_API_KEY` is configured.
+- Without that key, the same bridge starts `mlx-community/Qwen3-8B-4bit`
+  locally. Studio never races its private provider against NVIDIA text.
+- Every response must pass JSON and domain contracts. If the provider returns
+  an invalid answer, deterministic application code continues.
 - Image analysis: NVIDIA Vision through `/api/deepseek`; the key remains on the
   server and never reaches the browser.
 - Geometry, pagination and contract repair: deterministic application code.
 - GitHub Pages remains a static UI. The local model is never uploaded to or
   executed by GitHub.
 
-The browser calls `http://127.0.0.1:11435`. The bridge calls the MLX server on
-`http://127.0.0.1:11436`. Both bind to loopback only.
+The browser calls `http://127.0.0.1:11435`. In local-Qwen mode, the bridge
+calls the MLX server on `http://127.0.0.1:11436`. Both bind to loopback only.
+In Mistral mode there is no local model server; the bridge is the sole holder
+of the hosted API credential.
 
 ## One-time setup
 
@@ -55,7 +59,9 @@ either provider for A/B tests.
 - Browser origins are an explicit allowlist. The default production origin is
   `https://morfemartin.github.io` plus the two local development origins.
 - The host header is restricted to loopback names to reduce DNS-rebinding risk.
-- Requests are capped at 1 MiB, 64 messages and 4096 output tokens.
+- Requests are capped at 1 MiB and 64 messages. Local Qwen is capped at 4096
+  output tokens; hosted Mistral allows 6400 so a complete translation with
+  BOM, colors and tallaje is not silently truncated by the bridge.
 - The configured model is forced server-side; clients cannot select arbitrary
   local models or paths.
 - Image payloads are rejected by the local bridge's chat route. Vision remains
@@ -68,11 +74,12 @@ either provider for A/B tests.
   goes through the same capped, text-only chat route as everything else.
 - The bridge has no API key, shell endpoint, filesystem endpoint or arbitrary
   upstream URL.
-- Studio text is allowed to use DeepSeek automatically. This is an explicit
-  studio policy: do not enter client-confidential text unless cloud processing
-  is permitted for that project.
-- There is no silent substitution to Llama for structured requests. DeepSeek
-  failure returns to the client, which races Qwen or uses the contract.
+- Mistral-backed Studio sends text to Mistral. Local-Qwen Studio keeps text on
+  this Mac. Do not enter client-confidential text in hosted mode unless cloud
+  processing is permitted for that project.
+- There is no silent substitution to NVIDIA or Llama for Studio structured
+  requests. A private-provider failure returns to the client, which uses the
+  deterministic contract.
 - Local telemetry stores only task, provider, model, latency, validation and
   fallback reason. Prompts and client data are never written to telemetry.
 

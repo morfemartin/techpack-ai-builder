@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createStudioBridge, isAllowedOrigin, sanitizeCompletionPayload } from "./studioBridge.mjs"
+import { createStudioBridge, HOSTED_MAX_TOKENS, isAllowedOrigin, sanitizeCompletionPayload } from "./studioBridge.mjs"
 
 describe("studio AI bridge security", () => {
   it("allows only configured browser origins", () => {
@@ -26,6 +26,14 @@ describe("studio AI bridge security", () => {
     }, "studio/qwen")
     expect(payload.model).toBe("studio/qwen")
     expect(payload.max_tokens).toBe(4096)
+  })
+
+  it("allows the hosted Mistral bridge to finish the 6400-token translation contract", () => {
+    const payload = sanitizeCompletionPayload({
+      max_tokens: 999999,
+      messages: [{ role: "user", content: "translate the complete document" }],
+    }, "mistral-small-2603", HOSTED_MAX_TOKENS)
+    expect(payload.max_tokens).toBe(6400)
   })
 
   it("rejects image content so vision cannot leak into the local text route", () => {

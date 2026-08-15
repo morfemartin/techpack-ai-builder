@@ -144,6 +144,14 @@ time budget. When DeepSeek does not answer, the wizard uses the contractual
 outline/layout fallback or continues without designs/briefs instead of staying
 blocked behind the provider's internal retries.
 
+Translation is a separate contract from composition. A failed or delayed
+translation may show the source-language data with an explicit warning, but it
+must never route a custom garment through the legacy fixed-page generator.
+Both AI and deterministic custom paths end at the same measured candidate
+composer. The preview also exposes an original-language SVG action whenever
+the source language is not one of the requested factory languages, so a
+translation outage cannot remove access to the completed document.
+
 After contract repair, every page is evaluated on an exact A4 landscape macro
 grid: eight 32.5mm columns, 3mm gutters and 8mm margins. The composer compares
 `hero-rail`, independent data columns, bottom bands, BOM/hero and
