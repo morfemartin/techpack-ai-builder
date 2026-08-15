@@ -2,7 +2,8 @@ import { extractStructured } from "./deepseekClient.js"
 import { LANGUAGE_NAMES } from "./languageConfig.js"
 import { T } from "./i18n.js"
 
-const TECH_TOKEN = /(?:%\s?\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?(?:\s?(?:mm|cm|m|in|g|kg|gsm|g\/m2|%|pt\.?))?|#[0-9a-f]{3,8}|\b(?:PANTONE|MADEIRA|DIM|D|V|P)[- .]?\d+[a-z0-9-]*\b)/gi
+const TECH_TOKEN = /(?:%\s?\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?(?:\s?(?:g\/m2|gsm|kg|mm|cm|in|pt\.?|m|g|%))?|#[0-9a-f]{3,8}|\b(?:PANTONE|MADEIRA|DIM|D|V|P)[- .]?\d+[a-z0-9-]*\b)/gi
+const TECH_PLACEHOLDER = /__TECH_[A-Z]+__/g
 
 function normalizeTechnicalToken(token) {
   const compact = token.toUpperCase().replace(/\s+/g, "")
@@ -16,6 +17,41 @@ function technicalTokens(value) {
 
 function sameTokens(source, translated) {
   return technicalTokens(source).sort().join("|") === technicalTokens(translated).sort().join("|")
+}
+
+function alphabeticIndex(index) {
+  let value = index + 1
+  let result = ""
+  while (value > 0) {
+    value -= 1
+    result = String.fromCharCode(65 + (value % 26)) + result
+    value = Math.floor(value / 26)
+  }
+  return result
+}
+
+function maskTechnicalTokens(text) {
+  const tokens = []
+  const maskedText = String(text).replace(TECH_TOKEN, (token) => {
+    const marker = "__TECH_" + alphabeticIndex(tokens.length) + "__"
+    tokens.push({ marker, token })
+    return marker
+  })
+  return { text: maskedText, tokens }
+}
+
+function technicalPlaceholders(text) {
+  return String(text).match(TECH_PLACEHOLDER) || []
+}
+
+function sameTechnicalPlaceholders(source, translated) {
+  return technicalPlaceholders(source).join("|") === technicalPlaceholders(translated).join("|")
+}
+
+function restoreTechnicalTokens(text, tokens) {
+  let restored = String(text)
+  for (const token of tokens) restored = restored.replace(token.marker, token.token)
+  return restored
 }
 
 function sameKeys(source, translated) {
@@ -234,27 +270,33 @@ function validCatalogAnswer(sourceItems, result) {
   return sourceItems.every((source, index) => {
     const translated = result.items[index]
     return translated && typeof translated === "object" && sameKeys(translated, { id: "", text: "" }) &&
-      translated.id === source.id && typeof translated.text === "string" && sameTokens(source.text, translated.text)
+      translated.id === source.id && typeof translated.text === "string" && sameTechnicalPlaceholders(source.text, translated.text)
   })
 }
 
 async function translateCatalogBatch(items, sourceName, targetName, signal) {
   let lastError = null
-  const payload = { items: items.map(({ id, text }) => ({ id, text })) }
+  const maskedItems = items.map(({ id, text }) => ({ id, ...maskTechnicalTokens(text) }))
+  const payload = { items: maskedItems.map(({ id, text }) => ({ id, text })) }
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const result = await extractStructured({
         instructions:
           "Translate the text values in this garment technical-data catalog from " + sourceName + " to " + targetName + ". " +
           "Return one top-level object with exactly one key named items. Keep every item id, item order and item count exactly. " +
-          "Each item must contain exactly id and text. Translate text only. Preserve every number, measurement, unit, code, brand, file name, Pantone/Madeira reference, hexadecimal color and DIM/D/V identifier character-for-character. " +
+          "Each item must contain exactly id and text. Translate text only. Tokens such as __TECH_A__ protect production data: copy every such token exactly once, character-for-character, in its original position. Never translate, edit, remove or reorder a __TECH_*__ token. " +
           (attempt === 2 ? "The previous response failed the contract. Rebuild this small batch from the source." : ""),
         content: JSON.stringify(payload),
         maxTokens: 2400,
         signal,
       })
-      if (validCatalogAnswer(payload.items, result)) return result.items
-      lastError = new Error("The model changed catalog ids, cardinality or technical tokens")
+      if (validCatalogAnswer(payload.items, result)) {
+        return result.items.map((translated, index) => ({
+          ...translated,
+          text: restoreTechnicalTokens(translated.text, maskedItems[index].tokens),
+        }))
+      }
+      lastError = new Error("The model changed catalog ids, cardinality or protected technical placeholders")
     } catch (error) {
       lastError = error
     }

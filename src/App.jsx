@@ -1141,11 +1141,22 @@ export default function App() {
     setPlannedPreviewKey(previewPlanKey)
     setPlannedPreviewPages(null)
     setPlannedPreviewError(null)
+    setDocumentReady(false)
     Promise.allSettled([ensureTx(prevLang), ensureDesignerTx()])
       .then(([factoryResult, designerResult]) => {
         var factoryOk = factoryResult.status === "fulfilled"
-        var renderLang = factoryOk ? prevLang : sourceLanguage
-        var tx = factoryOk ? factoryResult.value : sourceDocumentTranslation()
+        if (!factoryOk) {
+          if (!active) return null
+          setPlannedPreviewPages([])
+          setPlannedPreviewError(
+            uiLang === "EN"
+              ? `The ${prevLang} document was not generated. The source-language document will not be shown as ${prevLang}. Retry the translation.`
+              : `No se genero el documento ${prevLang}. El original no se mostrara como si estuviera en ${prevLang}. Reintenta la traduccion.`
+          )
+          return null
+        }
+        var renderLang = prevLang
+        var tx = factoryResult.value
         var designerTx = designerResult.status === "fulfilled" ? designerResult.value : sourceDocumentTranslation()
         return buildCustomDocumentPages(renderLang, tx, {
         showModal: false,
@@ -1159,7 +1170,7 @@ export default function App() {
         })
       })
       .then((pages) => {
-        if (!active) return
+        if (!active || !pages) return
         setPlannedPreviewPages(pages)
         setPrevPage((p) => Math.min(p, Math.max(0, pages.length - 1)))
       })

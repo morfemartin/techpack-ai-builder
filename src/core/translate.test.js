@@ -33,6 +33,28 @@ describe("technical translation", () => {
     expect(validTranslation(source, translated)).toBe(false)
   })
 
+  it("keeps production tokens outside the model translation and restores them exactly", async () => {
+    const percentParts = [{ on: true, val: "100% Poliester, 220gsm, DIM-1" }]
+    extractStructured.mockImplementation(async ({ content }) => {
+      const payload = JSON.parse(content)
+      return {
+        items: payload.items.map((item) => ({
+          ...item,
+          text: item.text.replace("Poliester", "Polyester"),
+        })),
+      }
+    })
+
+    const translated = await translateContent(hdr, percentParts, [], "TR")
+    const protectedItem = extractStructured.mock.calls
+      .flatMap(([call]) => JSON.parse(call.content).items)
+      .find((item) => item.id === "part-value:0")
+
+    expect(protectedItem.text).toBe("__TECH_A__ Poliester, __TECH_B__, __TECH_C__")
+    expect(protectedItem.text).not.toContain("100%")
+    expect(translated.parts[0]).toBe("100% Polyester, 220gsm, DIM-1")
+  })
+
   it("sends a stable id/text catalog instead of asking the model to reproduce the document JSON", async () => {
     extractStructured.mockImplementationOnce(async ({ content }) => JSON.parse(content))
     await translateContent(hdr, parts, designs, "EN")
