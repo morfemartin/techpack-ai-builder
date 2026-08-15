@@ -632,6 +632,8 @@ export default function App() {
         return tx
       } catch (error) {
         if (generation !== translationGeneration.current || (error && error.name === "AbortError")) throw error
+        setDocumentReady(false)
+        setPlannedPreviewPages([])
         setTranslationError({ language: lang, audience, message: (error && error.message) || "No se pudo traducir el documento." })
         throw error
       } finally {
@@ -657,9 +659,16 @@ export default function App() {
 
   async function retryTranslation(error) {
     if (!error) return
-    const result = await (error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language))
-    setTranslationRevision((value) => value + 1)
-    return result
+    setDocumentReady(false)
+    setPlannedPreviewPages([])
+    setPlannedPreviewError(null)
+    try {
+      const result = await (error.audience === "designer" ? ensureDesignerTx() : ensureTx(error.language))
+      setTranslationRevision((value) => value + 1)
+      return result
+    } catch {
+      return null
+    }
   }
 
   async function ensureFactoryTranslations() {

@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("./deepseekClient.js", () => ({ extractStructured: vi.fn() }))
 import { extractStructured } from "./deepseekClient.js"
-import { buildTranslationPayload, combineTranslations, translateContent, validTranslation } from "./translate.js"
+import { buildTranslationPayload, combineTranslations, translateContent, translationContractIssues, validTranslation } from "./translate.js"
+import { buildCustomGarment, mapChatDesignsToDesigns } from "../garments/buildCustomGarment.js"
 import { newPom, newSizeChart } from "./sizeChart.js"
 
 const hdr = { pname: "Chaqueta 20K" }
@@ -34,7 +35,7 @@ describe("technical translation", () => {
   })
 
   it("keeps production tokens outside the model translation and restores them exactly", async () => {
-    const percentParts = [{ on: true, val: "100% Poliester, 220gsm, DIM-1" }]
+    const percentParts = [{ on: true, val: "100% Poliester, 220gsm, DIM-1, V1.1" }]
     extractStructured.mockImplementation(async ({ content }) => {
       const payload = JSON.parse(content)
       return {
@@ -50,9 +51,66 @@ describe("technical translation", () => {
       .flatMap(([call]) => JSON.parse(call.content).items)
       .find((item) => item.id === "part-value:0")
 
-    expect(protectedItem.text).toBe("__TECH_A__ Poliester, __TECH_B__, __TECH_C__")
+    expect(protectedItem.text).toBe("__TECH_A__ Poliester, __TECH_B__, __TECH_C__, __TECH_D__")
     expect(protectedItem.text).not.toContain("100%")
-    expect(translated.parts[0]).toBe("100% Polyester, 220gsm, DIM-1")
+    expect(translated.parts[0]).toBe("100% Polyester, 220gsm, DIM-1, V1.1")
+  })
+
+  it("translates a large AI-created garment without asking the model to rebuild Turkish document chrome", async () => {
+    const draft = {
+      label: "Polo tecnico de manga corta",
+      parts: Array.from({ length: 44 }, (_, index) => ({
+        label: "Dato tecnico " + (index + 1),
+        val: index === 0 ? "100% Poliester, 220gsm" : "Construccion confirmada " + (index + 1) + ", DIM-" + (index + 1) + " 43mm",
+      })),
+      positions: ["Pecho izquierdo"],
+      designs: [{ name: "Logo reflectivo", pos: "Pecho izquierdo", tec: "Bordado plano", illustrationBrief: "Marcar V1.1 y DIM-1 43mm" }],
+    }
+    const garment = buildCustomGarment(draft)
+    const customParts = garment.defaultParts
+    const customDesigns = mapChatDesignsToDesigns(draft.designs, garment.positions.ES[0])
+    const customLabels = customParts.map((part) => garment.partLabels.ES[part.id])
+
+    extractStructured.mockImplementation(async ({ content }) => {
+      const payload = JSON.parse(content)
+      return {
+        items: payload.items.map((item) => ({
+          ...item,
+          text: item.text
+            .replaceAll("Polo tecnico de manga corta", "Kısa kollu teknik polo")
+            .replaceAll("Dato tecnico", "Teknik veri")
+            .replaceAll("Construccion confirmada", "Onaylanmış yapı")
+            .replaceAll("Pecho izquierdo", "Sol göğüs")
+            .replaceAll("Bordado plano", "Düz nakış")
+            .replaceAll("Marcar", "İşaretle"),
+        })),
+      }
+    })
+
+    const translated = await translateContent(
+      { pname: draft.label },
+      customParts,
+      customDesigns,
+      "TR",
+      { partLabels: customLabels }
+    )
+
+    const sentItems = extractStructured.mock.calls.flatMap(([call]) => JSON.parse(call.content).items)
+    expect(sentItems).toHaveLength(44 * 2 + 4)
+    expect(sentItems.some((item) => item.id.startsWith("lexicon:"))).toBe(false)
+    expect(translated.parts).toHaveLength(44)
+    expect(translated.partLabels[43]).toBe("Teknik veri 44")
+    expect(translated.designs[0]).toMatchObject({ pos: "Sol göğüs", technique: "Düz Nakış" })
+    expect(sentItems.some((item) => item.id === "design:0:technique")).toBe(false)
+    expect(translated.lexicon.pending).toBe("ONAY BEKLİYOR")
+    expect(validTranslation(buildTranslationPayload({ pname: draft.label }, customParts, customDesigns, "ES", [], null, customLabels), translated)).toBe(true)
+  })
+
+  it("reports the exact custom-garment field that violates the contract", () => {
+    const source = buildTranslationPayload(hdr, parts, designs)
+    const translated = structuredClone(source)
+    translated.parts[0] = "YKK fermuar"
+    expect(translationContractIssues(source, translated)).toContain("document.parts[0]: technical tokens changed")
   })
 
   it("sends a stable id/text catalog instead of asking the model to reproduce the document JSON", async () => {
