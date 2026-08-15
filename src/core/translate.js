@@ -2,10 +2,16 @@ import { extractStructured } from "./deepseekClient.js"
 import { LANGUAGE_NAMES } from "./languageConfig.js"
 import { T } from "./i18n.js"
 
-const TECH_TOKEN = /(?:\d+(?:[.,]\d+)?(?:\s?(?:mm|cm|m|in|g|kg|gsm|g\/m2|%|pt\.?))?|#[0-9a-f]{3,8}|\b(?:PANTONE|MADEIRA|DIM|D|V|P)[- .]?\d+[a-z0-9-]*\b)/gi
+const TECH_TOKEN = /(?:%\s?\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?(?:\s?(?:mm|cm|m|in|g|kg|gsm|g\/m2|%|pt\.?))?|#[0-9a-f]{3,8}|\b(?:PANTONE|MADEIRA|DIM|D|V|P)[- .]?\d+[a-z0-9-]*\b)/gi
+
+function normalizeTechnicalToken(token) {
+  const compact = token.toUpperCase().replace(/\s+/g, "")
+  const localizedPercent = compact.match(/^%(\d+(?:[.,]\d+)?)$/)
+  return localizedPercent ? localizedPercent[1] + "%" : compact
+}
 
 function technicalTokens(value) {
-  return JSON.stringify(value).match(TECH_TOKEN)?.map((token) => token.toUpperCase().replace(/\s+/g, "")) || []
+  return JSON.stringify(value).match(TECH_TOKEN)?.map(normalizeTechnicalToken) || []
 }
 
 function sameTokens(source, translated) {
@@ -69,10 +75,12 @@ function sizeChartPayload(chart) {
   }
 }
 
-export function buildTranslationPayload(hdr, parts, designs, sourceLang = "ES", fabricColors = [], sizeChart = null) {
+export function buildTranslationPayload(hdr, parts, designs, sourceLang = "ES", fabricColors = [], sizeChart = null, partLabels = []) {
+  const activeParts = (parts || []).filter((part) => part && part.on !== false)
   return {
     pname: (hdr && hdr.pname) || "",
-    parts: (parts || []).filter((part) => part && part.on !== false).map((part) => String(part.val || "")),
+    parts: activeParts.map((part) => String(part.val || "")),
+    partLabels: activeParts.map((_, index) => String(partLabels[index] || "")),
     designs: (designs || []).map((design) => ({
       name: String((design && design.name) || ""),
       pos: String((design && design.pos) || ""),
@@ -100,6 +108,7 @@ export function validTranslation(source, translated) {
   if (!translated || typeof translated !== "object" || !sameKeys(source, translated)) return false
   if (typeof translated.pname !== "string") return false
   if (!Array.isArray(translated.parts) || translated.parts.length !== source.parts.length) return false
+  if (!Array.isArray(translated.partLabels) || translated.partLabels.length !== source.partLabels.length || translated.partLabels.some((label) => typeof label !== "string")) return false
   if (!Array.isArray(translated.designs) || translated.designs.length !== source.designs.length) return false
   if (!Array.isArray(translated.fabricColors) || translated.fabricColors.length !== source.fabricColors.length) return false
   if (!translated.lexicon || typeof translated.lexicon !== "object") return false
@@ -133,6 +142,7 @@ export function combineTranslations(translations, languages) {
   return {
     pname: combineValue(translations, selected, (translation) => translation.pname),
     parts: first.parts.map((_, index) => combineValue(translations, selected, (translation) => translation.parts[index])),
+    partLabels: first.partLabels.map((_, index) => combineValue(translations, selected, (translation) => translation.partLabels[index])),
     designs: first.designs.map((_, index) => ({
       name: combineValue(translations, selected, (translation) => translation.designs[index].name),
       pos: combineValue(translations, selected, (translation) => translation.designs[index].pos),
@@ -176,65 +186,95 @@ function chunk(values, size) {
   return result
 }
 
-function needsChunkedTranslation(source) {
-  return source.parts.length > 24 || source.designs.length > 4 || JSON.stringify(source).length > 24000
+function setPath(target, path, value) {
+  let cursor = target
+  for (let index = 0; index < path.length - 1; index++) cursor = cursor[path[index]]
+  cursor[path[path.length - 1]] = value
 }
 
-function buildTranslationFragments(source, targetLang) {
-  const fragments = []
-  const partChunks = chunk(source.parts, 24)
-  if (!partChunks.length) fragments.push({ type: "core", index: 0, source: { pname: source.pname, parts: [] } })
-  partChunks.forEach((entry, position) => fragments.push({
-    type: "core",
-    index: entry.index,
-    source: position === 0 ? { pname: source.pname, parts: entry.values } : { parts: entry.values },
-  }))
-  chunk(source.designs, 3).forEach((entry) => fragments.push({ type: "designs", index: entry.index, source: { designs: entry.values } }))
-  chunk(source.fabricColors, 12).forEach((entry) => fragments.push({ type: "fabricColors", index: entry.index, source: { fabricColors: entry.values } }))
-  chunk(source.sizeChart.poms, 10).forEach((entry) => fragments.push({ type: "poms", index: entry.index, source: { poms: entry.values } }))
-  chunk(source.sizeChart.constants, 16).forEach((entry) => fragments.push({ type: "constants", index: entry.index, source: { constants: entry.values } }))
+function translationCatalog(source, targetLang) {
+  const target = structuredClone(source)
+  const items = []
+  function add(id, path, text) {
+    if (typeof text !== "string" || text.length === 0) return
+    items.push({ id, path, text })
+  }
+
+  add("pname", ["pname"], source.pname)
+  source.parts.forEach((text, index) => add("part-value:" + index, ["parts", index], text))
+  source.partLabels.forEach((text, index) => add("part-label:" + index, ["partLabels", index], text))
+  source.designs.forEach((design, index) => {
+    for (const key of ["name", "pos", "posDetail", "technique", "illustrationBrief"]) {
+      add("design:" + index + ":" + key, ["designs", index, key], design[key])
+    }
+    design.colors.forEach((color, colorIndex) => add("design:" + index + ":color:" + colorIndex, ["designs", index, "colors", colorIndex, "name"], color.name))
+  })
+  source.fabricColors.forEach((color, index) => add("fabric-color:" + index, ["fabricColors", index, "name"], color.name))
+  source.sizeChart.poms.forEach((pom, index) => {
+    add("pom:" + index + ":label", ["sizeChart", "poms", index, "label"], pom.label)
+    add("pom:" + index + ":measure", ["sizeChart", "poms", index, "howToMeasure"], pom.howToMeasure)
+  })
+  source.sizeChart.constants.forEach((constant, index) => add("constant:" + index, ["sizeChart", "constants", index, "label"], constant.label))
 
   const trustedLexicon = T[targetLang]
-  if (!trustedLexicon || !fragmentContract(source.lexicon, trustedLexicon)) {
-    chunk(Object.entries(source.lexicon), 36).forEach((entry) => fragments.push({
-      type: "lexicon",
-      index: entry.index,
-      source: { lexicon: Object.fromEntries(entry.values) },
-    }))
+  if (trustedLexicon && fragmentContract(source.lexicon, trustedLexicon)) {
+    target.lexicon = structuredClone(trustedLexicon)
+  } else {
+    for (const [key, value] of Object.entries(source.lexicon)) {
+      if (Array.isArray(value)) value.forEach((text, index) => add("lexicon:" + key + ":" + index, ["lexicon", key, index], text))
+      else add("lexicon:" + key, ["lexicon", key], value)
+    }
   }
-  return { fragments, trustedLexicon: trustedLexicon && fragmentContract(source.lexicon, trustedLexicon) ? trustedLexicon : null }
+  return { target, items }
 }
 
-async function translateFragment(fragment, sourceName, targetName, signal) {
-  let previous = null
+function validCatalogAnswer(sourceItems, result) {
+  if (!result || typeof result !== "object" || !sameKeys(result, { items: [] }) || !Array.isArray(result.items)) return false
+  if (result.items.length !== sourceItems.length) return false
+  return sourceItems.every((source, index) => {
+    const translated = result.items[index]
+    return translated && typeof translated === "object" && sameKeys(translated, { id: "", text: "" }) &&
+      translated.id === source.id && typeof translated.text === "string" && sameTokens(source.text, translated.text)
+  })
+}
+
+async function translateCatalogBatch(items, sourceName, targetName, signal) {
   let lastError = null
+  const payload = { items: items.map(({ id, text }) => ({ id, text })) }
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const repairing = attempt === 2
-    const content = repairing && previous
-      ? { documentToTranslate: fragment.source, invalidPreviousAttempt: previous }
-      : fragment.source
     try {
       const result = await extractStructured({
         instructions:
-          "Translate this small section of a garment technical document from " + sourceName + " to " + targetName + ". " +
-          "Return EXACTLY the same JSON keys, arrays and item order as the input document; do not add a wrapper. " +
-          "Translate human-readable text only. Preserve every number, measurement, unit, ID, brand, file name, Pantone/Madeira reference, hexadecimal color and status value exactly. " +
-          (repairing ? "The previous answer was rejected; repair its shape and invariants." : ""),
-        content: JSON.stringify(content),
-        maxTokens: 3200,
+          "Translate the text values in this garment technical-data catalog from " + sourceName + " to " + targetName + ". " +
+          "Return one top-level object with exactly one key named items. Keep every item id, item order and item count exactly. " +
+          "Each item must contain exactly id and text. Translate text only. Preserve every number, measurement, unit, code, brand, file name, Pantone/Madeira reference, hexadecimal color and DIM/D/V identifier character-for-character. " +
+          (attempt === 2 ? "The previous response failed the contract. Rebuild this small batch from the source." : ""),
+        content: JSON.stringify(payload),
+        maxTokens: 2400,
         signal,
       })
-      if (fragmentContract(fragment.source, result)) return result
-      previous = result
-      lastError = null
+      if (validCatalogAnswer(payload.items, result)) return result.items
+      lastError = new Error("The model changed catalog ids, cardinality or technical tokens")
     } catch (error) {
       lastError = error
-      previous = error && error.cause && error.cause.raw ? error.cause.raw : null
     }
   }
-  const error = new Error("Translation fragment failed: " + fragment.type)
+  const error = new Error("Translation catalog batch failed: " + items.map((item) => item.id).join(", "))
   error.cause = lastError
+  error.items = items.map((item) => item.id)
   throw error
+}
+
+async function translateCatalogBatchResilient(items, sourceName, targetName, signal) {
+  try {
+    return await translateCatalogBatch(items, sourceName, targetName, signal)
+  } catch (error) {
+    if (items.length <= 1 || (signal && signal.aborted)) throw error
+    const middle = Math.ceil(items.length / 2)
+    const left = await translateCatalogBatchResilient(items.slice(0, middle), sourceName, targetName, signal)
+    const right = await translateCatalogBatchResilient(items.slice(middle), sourceName, targetName, signal)
+    return [...left, ...right]
+  }
 }
 
 async function mapWithConcurrency(values, limit, mapper) {
@@ -250,8 +290,10 @@ async function mapWithConcurrency(values, limit, mapper) {
   return results
 }
 
-async function translateContentInFragments(source, sourceName, targetName, targetLang, externalSignal) {
-  const { fragments, trustedLexicon } = buildTranslationFragments(source, targetLang)
+async function translateCatalog(source, sourceName, targetName, targetLang, { signal: externalSignal, onProgress } = {}) {
+  const { target, items } = translationCatalog(source, targetLang)
+  if (items.length === 0) return target
+  const batches = chunk(items, 24)
   const controller = new AbortController()
   const abortFromExternal = () => controller.abort(externalSignal.reason)
   if (externalSignal) {
@@ -259,115 +301,42 @@ async function translateContentInFragments(source, sourceName, targetName, targe
     else externalSignal.addEventListener("abort", abortFromExternal, { once: true })
   }
   const timer = setTimeout(() => controller.abort(), 120000)
-  let translatedFragments
+  let completed = 0
+  let translatedBatches
   try {
-    translatedFragments = await mapWithConcurrency(fragments, 2, (fragment) => translateFragment(fragment, sourceName, targetName, controller.signal))
+    translatedBatches = await mapWithConcurrency(batches, 2, async (batch) => {
+      const result = await translateCatalogBatchResilient(batch.values, sourceName, targetName, controller.signal)
+      completed += batch.values.length
+      if (onProgress) onProgress({ completed, total: items.length })
+      return result
+    })
   } finally {
     clearTimeout(timer)
     if (externalSignal) externalSignal.removeEventListener("abort", abortFromExternal)
   }
-  const translated = {
-    pname: source.pname,
-    parts: [],
-    designs: [],
-    fabricColors: [],
-    sizeChart: { poms: [], constants: [] },
-    lexicon: trustedLexicon || {},
-  }
-  translatedFragments.forEach((result, fragmentIndex) => {
-    const fragment = fragments[fragmentIndex]
-    if (fragment.type === "core") {
-      if (typeof result.pname === "string") translated.pname = result.pname
-      translated.parts.splice(fragment.index, 0, ...result.parts)
-    } else if (fragment.type === "designs") translated.designs.splice(fragment.index, 0, ...result.designs)
-    else if (fragment.type === "fabricColors") translated.fabricColors.splice(fragment.index, 0, ...result.fabricColors)
-    else if (fragment.type === "poms") translated.sizeChart.poms.splice(fragment.index, 0, ...result.poms)
-    else if (fragment.type === "constants") translated.sizeChart.constants.splice(fragment.index, 0, ...result.constants)
-    else if (fragment.type === "lexicon") Object.assign(translated.lexicon, result.lexicon)
-  })
-  if (!validTranslation(source, translated)) throw new Error("Translated fragments do not satisfy the complete document contract")
-  return translated
+  const byId = new Map(translatedBatches.flat().map((item) => [item.id, item.text]))
+  for (const item of items) setPath(target, item.path, byId.get(item.id))
+  if (!validTranslation(source, target)) throw new Error("Translated catalog does not satisfy the complete document contract")
+  return target
 }
 
 export async function translateContent(hdr, parts, designs, targetLang, options = {}) {
   const sourceLang = options.sourceLang || "ES"
-  const source = buildTranslationPayload(hdr, parts, designs, sourceLang, options.fabricColors, options.sizeChart)
+  const source = buildTranslationPayload(hdr, parts, designs, sourceLang, options.fabricColors, options.sizeChart, options.partLabels)
   if (targetLang === sourceLang) return source
 
   const targetName = LANGUAGE_NAMES[targetLang]
   const sourceName = LANGUAGE_NAMES[sourceLang]
   if (!targetName || !sourceName) throw new Error("Unsupported document language: " + targetLang)
 
-  if (needsChunkedTranslation(source)) {
-    try {
-      return await translateContentInFragments(source, sourceName, targetName, targetLang, options.signal)
-    } catch (cause) {
-      const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
-      error.code = "translation_contract_failed"
-      error.language = targetLang
-      error.cause = cause
-      throw error
-    }
+  try {
+    return await translateCatalog(source, sourceName, targetName, targetLang, options)
+  } catch (cause) {
+    const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
+    error.code = "translation_contract_failed"
+    error.language = targetLang
+    error.cause = cause
+    error.translationItems = Array.isArray(cause && cause.items) ? cause.items : []
+    throw error
   }
-
-  let previous = null
-  let lastError = null
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const repair = attempt === 2
-      ? " The previous answer failed validation. Repair it: keep every key and array item, and preserve every number, unit, code, Pantone/Madeira reference, DIM/D/V identifier and hexadecimal value exactly."
-      : attempt === 3
-        ? " Start a fresh complete translation. The two previous structures were invalid; rebuild the whole JSON from the source and preserve every invariant exactly."
-        : ""
-    // Only wrap the payload in an envelope when there is a previous invalid
-    // answer worth showing (repair attempt). Verified live against Mistral:
-    // wrapping it EVERY attempt (even as {source, previousInvalidAnswer:
-    // null}) made the model mirror that wrapper back - 3/3 real translations
-    // came back perfectly translated but nested under a "source" key, so
-    // validTranslation's sameKeys() check failed on every attempt before the
-    // content was ever inspected. The instructions now also say the exact
-    // top-level keys expected, since "return the exact same structure" left
-    // it ambiguous whether that meant the envelope's structure or the
-    // document's.
-    const showPrevious = attempt === 2 && previous
-    const envelope = showPrevious ? { documentToTranslate: source, invalidPreviousAttempt: previous } : source
-    try {
-      const result = await extractStructured({
-        instructions:
-          "Translate a garment technical document from " + sourceName + " to " + targetName + ". " +
-          "Respond with a JSON object containing EXACTLY these top-level keys, translated: pname, parts, designs, fabricColors, sizeChart, lexicon. " +
-          "Do not wrap your answer in any other key (no 'source', no 'translation', no 'documentToTranslate') - your entire response IS that object, at the top level. " +
-          (showPrevious
-            ? "The input below has two keys: documentToTranslate (translate this one) and invalidPreviousAttempt (a rejected prior answer, shown so you can avoid its mistake - keep every key and array item, and preserve every number, unit, code, Pantone/Madeira reference, DIM/D/V identifier and hexadecimal value exactly). "
-            : "") +
-          "Translate human-readable text only. Never translate, remove, reorder or alter numbers, measurements, units, IDs, brand names, file names, Pantone references, Madeira codes or hexadecimal colors." + repair,
-        content: JSON.stringify(envelope),
-        // Was 4200. sizeChart added a 6th top-level key the model has to
-        // reproduce in full (every POM's label + howToMeasure, every
-        // constant) on top of everything already being translated - a
-        // document with a real size chart (up to 12 POMs) plus several
-        // pieces/designs can now legitimately exceed 4200 output tokens.
-        // extractStructured's repairTruncatedJSON salvages a cut-off
-        // response by DROPPING whatever array item was mid-write, so a
-        // truncated answer correctly fails validSizeChartTranslation's
-        // length check (fewer poms than the source) - not a validator bug,
-        // just not enough room to finish. Raised with margin rather than
-        // tuned to the observed failure, since a bigger document (more
-        // parts, more designs) hits the same ceiling.
-        maxTokens: 6400,
-      })
-      if (validTranslation(source, result)) return result
-      previous = result
-      lastError = null
-    } catch (error) {
-      // A formatting miss is one invalid attempt, not the end of the language
-      // workflow. The following pass starts again from the intact source.
-      lastError = error
-      previous = error && error.cause && error.cause.raw ? error.cause.raw : null
-    }
-  }
-  const error = new Error("La traduccion no cumple el contrato tecnico para " + targetName + ".")
-  error.code = "translation_contract_failed"
-  error.language = targetLang
-  error.cause = lastError
-  throw error
 }

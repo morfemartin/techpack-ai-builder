@@ -4,6 +4,7 @@ import { T, UI, uiPhotosCount, uiSearchReferences, uiDevelopingPage, uiDocumentS
 import { EMPTY_EMB, isEmbTec, isWholePosF, readDesignImageFile } from "./core/helpers.js"
 import { DEFAULT_UNIT, UNITS, formatDimensions, normalizeUnit } from "./core/units.js"
 import { buildTranslationPayload, combineTranslations, translateContent } from "./core/translate.js"
+import { buildLocalizedSnapshot } from "./core/localizedSnapshot.js"
 import { languageLabel, sortedTextileLanguages, toggleFactoryLanguage } from "./core/languageConfig.js"
 import { importGarmentCSV, readFileText, buildExampleCSV, matchImagesToDesigns, csvSeedToRequirementsSeed, extractSeedFromDocument } from "./core/csvImport.js"
 import { DeepSeekError, getLocalAIHealth, getTextAIProvider } from "./core/deepseekClient.js"
@@ -238,9 +239,12 @@ export default function App() {
   const [prevLang, setPrevLang] = useState("ES")
   const [prevPage, setPrevPage] = useState(0)
   const [translating, setTranslating] = useState(false)
+  const [translationProgress, setTranslationProgress] = useState(null)
   const [translationError, setTranslationError] = useState(null)
   const translationRuns = useRef(0)
   const translationGeneration = useRef(0)
+  const translationPromises = useRef(new Map())
+  const translationControllers = useRef(new Map())
   const [translationRevision, setTranslationRevision] = useState(0)
   // The in-flight live-preview planning run, so a new one can cancel it (see
   // the preview effect) instead of leaving two runs racing for the same
@@ -308,8 +312,12 @@ export default function App() {
   const sourceLanguage = uiLang
   useEffect(() => {
     translationGeneration.current += 1
+    translationControllers.current.forEach((controller) => controller.abort())
+    translationControllers.current.clear()
+    translationPromises.current.clear()
     setTxCache({})
     setTranslationError(null)
+    setTranslationProgress(null)
   }, [sourceLanguage, hdr, parts, designs, fabricColors, sizeChart])
   useEffect(() => {
     if (!factoryLanguages.includes(prevLang)) setPrevLang(factoryLanguages[0])
@@ -594,47 +602,57 @@ export default function App() {
     document.body.removeChild(a)
   }
 
-  async function ensureTx(lang) {
-    if (txCache[lang]) return txCache[lang]
+  function translationPartLabels() {
+    return withPartLabels(parts, garment, sourceLanguage)
+      .filter((part) => part && part.on !== false)
+      .map((part) => part.label || "")
+  }
+
+  async function ensureTranslation(cacheKey, lang, audience) {
+    if (txCache[cacheKey]) return txCache[cacheKey]
+    if (translationPromises.current.has(cacheKey)) return translationPromises.current.get(cacheKey)
     const generation = translationGeneration.current
+    const controller = new AbortController()
+    translationControllers.current.set(cacheKey, controller)
     translationRuns.current += 1
     setTranslating(true)
     setTranslationError(null)
-    try {
-      var tx = await translateContent(hdr, parts, designs, lang, { sourceLang: sourceLanguage, fabricColors, sizeChart })
-      if (generation !== translationGeneration.current) throw new DOMException("Translation superseded", "AbortError")
-      setTxCache((p) => Object.assign({}, p, { [lang]: tx }))
-      return tx
-    } catch (error) {
-      if (generation !== translationGeneration.current || (error && error.name === "AbortError")) throw error
-      setTranslationError({ language: lang, audience: "factory", message: (error && error.message) || "No se pudo traducir el documento." })
-      throw error
-    } finally {
-      translationRuns.current = Math.max(0, translationRuns.current - 1)
-      setTranslating(translationRuns.current > 0)
-    }
+    const promise = (async () => {
+      try {
+        const tx = await translateContent(hdr, parts, designs, lang, {
+          sourceLang: sourceLanguage,
+          fabricColors,
+          sizeChart,
+          partLabels: translationPartLabels(),
+          signal: controller.signal,
+          onProgress: setTranslationProgress,
+        })
+        if (generation !== translationGeneration.current) throw new DOMException("Translation superseded", "AbortError")
+        setTxCache((current) => Object.assign({}, current, { [cacheKey]: tx }))
+        return tx
+      } catch (error) {
+        if (generation !== translationGeneration.current || (error && error.name === "AbortError")) throw error
+        setTranslationError({ language: lang, audience, message: (error && error.message) || "No se pudo traducir el documento." })
+        throw error
+      } finally {
+        if (translationPromises.current.get(cacheKey) === promise) translationPromises.current.delete(cacheKey)
+        if (translationControllers.current.get(cacheKey) === controller) translationControllers.current.delete(cacheKey)
+        translationRuns.current = Math.max(0, translationRuns.current - 1)
+        setTranslating(translationRuns.current > 0)
+        if (translationRuns.current === 0) setTranslationProgress(null)
+      }
+    })()
+    translationPromises.current.set(cacheKey, promise)
+    return promise
+  }
+
+  async function ensureTx(lang) {
+    return ensureTranslation(lang, lang, "factory")
   }
 
   async function ensureDesignerTx() {
     const key = "designer:" + designerLanguage
-    if (txCache[key]) return txCache[key]
-    const generation = translationGeneration.current
-    translationRuns.current += 1
-    setTranslating(true)
-    setTranslationError(null)
-    try {
-      const tx = await translateContent(hdr, parts, designs, designerLanguage, { sourceLang: sourceLanguage, fabricColors, sizeChart })
-      if (generation !== translationGeneration.current) throw new DOMException("Translation superseded", "AbortError")
-      setTxCache((current) => Object.assign({}, current, { [key]: tx }))
-      return tx
-    } catch (error) {
-      if (generation !== translationGeneration.current || (error && error.name === "AbortError")) throw error
-      setTranslationError({ language: designerLanguage, audience: "designer", message: (error && error.message) || "No se pudo traducir la comunicacion del disenador." })
-      throw error
-    } finally {
-      translationRuns.current = Math.max(0, translationRuns.current - 1)
-      setTranslating(translationRuns.current > 0)
-    }
+    return ensureTranslation(key, designerLanguage, "designer")
   }
 
   async function retryTranslation(error) {
@@ -650,7 +668,7 @@ export default function App() {
   }
 
   function sourceDocumentTranslation() {
-    return buildTranslationPayload(hdr, parts, designs, sourceLanguage, fabricColors, sizeChart)
+    return buildTranslationPayload(hdr, parts, designs, sourceLanguage, fabricColors, sizeChart, translationPartLabels())
   }
 
   function svgSafeText(value) {
@@ -702,17 +720,18 @@ export default function App() {
     )
   }
 
-  function fallbackPageLayout(page) {
-    return deterministicPageLayout(page, { parts, designs, fabricColors })
+  function fallbackPageLayout(page, context = { parts, designs, fabricColors }) {
+    return deterministicPageLayout(page, context)
   }
 
   // Translation and layout are independent contracts. If a provider cannot
   // translate, the document still goes through the measured semantic engine;
   // it must never fall back to the old fixed template with floating tables.
   function buildDeterministicCustomPages(lang, tx, designerTx, renderColorways) {
-    var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
-    var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, sizeChart, lang, sourceLanguage, designerLanguage }
-    var ctx = { lang, hdr, parts, designs, fabricColors, sizeChart, logo, txData: tx, designerTx, garment, dimensionUnit }
+    const localized = buildLocalizedSnapshot({ hdr, parts, designs, fabricColors, sizeChart }, tx)
+    var garmentType = localized.hdr.pname || (garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment")
+    var baseContext = { garmentType, parts: localized.parts, designs: localized.designs, fabricColors: localized.fabricColors, sizeChart: localized.sizeChart, lang, sourceLanguage, designerLanguage }
+    var ctx = { lang, ...localized, logo, txData: tx, designerTx, garment, dimensionUnit }
     return buildDeterministicCustomDocument({ baseContext, renderContext: ctx, colorways: renderColorways || [colorways[0]] })
   }
 
@@ -729,7 +748,8 @@ export default function App() {
   // its own "Preview renders colorway[0] only" comment); only the real
   // Generar path (generateResolvedDocument) opts into the full colorway set.
   async function buildCustomDocumentPages(lang, tx, { showModal = true, onPages, onPlan, designerTx = null, signal, renderColorways } = {}) {
-    var garmentType = garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment"
+    const localized = buildLocalizedSnapshot({ hdr, parts, designs, fabricColors, sizeChart }, tx)
+    var garmentType = localized.hdr.pname || (garment && garment.label ? garment.label[lang] || garment.label.ES : "Custom garment")
     // Distinguishes "we cancelled this run" from "the AI could not do it".
     // Checks the signal too, because an abort can surface as a plain rejection
     // from whichever await was in flight rather than as a named AbortError.
@@ -750,10 +770,10 @@ export default function App() {
       // ("180-220 GSM" instead of "Gramaje") - garment.partLabels holds the
       // name for a chat-built custom garment, but baseContext never carried
       // `garment` before, so nothing downstream could resolve it.
-      var baseContext = { garmentType, parts: withPartLabels(parts, garment, lang), designs, fabricColors, sizeChart, lang, sourceLanguage, designerLanguage }
+      var baseContext = { garmentType, parts: localized.parts, designs: localized.designs, fabricColors: localized.fabricColors, sizeChart: localized.sizeChart, lang, sourceLanguage, designerLanguage }
       var provisionalOutline = fallbackDocumentOutline(baseContext)
       var provisionalPlan = { pages: provisionalOutline.pages.map((page) => deterministicPageLayout(page, baseContext)) }
-      var ctx = { lang, hdr, parts, designs, fabricColors, sizeChart, logo, txData: tx, designerTx, garment, dimensionUnit }
+      var ctx = { lang, ...localized, logo, txData: tx, designerTx, garment, dimensionUnit }
       // Deliberately NOT publishing the rendered provisional plan here. It
       // looks exactly like a finished document, so the preview showed a
       // complete-looking tech pack while the AI had not started - the user
@@ -889,7 +909,7 @@ export default function App() {
           // reporting each one as an AI failure ("29 paginas usaron layout
           // estandar" came from exactly this loop running on after an abort).
           if (wasCancelled(error)) throw error
-          plannedPages.push(fallbackPageLayout(page))
+          plannedPages.push(fallbackPageLayout(page, baseContext))
           setDocumentPlanWarnings((w) => [...w, { level: "page", text: uiPageDesignFailed(uiLang, i + 1, plannedPageName(page, i), describeAIError(error)) }])
         }
         var rendered = buildPlannedPages({ pages: plannedPages }, ctx, { documentMode: "illustration-handoff" })
@@ -1715,7 +1735,7 @@ export default function App() {
               </button>
             </div>
             <div style={{ display: "flex", gap: space(2), flexWrap: "wrap", alignItems: "center" }}>
-              {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{ui.translating}</span>}
+              {translating && <span style={{ fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>{ui.translating}{translationProgress ? ` ${translationProgress.completed}/${translationProgress.total}` : ""}</span>}
               {translationError && (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: space(1), fontSize: type.size.xs, color: role.index.fill, fontWeight: 700 }}>
                   {translationError.message}
