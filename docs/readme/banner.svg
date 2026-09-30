@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 220" width="860" height="220" role="img" aria-label="TechPack AI Builder — Open-source fashion tech pack generator — print-ready SVG, Illustrator-ready artboards">
+<style>.t{font-family:'JetBrains Mono','SFMono-Regular',Menlo,Consolas,monospace}.big{font-family:'Space Grotesk','Helvetica Neue',Arial,sans-serif;font-weight:700}
+.in{opacity:0;animation:in .7s ease-out forwards}.d2{animation-delay:.25s}.d3{animation-delay:.5s}
+@keyframes in{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}</style>
+<rect width="860" height="220" fill="#141518"/><rect width="10" height="220" fill="#E5352B"/>
+<text x="44" y="42" class="t" font-size="12" fill="#6b6f7a">MORFEMARTIN /</text>
+<text x="44" y="98" class="big in" font-size="44" fill="#FFFFFF">TechPack AI Builder</text>
+<text x="44" y="132" class="t in d2" font-size="14" fill="#9aa0ab">Open-source fashion tech pack generator — print-ready SVG, Illustrator-ready artboards</text>
+<g class="in d3"><rect x="44" y="158" width="63" height="26" fill="#E5352B"/><text x="56" y="175" class="t" font-size="12" fill="#FFFFFF">REACT</text><rect x="117" y="158" width="55" height="26" fill="#1A3FB0"/><text x="129" y="175" class="t" font-size="12" fill="#FFFFFF">VITE</text><rect x="182" y="158" width="47" height="26" fill="#F5C518"/><text x="194" y="175" class="t" font-size="12" fill="#141518">SVG</text><rect x="240" y="158" width="110" height="26" fill="#E5352B"/><text x="252" y="175" class="t" font-size="12" fill="#FFFFFF">AI-ASSISTED</text></g>
+<rect x="786" y="30" width="30" height="30" fill="#E5352B"/><circle cx="816" cy="96" r="16" fill="#1A3FB0"/><rect x="794" y="130" width="20" height="20" fill="#F5C518" stroke="#000" stroke-width="2"/>
+</svg>

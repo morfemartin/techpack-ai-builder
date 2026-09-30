@@ -1,55 +1,59 @@
-# TechPack AI Builder 🧵
+<p align="center"><img src="docs/readme/banner.svg" alt="TechPack AI Builder — open-source fashion tech pack generator" width="100%"/></p>
 
-Open-source wizard that generates professional, print-ready fashion **tech packs** (fichas técnicas) as SVG — no design software required. Built by [Morfe](https://github.com/morfemartin), a branding + textile development agency, to run our own production pipeline in the open.
+<p align="center">
+  <a href="https://morfemartin.github.io/techpack-ai-builder/"><b>Live demo</b></a> ·
+  <a href="#features">Features</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#multi-garment-architecture">Architecture</a> ·
+  <a href="ROADMAP.md">Roadmap</a>
+</p>
 
-> Turn a brand's parts list, colorways, and embroidery specs into a multi-page, artboard-ready technical sheet in minutes, in Spanish, English and/or Chinese.
+Open-source wizard that generates professional, print-ready fashion **tech packs** as SVG, with no design software required. Built by [Morfe](https://github.com/morfemartin), a branding and textile-development studio, to run its own production pipeline in the open.
 
-**[▶ Demo en vivo](https://morfemartin.github.io/techpack-ai-builder/)** — build del wizard servido desde GitHub Pages.
-Nota: esta demo estática no incluye las funciones asistidas por IA (importar CSV, traducción, extracción de PDF de bordado) — esas requieren el proxy backend en Vercel descrito en [Seguridad](#seguridad), que un sitio estático no puede correr. Corré `npm run dev` en local para probarlas (ver [Instalación](#instalación)).
+> Turn a brand's parts list, colorways and embroidery specs into a multi-page, artboard-ready technical sheet in minutes, in Spanish, English and/or Chinese.
 
----
+<p align="center"><img src="docs/readme/wizard.png" alt="The wizard: pick a garment, or start a new one with AI or from a photo" width="85%"/></p>
 
-## Índice
-
-- [Sobre el proyecto](#sobre-el-proyecto)
-- [Características](#características)
-- [Instalación](#instalación)
-- [Uso rápido](#uso-rápido)
-- [Compatibilidad con Illustrator](#compatibilidad-con-illustrator)
-- [IA privada del estudio](#ia-privada-del-estudio)
-- [Arquitectura multi-prenda](#arquitectura-multi-prenda)
-- [Diseño y UX](#diseño-y-ux)
-- [Roadmap](#roadmap)
-- [Contribuir](#contribuir)
-- [Tecnologías](#tecnologías)
-- [Licencia](#licencia)
+> **About the live demo:** it is a static build served from GitHub Pages, so the AI-assisted features (CSV import, translation, embroidery-PDF extraction, garment from photo) are disabled there. They need the server-side proxy described under [Security](#security). Run `npm run dev` locally to try them.
 
 ---
 
-## Sobre el proyecto
+## Why
 
-Cualquier marca de ropa que produce en fábrica necesita una ficha técnica (tech pack) por cada estilo: especificaciones de piezas, vista técnica de 4 ángulos, posición y técnica de cada diseño/bordado, colores exactos en Pantone/CMYK, y — si hay bordado — la ficha de máquina (puntadas, hilos, secuencia de paradas).
+Every clothing brand that produces in a factory needs a tech pack for each style: part specifications, a four-view technical drawing, placement and technique for every print or embroidery, exact Pantone/CMYK colors and, when there is embroidery, the machine sheet (stitches, threads, stop sequence).
 
-Normalmente esto se arma a mano en Illustrator, ficha por ficha. TechPack AI Builder lo genera desde un wizard: completás los datos una vez y obtenés SVG listos para abrir en Illustrator con un artboard por página.
+This is usually assembled by hand in Illustrator, one sheet at a time. TechPack AI Builder generates it from a guided wizard: you enter the data once and get SVG pages that open in Illustrator with one artboard per page.
 
-Está pensado para dos públicos a la vez:
-- Marcas y agencias que necesitan producir fichas técnicas rápido, en varios idiomas.
-- Programadores que quieran una base sólida de generación de documentos técnicos en SVG para extender a otras verticales.
+It is built for two audiences at once:
 
-## Características
+- **Brands and agencies** that need tech packs fast, in several languages.
+- **Developers** who want a solid base for generating technical documents as SVG and extending it to other verticals.
 
-- Wizard guiado de 6 pasos: prenda → idioma(s) de exportación → header de marca → piezas/specs → diseños → vista previa.
-- Diagrama técnico de 4 vistas (frontal/trasera/izq/der) con callouts numerados apuntando a cada pieza.
-- Editor de colores Pantone/nombre + hex, con conversión automática a CMYK.
-- Ficha técnica de bordado dedicada, con extracción automática de datos desde un PDF de máquina Wilcom (requiere API key de Anthropic, opcional).
-- Exportación multi-idioma (ES/EN/ZH) con traducción asistida por IA (opcional).
-- Cada página se genera como SVG A4 horizontal (`297×210 mm`), descargable o copiable y agrupado semánticamente para abrir como artboards separados en Illustrator.
-- Cuando faltan dibujos técnicos, el resultado se identifica como **Illustration Handoff**: incluye índice, páginas numeradas, artboards editables e instrucciones textiles para que un diseñador gráfico complete las ilustraciones sin inventar construcción.
-- **Arquitectura multi-prenda desde el diseño**: agregar un nuevo tipo de prenda es un archivo de datos, no una reescritura — ver [abajo](#arquitectura-multi-prenda).
+## Features
 
-## Instalación
+- **Guided wizard**: garment → export languages → brand header → parts / specs → designs → preview → sizing.
+- **Four-view technical diagram** (front / back / left / right) with numbered callouts pointing at each part.
+- **Color editor** with Pantone name + hex and automatic CMYK conversion.
+- **Dedicated embroidery sheet**, with automatic data extraction from a Wilcom machine PDF (AI-assisted, optional).
+- **Multi-language export** (ES / EN / ZH) with AI-assisted translation (optional).
+- **Print-first output**: every page is an A4 landscape SVG (`297 × 210 mm`), downloadable or copyable, semantically grouped to open as separate Illustrator artboards.
+- **Illustration Handoff**: when technical drawings are missing, the output says so explicitly, with an index, numbered pages, editable artboards and textile instructions, so a designer can finish the illustrations without inventing construction.
+- **Multi-garment by design**: adding a new garment type is a data file, not a rewrite. See [below](#multi-garment-architecture).
 
-Requisitos: Node.js 18+.
+<table>
+  <tr>
+    <td><img src="docs/readme/page-structure.png" alt="Generated structure page: two views with instructions and a numbered parts table"/></td>
+    <td><img src="docs/readme/page-embroidery.png" alt="Generated design page with embroidery machine sheet and Pantone/CMYK swatches"/></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Structure page: views, instructions and numbered parts table</sub></td>
+    <td align="center"><sub>Design page with the embroidery machine sheet and Pantone / CMYK colors</sub></td>
+  </tr>
+</table>
+
+## Getting started
+
+Requirements: Node.js 18+.
 
 ```bash
 git clone https://github.com/morfemartin/techpack-ai-builder.git
@@ -58,126 +62,103 @@ npm install
 npm run dev
 ```
 
-Abrí `http://localhost:3000`.
+Open `http://localhost:3000`.
 
-Opcional — para traducción automática y extracción de PDF de bordado, copiá `.env.example` a `.env.local` y agregá tu API key de Anthropic. El resto de la app funciona igual sin ella.
+Optional: for the AI-assisted features, copy `.env.example` to `.env.local` and add your NVIDIA API key (DeepSeek through NVIDIA's OpenAI-compatible API). The key is read only by the server-side proxy; everything else works without it.
 
-## Uso rápido
+```bash
+npm test          # Vitest suite
+npm run build     # production build
+```
 
-1. Elegí el tipo de prenda (por ahora: Gorra — más tipos en el [roadmap](#roadmap)).
-2. Elegí en qué idiomas exportar (ES/EN/ZH).
-3. Completá marca, temporada, código de estilo, fábrica.
-4. Activá/editá las piezas de construcción (tela, cierre, paneles, etc.).
-5. Agregá uno o más diseños: posición, técnica, colores, imagen de referencia, y ficha de bordado si aplica.
-6. En la vista previa, generá el SVG por idioma y copiá/descargá cada página.
+### Quick use
 
-## Compatibilidad con Illustrator
+1. Choose the garment type (Cap is fully supported; more on the [roadmap](#roadmap)), or start a new garment with AI or from a photo.
+2. Choose the export languages (ES / EN / ZH).
+3. Fill in brand, season, style code and factory.
+4. Enable and edit the construction parts (fabric, closure, panels…).
+5. Add one or more designs: placement, technique, colors, reference image and, if needed, the embroidery sheet.
+6. In the preview, generate the SVG for each language and copy or download every page.
 
-El SVG abierto directamente sigue disponible como formato vectorial abierto.
-Para conservar una jerarquia de capas nativas y nombres estables en Illustrator,
-el proyecto tambien mantiene un contrato de exportacion y un importador JSX
-auditable. La investigacion de formatos, limitaciones de AI/PDF/SVG, prueba
-controlada y plan de integracion estan en
-**[docs/ILLUSTRATOR-COMPATIBILITY.md](docs/ILLUSTRATOR-COMPATIBILITY.md)**.
+## Illustrator compatibility
 
-La muestra reproducible se genera con:
+The plain SVG remains available as an open vector format. To keep a native layer hierarchy and stable names in Illustrator, the project also maintains an export contract and an auditable JSX importer. Format research, AI / PDF / SVG limitations, a controlled test and the integration plan are in **[docs/ILLUSTRATOR-COMPATIBILITY.md](docs/ILLUSTRATOR-COMPATIBILITY.md)**.
+
+Generate the reproducible sample with:
 
 ```bash
 npm run illustrator:sample
 ```
 
-Desde el modal de exportacion tambien se puede descargar un paquete completo:
-el JSX incluido crea un solo archivo AI con todas las paginas como mesas de
-trabajo nombradas y siete capas semanticas globales. Affinity abre directamente
-los SVG editables incluidos.
+From the export modal you can also download a complete package: the included JSX builds a single AI file with every page as a named artboard and seven global semantic layers. Affinity opens the included editable SVGs directly.
 
-## IA privada del estudio
+<p align="center"><img src="docs/illustrator-comparison/img/08-final-multi-artboard-document.png" alt="Final Illustrator document with eleven named artboards" width="85%"/></p>
 
-La instalación de Morfe puede usar Qwen local para chat, razonamiento y
-planificación, manteniendo NVIDIA únicamente para visión. El modelo corre con
-MLX en la Mac y no se sube a GitHub Pages ni expone claves en el navegador.
+## Private studio AI
+
+The Morfe installation can run **Qwen locally** (through MLX on the Mac) for chat, reasoning and planning, keeping NVIDIA only for vision. The model never ships to GitHub Pages and no key is exposed to the browser.
 
 ```bash
 uv tool install mlx-lm
 npm run studio:ai
 ```
 
-Después abrí `http://localhost:3000/studio.html`. La entrada publicada para
-pruebas del estudio es
-**[morfemartin.github.io/techpack-ai-builder/studio.html](https://morfemartin.github.io/techpack-ai-builder/studio.html)**:
-activa Qwen solo cuando el bridge privado está disponible en la Mac y conserva
-NVIDIA para visión. Configuración, límites y modelo de amenazas:
-**[docs/STUDIO-AI.md](docs/STUDIO-AI.md)**.
+Then open `http://localhost:3000/studio.html`. The published studio entry point is [morfemartin.github.io/techpack-ai-builder/studio.html](https://morfemartin.github.io/techpack-ai-builder/studio.html): it enables Qwen only when the private bridge is running on the Mac. Configuration, limits and threat model: **[docs/STUDIO-AI.md](docs/STUDIO-AI.md)**.
 
-## Arquitectura multi-prenda
+## Multi-garment architecture
 
-Toda la data específica de una prenda (piezas por defecto, nombres de piezas en 3 idiomas, posiciones de diseño disponibles, y el diagrama de silueta de 4 vistas con sus callouts) vive en un único archivo bajo `src/garments/`. El motor de wizard, generación de SVG y vista previa son genéricos y leen de ese archivo — no hay nada hardcodeado a "gorra" fuera de `src/garments/cap.js`.
+Everything specific to a garment (default parts, part names in three languages, available design placements, and the four-view silhouette with its callouts) lives in a single file under `src/garments/`. The wizard, SVG generation and preview engines are generic and read from that file: nothing is hard-coded to "cap" outside `src/garments/cap.js`.
 
 ```
 src/
-├─ core/           # primitivas SVG, i18n base, utilidades de color, helpers, cliente de Claude API
-├─ garments/        # un archivo de datos por tipo de prenda + registry
-│  ├─ cap.js        # unico tipo soportado en v0.1
+├─ core/         # SVG primitives, base i18n, color utilities, AI clients
+├─ garments/     # one data file per garment type + registry
+│  ├─ cap.js     # first fully supported garment
 │  └─ index.js
-├─ components/       # UI del wizard (editor de colores, uploader de imagen, ficha de bordado, modal SVG, preview)
-├─ pages/            # generadores de SVG (independientes de React)
-└─ App.jsx           # wizard que conecta todo lo anterior
+├─ components/   # wizard UI (color editor, image uploader, embroidery sheet, SVG modal, preview)
+├─ layout/       # flexbox-style layout engine for the generated pages
+├─ pages/        # SVG page generators (independent of React)
+└─ App.jsx       # the wizard that wires it all together
 ```
 
-Agregar una prenda nueva = copiar `cap.js`, completar los mismos campos, y registrarla. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
+Adding a garment = copy `cap.js`, fill in the same fields and register it. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Diseño y UX
+## Design and UX
 
-La interfaz sigue un sistema de diseño **Bauhaus** donde el color codifica
-prioridad de atención (rojo = índices numéricos, azul = bloques de prioridad,
-amarillo = highlights críticos), pensado desde el lector real de una ficha
-técnica: **la fábrica** — que la imprime, la fotocopia en blanco y negro y la lee
-en otro idioma. Todo está codificado en un solo `tokens.js` que alimenta la
-interfaz y el SVG generado.
+The interface follows a **Bauhaus** design system in which color encodes attention priority (red = numeric indexes, blue = priority blocks, yellow = critical highlights). It is designed for the real reader of a tech pack, **the factory**, which prints it, photocopies it in black and white and reads it in another language. Everything is encoded in a single `tokens.js` that feeds both the interface and the generated SVG.
 
-El porqué de cada decisión (impresión, escala de grises, tipografía mono para
-datos, la retícula ligada al motor flexbox) está justificado en
-**[docs/UX-DESIGN.md](docs/UX-DESIGN.md)**.
+The reasoning behind each decision (printing, grayscale, mono type for data, the grid tied to the flexbox engine) is in **[docs/UX-DESIGN.md](docs/UX-DESIGN.md)**.
 
-El motor de layout (grid, alineación, espacio en blanco y el compositor
-row-vs-stack) se desarrolla y prueba de forma aislada con un banco de pruebas
-visual — **[docs/layout-lab/](docs/layout-lab/README.md)** — que renderiza el
-compositor real contra entradas fijas, sin IA ni el wizard. _(Docs going
-forward are written in English.)_
+The layout engine (grid, alignment, white space and the row-vs-stack composer) is developed and tested in isolation with a visual test bench, **[docs/layout-lab/](docs/layout-lab/README.md)**, which renders the real composer against fixed inputs, without AI or the wizard.
 
 ## Roadmap
 
-- [x] v0.1 — arquitectura multi-prenda + Gorra como primer tipo completo
-- [ ] v0.2 — Camiseta, Hoodie, Polo
-- [ ] v0.3 — export PDF multi-página, guardar/cargar ficha como JSON
+- [x] v0.1: multi-garment architecture + Cap as the first complete type
+- [ ] v0.2: T-shirt, hoodie, polo
+- [ ] v0.3: multi-page PDF export, save / load a tech pack as JSON
 
-Detalle completo en [ROADMAP.md](ROADMAP.md).
+Full detail in [ROADMAP.md](ROADMAP.md).
 
-## Contribuir
+## Contributing
 
-Ver [CONTRIBUTING.md](CONTRIBUTING.md) — agregar un tipo de prenda nuevo es la forma más directa de contribuir. Antes de participar, revisá el [Código de Conducta](CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Adding a new garment type is the most direct way to contribute. Please read the [Code of Conduct](CODE_OF_CONDUCT.md) first.
 
-## Tecnologías
+## Tech stack
 
-- React 18 + Vite 5
-- SVG generado 100% en cliente (sin dependencias de canvas/render externo)
-- Orquestación híbrida DeepSeek V4-Pro → Qwen3-8B mediante MLX → contratos deterministas, con límites por tarea y circuit breaker
-- NVIDIA Vision para análisis de imágenes, a través de un proxy backend y nunca directo desde el navegador
-- Serverless en Vercel (`api/deepseek.js`) para custodiar la API key del lado servidor
+- React 18 + Vite 5, tested with Vitest
+- SVG generated 100 % client-side (no canvas or external renderer)
+- Hybrid orchestration DeepSeek V4-Pro → Qwen3-8B via MLX → deterministic contracts, with per-task limits and a circuit breaker
+- NVIDIA Vision for image analysis, always through a backend proxy, never directly from the browser
+- Vercel serverless function (`api/deepseek.js`) that keeps the API key server-side
 
-## ¿Necesitás la ficha técnica de tu marca ya armada, no la herramienta?
+## Need your brand's tech pack done, not the tool?
 
-Este repo es la base open source que usamos en [Morfe](https://github.com/morfemartin) para nuestro propio pipeline de lanzamiento de marcas de ropa (branding, desarrollo textil, fichas técnicas y web). Si preferís que te lo hagamos nosotros de punta a punta, [contactanos](https://github.com/morfemartin).
+This repo is the open-source base Morfe uses for its own clothing-brand launch pipeline (branding, textile development, tech packs and web). If you'd rather have it done end to end, [get in touch](https://github.com/morfemartin).
 
-## Seguridad
+## Security
 
-La API key de DeepSeek/NVIDIA **nunca** vive en el repositorio ni llega al
-navegador: todas las llamadas de IA pasan por un proxy serverless
-(`api/deepseek.js`) que adjunta la key del lado servidor. Los archivos `.env*`
-están gitignoreados, hay escaneo de secretos (gitleaks + push protection de
-GitHub) y Dependabot vigilando dependencias. Detalle completo y política de
-reporte en [SECURITY.md](SECURITY.md).
+The DeepSeek / NVIDIA API key **never** lives in the repository or reaches the browser: every AI call goes through a serverless proxy (`api/deepseek.js`) that attaches the key server-side. `.env*` files are git-ignored, secret scanning runs in CI (gitleaks) alongside GitHub push protection, and Dependabot watches dependencies. Full details and the reporting policy are in [SECURITY.md](SECURITY.md).
 
-## Licencia
+## License
 
-MIT — ver [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
