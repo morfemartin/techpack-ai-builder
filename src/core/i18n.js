@@ -15,6 +15,7 @@
 // completar..."), which are business logic, not simple static labels.
 export const UI = {
   ES: {
+    appTagline: "por Morfe · Generador Open Source de Fichas Técnicas · v0.2",
     garmentHelp: "Vas a charlar con la IA en el paso \"Piezas\" para armar esta prenda desde cero — no tiene el dibujo de silueta a mano de las prendas ya registradas, pero la tabla de piezas y el resto de la ficha funcionan igual. Si ya tenés los datos recopilados en un CSV o un documento (Markdown/texto), subilo abajo: el chat arranca directo con eso y solo pregunta lo que realmente falta.",
     newGarmentAI: "Prenda nueva (con IA)",
     garmentFromPhoto: "Prenda desde foto (IA)",
@@ -175,6 +176,7 @@ export const UI = {
     localPreviewTitle: "Vista previa (sin llamar a la IA)",
   },
   EN: {
+    appTagline: "by Morfe · Open-source tech pack generator · v0.2",
     garmentHelp: "You'll chat with the AI in the \"Parts\" step to build this garment from scratch — it has no hand-drawn silhouette like the registered garments, but the parts table and the rest of the tech pack still work the same. If you already have the data collected in a CSV or a document (Markdown/plain text), upload it below: the chat starts right from that and only asks about what's genuinely missing.",
     newGarmentAI: "New garment (with AI)",
     garmentFromPhoto: "Garment from photo (AI)",

@@ -1250,7 +1250,7 @@ export default function App() {
           <div style={{ display: "flex", gap: space(3), flexWrap: "wrap" }}>
             {GARMENT_LIST.map((g) => (
               <Chip key={g.id} selected={garmentId === g.id} onClick={() => selectGarment(g.id)} iconName={g.icon}>
-                {g.label.ES}
+                {g.label[uiLang] || g.label.ES}
               </Chip>
             ))}
             <Chip selected={garmentId === "custom" && !visionEntry} onClick={() => selectGarment("custom")} iconName="auto_awesome">
@@ -1980,7 +1980,7 @@ export default function App() {
           <MorfeLogo size={44} color={C.white.hex} />
           <div>
             <h1 style={{ margin: 0, fontSize: type.size.lg, fontFamily: type.fonts.display, fontWeight: 700, letterSpacing: "-0.01em", textTransform: "uppercase", color: C.white.hex }}>TechPack AI Builder</h1>
-            <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.white.hex, opacity: 0.55 }}>por Morfe · Generador Open Source de Fichas Técnicas · v0.2</p>
+            <p style={{ margin: 0, fontSize: type.size.xs, fontFamily: type.fonts.data, color: C.white.hex, opacity: 0.55 }}>{ui.appTagline}</p>
           </div>
           {/* App UI language - independent of the export "Idioma" step below.
               Only ES/EN for now: the export table already covers ZH, but this
